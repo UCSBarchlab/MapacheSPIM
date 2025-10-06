@@ -1,0 +1,9 @@
+load examples/matrix_multiply/matrix_mult
+break 0x80000010
+info breakpoints
+run 20
+pc
+delete 0x80000010
+clear
+info break
+quit

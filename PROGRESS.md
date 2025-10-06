@@ -219,3 +219,110 @@ Python (SailSimulator) → ctypes → C API (libsailsim) → Sail RISC-V
 **Date**: October 6, 2025
 **Status**: 🎉 POC 2 COMPLETE ✅
 **Next**: POC 3 - Interactive Console (like SPIM)
+
+---
+
+## Session 4: POC 3 - Interactive Console
+
+### 🎉 POC 3 COMPLETE!
+
+**Built SPIM-like interactive console for RISC-V programs**
+
+**Files Created:**
+- `mapachesail/console.py` - Full interactive console using cmd.Cmd (400+ lines)
+- `mapachesail_console` - Executable entry point
+- `CONSOLE_GUIDE.md` - Complete user guide with examples
+- Test scripts for validation
+
+**Console Features:**
+```
+Essential Commands:
+✅ load <file>        - Load RISC-V ELF executable
+✅ step [n]           - Execute 1 or n instructions
+✅ run [max]          - Run until halt or max steps
+✅ continue           - Run to next breakpoint
+✅ regs               - Display all 32 registers + PC with ABI names
+✅ pc                 - Show program counter
+✅ mem <addr> [len]   - Display memory in hex dump format
+✅ break <addr>       - Set breakpoint
+✅ info breakpoints   - List all breakpoints
+✅ delete <addr>      - Remove breakpoint
+✅ clear              - Clear all breakpoints
+✅ status             - Show simulator status
+✅ reset              - Reset simulator
+✅ quit/exit          - Exit console
+```
+
+**Example Console Session:**
+```
+$ ./mapachesail_console
+Welcome to MapacheSail. Type help or ? to list commands.
+
+(mapachesail) load examples/fibonacci/fibonacci
+✓ Loaded examples/fibonacci/fibonacci
+Entry point: 0x0000000080000000
+
+(mapachesail) step
+[0x0000000080000000] Executed 1 instruction
+
+(mapachesail) regs
+x0  (zero) = 0x0000000000000000  x1  (  ra) = 0x0000000000000000
+x2  (  sp) = 0x0000000083f00000  x3  (  gp) = 0x0000000000000000
+...
+pc                 = 0x0000000080000004
+
+(mapachesail) break 0x80000038
+Breakpoint set at 0x0000000080000038
+
+(mapachesail) run
+Breakpoint hit at 0x0000000080000038 after 5 instructions
+
+(mapachesail) continue
+Executed 95 instructions
+```
+
+**Technical Features:**
+- Built on Python's `cmd.Cmd` library (like original MapacheSim)
+- Signal handling for Ctrl-C during execution
+- Breakpoint support with address tracking
+- Pretty-formatted register display (4 columns with ABI names)
+- Hex dump memory display (16 bytes per line, grouped by 4)
+- Command aliases (s, r, c, b, q)
+- Tab completion and command history
+- Verbose/quiet modes
+- Auto-load file on startup option
+
+**RISC-V Features:**
+- Shows ABI register names (zero, ra, sp, a0-a7, t0-t6, s0-s11)
+- All 32 registers + PC displayed
+- Full 64-bit address/value support
+- Memory access to any valid address
+
+**Tested:**
+✅ Load and execute fibonacci
+✅ Load and execute matrix_multiply
+✅ Single-step execution
+✅ Multi-step execution (step 10)
+✅ Run with max limit
+✅ Breakpoint hit detection
+✅ Register display with ABI names
+✅ Memory hex dump display
+✅ Breakpoint management (set/list/delete/clear)
+
+**Usage:**
+```bash
+# Interactive mode
+./mapachesail_console
+
+# Load file on startup
+./mapachesail_console examples/fibonacci/fibonacci
+
+# Quiet mode
+./mapachesail_console -q examples/fibonacci/fibonacci
+```
+
+---
+
+**Date**: October 6, 2025
+**Status**: 🎉 POC 3 COMPLETE ✅
+**Next**: POC 4 - Enhanced Display & Disassembly
