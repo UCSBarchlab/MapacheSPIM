@@ -161,3 +161,61 @@ bool sailsim_read_mem(sailsim_context_t* ctx, uint64_t addr, void* buf, size_t l
 **Date**: October 6, 2025
 **Status**: 🎉 POC 1 COMPLETE ✅
 **Next**: Proceed to POC 2 (Python bindings using ctypes)
+
+---
+
+## Session 3: POC 2 - Python Bindings
+
+### 🎉 POC 2 COMPLETE!
+
+**Created Python ctypes bindings for libsailsim**
+
+**Files Created:**
+- `mapachesail/__init__.py` - Package initialization
+- `mapachesail/sail_backend.py` - Python wrapper using ctypes (300+ lines)
+- `mapachesail/README.md` - API documentation
+- `test_python_bindings.py` - Test script demonstrating all features
+
+**Python API Features:**
+```python
+from mapachesail import SailSimulator
+
+sim = SailSimulator()                    # Initialize
+sim.load_elf("program.elf")              # Load ELF
+sim.step()                               # Single-step
+sim.run(1000)                            # Run N steps
+sim.get_pc()                             # Read PC
+sim.get_reg(10)                          # Read register
+sim.get_all_regs()                       # All 32 registers
+sim.read_mem(addr, len)                  # Read memory
+sim.write_mem(addr, data)                # Write memory
+```
+
+**Test Results:**
+```
+✅ Simulator initialization from Python
+✅ ELF loading
+✅ Single-stepping (10 instructions)
+✅ Register state reading (all 32 registers)
+✅ Memory reading (16 bytes at PC)
+✅ Reset functionality
+✅ Context manager support (with statement)
+```
+
+**Technical Details:**
+- Used ctypes to wrap C API (no compilation needed)
+- Pythonic interface with proper error handling
+- Type conversions: uint64_t ↔ Python int, C pointers ↔ bytes
+- StepResult enum for execution status
+- Automatic library loading (finds libsailsim.dylib/.so/.dll)
+
+**Architecture:**
+```
+Python (SailSimulator) → ctypes → C API (libsailsim) → Sail RISC-V
+```
+
+---
+
+**Date**: October 6, 2025
+**Status**: 🎉 POC 2 COMPLETE ✅
+**Next**: POC 3 - Interactive Console (like SPIM)
