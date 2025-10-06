@@ -48,6 +48,10 @@ class MapacheSailConsole(cmd.Cmd):
         self._interrupted = False
         self._running = False
 
+        # Register change tracking
+        self.show_reg_changes = True
+        self.prev_regs = None
+
         # Set up signal handler for Ctrl-C
         signal.signal(signal.SIGINT, self._handler_sigint)
 
@@ -169,22 +173,54 @@ class MapacheSailConsole(cmd.Cmd):
                 print(f'Breakpoint hit at {pc:#018x}')
                 break
 
+            # Get instruction before executing (for display)
+            try:
+                instr_disasm = self.sim.disasm(pc)
+                instr_bytes = self.sim.read_mem(pc, 4)
+                instr_hex = ''.join(f'{b:02x}' for b in instr_bytes)
+            except Exception:
+                instr_disasm = "<error>"
+                instr_hex = "????????"
+
+            # Snapshot registers before execution (only for single step with tracking enabled)
+            prev_regs = None
+            if self.show_reg_changes and n_steps == 1:
+                prev_regs = self.sim.get_all_regs()
+
             result = self.sim.step()
 
             if result == StepResult.HALT:
-                print(f'[{pc:#018x}] Program halted')
+                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}')
+                print(f'Program halted')
                 break
             elif result == StepResult.ERROR:
-                print(f'[{pc:#018x}] Execution error')
+                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}')
+                print(f'Execution error')
                 break
 
-            # For single step, show the PC that was executed
-            if n_steps == 1:
-                print(f'[{pc:#018x}] Executed 1 instruction')
+            # Show the instruction that was executed
+            # Try to show symbol name
+            sym, offset = self.sim.addr_to_symbol(pc)
+            if sym and offset == 0:
+                print(f'[{pc:#010x}] <{sym}>  0x{instr_hex}  {instr_disasm}')
+            elif sym:
+                print(f'[{pc:#010x}] <{sym}+{offset}>  0x{instr_hex}  {instr_disasm}')
+            else:
+                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}')
 
-        # For multiple steps, show range
-        if n_steps > 1 and i > 0:
-            print(f'Executed {i+1} instruction(s)')
+            # Show register changes (only for single step)
+            if prev_regs is not None and n_steps == 1:
+                curr_regs = self.sim.get_all_regs()
+                changed = []
+                for reg_num in range(32):
+                    if prev_regs[reg_num] != curr_regs[reg_num]:
+                        abi = self.RISCV_ABI_NAMES[reg_num]
+                        changed.append((reg_num, abi, prev_regs[reg_num], curr_regs[reg_num]))
+
+                if changed:
+                    print('Register changes:')
+                    for reg_num, abi, old_val, new_val in changed:
+                        print(f'  x{reg_num:<2} ({abi:>4}) : {old_val:#018x} → {new_val:#018x}  ★')
 
     def do_run(self, arg):
         """Run program until halt or maximum instructions
@@ -547,27 +583,31 @@ class MapacheSailConsole(cmd.Cmd):
     # --- Breakpoints ---
 
     def do_break(self, arg):
-        """Set a breakpoint at an address
+        """Set a breakpoint at an address or symbol
 
         Usage:
-            break <address>
+            break <address|symbol>
 
-        Sets a breakpoint at the specified address. When running or
-        stepping, execution will stop if the PC reaches this address.
+        Sets a breakpoint at the specified address or symbol name.
+        When running or stepping, execution will stop if the PC
+        reaches this address.
 
         Arguments:
             address - Memory address in hex (0x...) or decimal
+            symbol  - Function or label name from symbol table
 
         Aliases:
             b - Short alias for break
 
         Examples:
             break 0x80000010        # Set breakpoint at address
-            b 0x8000001c            # Using alias
+            break main              # Set breakpoint at 'main' function
+            b fibonacci             # Using alias with symbol
             run                     # Will stop at breakpoint
             info breakpoints        # List all breakpoints
 
         Tips:
+            - Use 'info symbols' to see available symbol names
             - Use 'info breakpoints' to see all set breakpoints
             - Use 'delete <address>' to remove a specific breakpoint
             - Use 'clear' to remove all breakpoints
@@ -575,36 +615,50 @@ class MapacheSailConsole(cmd.Cmd):
             - Set breakpoints before running to stop at key locations
         """
         if not arg:
-            self.print_error('Error: Please specify an address.')
+            self.print_error('Error: Please specify an address or symbol name.')
             return
 
+        # First try to look up as symbol name
+        if self.loaded_file:
+            addr = self.sim.lookup_symbol(arg)
+            if addr is not None:
+                self.breakpoints.add(addr)
+                print(f'Breakpoint set at {arg} ({addr:#010x})')
+                return
+
+        # If not a symbol, try to parse as address
         try:
             addr = int(arg, 0)
             self.breakpoints.add(addr)
-            print(f'Breakpoint set at {addr:#018x}')
+            print(f'Breakpoint set at {addr:#010x}')
         except ValueError:
-            self.print_error(f'Error: Invalid address "{arg}".')
+            self.print_error(f'Error: "{arg}" is not a valid address or known symbol.')
 
     def do_info(self, arg):
         """Show information about simulator state
 
         Usage:
             info breakpoints
+            info symbols
 
         Displays information about the current simulator state.
-        Currently supports viewing all set breakpoints.
+        Supports viewing breakpoints and symbol table.
 
         Arguments:
             breakpoints - List all set breakpoints (can abbreviate as 'break')
+            symbols     - List all symbols from symbol table (can abbreviate as 'sym')
 
         Examples:
             info breakpoints        # List all breakpoints
             info break              # Same, abbreviated
+            info symbols            # List all symbols
+            info sym                # Same, abbreviated
             break 0x80000010        # Set a breakpoint
             info breakpoints        # See it in the list
 
         Tips:
             - Shows breakpoints sorted by address
+            - Symbols are listed with their addresses
             - Each breakpoint is numbered for reference
             - Use 'delete <address>' to remove specific breakpoints
         """
@@ -614,10 +668,35 @@ class MapacheSailConsole(cmd.Cmd):
             else:
                 print('\nBreakpoints:')
                 for i, addr in enumerate(sorted(self.breakpoints), 1):
-                    print(f'  {i}. {addr:#018x}')
+                    # Try to show symbol name if available
+                    sym, offset = self.sim.addr_to_symbol(addr)
+                    if sym and offset == 0:
+                        print(f'  {i}. {addr:#010x}  <{sym}>')
+                    elif sym:
+                        print(f'  {i}. {addr:#010x}  <{sym}+{offset}>')
+                    else:
+                        print(f'  {i}. {addr:#010x}')
                 print()
+        elif arg == 'symbols' or arg == 'sym':
+            if not self.loaded_file:
+                print('No program loaded.')
+                return
+
+            symbols = self.sim.get_symbols()
+            if not symbols:
+                print('No symbols available.')
+                return
+
+            print(f'\nSymbols ({len(symbols)} total):')
+
+            # Sort by address
+            sorted_symbols = sorted(symbols.items(), key=lambda x: x[1])
+
+            for name, addr in sorted_symbols:
+                print(f'  {addr:#010x}  {name}')
+            print()
         else:
-            self.print_error('Usage: info breakpoints')
+            self.print_error('Usage: info [breakpoints|symbols]')
 
     def do_delete(self, arg):
         """Delete a specific breakpoint
@@ -710,6 +789,52 @@ class MapacheSailConsole(cmd.Cmd):
             print(f'PC: {pc:#018x}')
         print(f'Breakpoints: {len(self.breakpoints)}')
         print()
+
+    def do_set(self, arg):
+        """Configure console options
+
+        Usage:
+            set <option> <value>
+            set                    # Show all current settings
+
+        Options:
+            show-changes  [on|off]  - Show register changes after each step
+
+        Examples:
+            set                     # Show current settings
+            set show-changes on     # Enable register change display
+            set show-changes off    # Disable register change display
+
+        Tips:
+            - Register changes only shown for single steps
+            - Use 'regs' command to manually check registers
+        """
+        if not arg:
+            # Show all settings
+            print()
+            print('Current settings:')
+            print(f'  show-changes : {"on" if self.show_reg_changes else "off"}')
+            print()
+            return
+
+        parts = arg.split()
+        if len(parts) != 2:
+            self.print_error('Error: Usage: set <option> <value>')
+            return
+
+        option, value = parts[0].lower(), parts[1].lower()
+
+        if option == 'show-changes':
+            if value in ('on', 'true', '1', 'yes'):
+                self.show_reg_changes = True
+                print('Register change display enabled')
+            elif value in ('off', 'false', '0', 'no'):
+                self.show_reg_changes = False
+                print('Register change display disabled')
+            else:
+                self.print_error('Error: Value must be on or off')
+        else:
+            self.print_error(f'Error: Unknown option "{option}"')
 
     def do_quit(self, arg):
         """Exit the console

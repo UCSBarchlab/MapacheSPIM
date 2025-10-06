@@ -133,6 +133,28 @@ class SailSimulator:
         lib.sailsim_get_error.argtypes = [ctypes.c_void_p]
         lib.sailsim_get_error.restype = ctypes.c_char_p
 
+        # Symbol table API
+        # sailsim_get_symbol_count(sailsim_context_t* ctx) -> size_t
+        lib.sailsim_get_symbol_count.argtypes = [ctypes.c_void_p]
+        lib.sailsim_get_symbol_count.restype = ctypes.c_size_t
+
+        # sailsim_get_symbol_by_index(ctx, index, name_buf, name_bufsize, addr) -> bool
+        lib.sailsim_get_symbol_by_index.argtypes = [ctypes.c_void_p, ctypes.c_size_t,
+                                                      ctypes.c_char_p, ctypes.c_size_t,
+                                                      ctypes.POINTER(ctypes.c_uint64)]
+        lib.sailsim_get_symbol_by_index.restype = ctypes.c_bool
+
+        # sailsim_lookup_symbol(ctx, name, addr) -> bool
+        lib.sailsim_lookup_symbol.argtypes = [ctypes.c_void_p, ctypes.c_char_p,
+                                               ctypes.POINTER(ctypes.c_uint64)]
+        lib.sailsim_lookup_symbol.restype = ctypes.c_bool
+
+        # sailsim_addr_to_symbol(ctx, addr, name_buf, name_bufsize, offset) -> bool
+        lib.sailsim_addr_to_symbol.argtypes = [ctypes.c_void_p, ctypes.c_uint64,
+                                                 ctypes.c_char_p, ctypes.c_size_t,
+                                                 ctypes.POINTER(ctypes.c_uint64)]
+        lib.sailsim_addr_to_symbol.restype = ctypes.c_bool
+
     def load_elf(self, elf_path):
         """
         Load an ELF file into simulator memory
@@ -260,6 +282,59 @@ class SailSimulator:
             error = self._lib.sailsim_get_error(self._ctx)
             raise RuntimeError(f"Failed to disassemble: {error.decode('utf-8')}")
         return buf.value.decode('utf-8')
+
+    def get_symbols(self):
+        """
+        Get all symbols from the symbol table
+
+        Returns:
+            dict: Dictionary mapping symbol names to addresses
+        """
+        count = self._lib.sailsim_get_symbol_count(self._ctx)
+        symbols = {}
+
+        name_buf = ctypes.create_string_buffer(256)
+        addr = ctypes.c_uint64()
+
+        for i in range(count):
+            if self._lib.sailsim_get_symbol_by_index(self._ctx, i, name_buf, 256,
+                                                       ctypes.byref(addr)):
+                symbols[name_buf.value.decode('utf-8')] = addr.value
+
+        return symbols
+
+    def lookup_symbol(self, name):
+        """
+        Look up symbol address by name
+
+        Args:
+            name (str): Symbol name to look up
+
+        Returns:
+            int: Symbol address, or None if not found
+        """
+        addr = ctypes.c_uint64()
+        result = self._lib.sailsim_lookup_symbol(self._ctx, name.encode('utf-8'),
+                                                   ctypes.byref(addr))
+        return addr.value if result else None
+
+    def addr_to_symbol(self, addr):
+        """
+        Convert address to symbol name + offset
+
+        Args:
+            addr (int): Address to look up
+
+        Returns:
+            tuple: (symbol_name, offset) if found, or (None, None) if not found
+        """
+        name_buf = ctypes.create_string_buffer(256)
+        offset = ctypes.c_uint64()
+        result = self._lib.sailsim_addr_to_symbol(self._ctx, addr, name_buf, 256,
+                                                    ctypes.byref(offset))
+        if result:
+            return (name_buf.value.decode('utf-8'), offset.value)
+        return (None, None)
 
     def reset(self):
         """Reset the simulator to initial state"""

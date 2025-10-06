@@ -52,6 +52,8 @@ struct sailsim_context {
     int64_t htif_exit_code;
     std::string last_error;
     char* config_str;
+    std::map<std::string, uint64_t> symbols;  // Symbol name → address
+    std::map<uint64_t, std::string> addr_to_symbol;  // Address → symbol name
 };
 
 // Global flags to track initialization
@@ -181,6 +183,14 @@ bool sailsim_load_elf(sailsim_context_t* ctx, const char* elf_path) {
         uint64_t entry_point = elf.entry();
         zPC = make_sbits(entry_point);
         znextPC = make_sbits(entry_point);
+
+        // Load symbol table using Sail's ELF loader
+        ctx->symbols = elf.symbols();
+        ctx->addr_to_symbol.clear();
+        for (const auto& [name, addr] : ctx->symbols) {
+            // For reverse lookup, prefer function symbols (no duplicates expected at same addr)
+            ctx->addr_to_symbol[addr] = name;
+        }
 
         return true;
 
@@ -409,6 +419,74 @@ const char* sailsim_get_error(sailsim_context_t* ctx) {
         return "Invalid context";
     }
     return ctx->last_error.c_str();
+}
+
+// Symbol table API
+size_t sailsim_get_symbol_count(sailsim_context_t* ctx) {
+    if (!ctx || !ctx->initialized) {
+        return 0;
+    }
+    return ctx->symbols.size();
+}
+
+bool sailsim_get_symbol_by_index(sailsim_context_t* ctx, size_t index,
+                                  char* name_buf, size_t name_bufsize,
+                                  uint64_t* addr) {
+    if (!ctx || !ctx->initialized || !name_buf || !addr) {
+        return false;
+    }
+
+    if (index >= ctx->symbols.size()) {
+        return false;
+    }
+
+    auto it = ctx->symbols.begin();
+    std::advance(it, index);
+
+    snprintf(name_buf, name_bufsize, "%s", it->first.c_str());
+    *addr = it->second;
+    return true;
+}
+
+bool sailsim_lookup_symbol(sailsim_context_t* ctx, const char* name, uint64_t* addr) {
+    if (!ctx || !ctx->initialized || !name || !addr) {
+        return false;
+    }
+
+    auto it = ctx->symbols.find(name);
+    if (it == ctx->symbols.end()) {
+        return false;
+    }
+
+    *addr = it->second;
+    return true;
+}
+
+bool sailsim_addr_to_symbol(sailsim_context_t* ctx, uint64_t addr,
+                             char* name_buf, size_t name_bufsize,
+                             uint64_t* offset) {
+    if (!ctx || !ctx->initialized || !name_buf) {
+        return false;
+    }
+
+    // Find the symbol at or before this address
+    auto it = ctx->addr_to_symbol.upper_bound(addr);
+    if (it != ctx->addr_to_symbol.begin()) {
+        --it;
+        uint64_t symbol_addr = it->first;
+        const std::string& symbol_name = it->second;
+
+        // Check if address is reasonably close (within 4KB of symbol)
+        if (addr - symbol_addr < 4096) {
+            snprintf(name_buf, name_bufsize, "%s", symbol_name.c_str());
+            if (offset) {
+                *offset = addr - symbol_addr;
+            }
+            return true;
+        }
+    }
+
+    return false;
 }
 
 } // extern "C"

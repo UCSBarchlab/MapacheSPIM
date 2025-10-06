@@ -156,6 +156,52 @@ bool sailsim_disasm(sailsim_context_t* ctx, uint64_t addr, char* buf, size_t buf
  */
 const char* sailsim_get_error(sailsim_context_t* ctx);
 
+/**
+ * Get number of symbols in symbol table
+ *
+ * @param ctx Simulator context
+ * @return Number of symbols (0 if no ELF loaded or no symbols)
+ */
+size_t sailsim_get_symbol_count(sailsim_context_t* ctx);
+
+/**
+ * Get symbol by index
+ *
+ * @param ctx Simulator context
+ * @param index Symbol index (0 to count-1)
+ * @param name_buf Buffer to store symbol name
+ * @param name_bufsize Size of name buffer
+ * @param addr Pointer to store symbol address
+ * @return true on success, false if index out of range
+ */
+bool sailsim_get_symbol_by_index(sailsim_context_t* ctx, size_t index,
+                                  char* name_buf, size_t name_bufsize,
+                                  uint64_t* addr);
+
+/**
+ * Look up symbol address by name
+ *
+ * @param ctx Simulator context
+ * @param name Symbol name to look up
+ * @param addr Pointer to store symbol address
+ * @return true if found, false if not found
+ */
+bool sailsim_lookup_symbol(sailsim_context_t* ctx, const char* name, uint64_t* addr);
+
+/**
+ * Convert address to symbol name
+ *
+ * @param ctx Simulator context
+ * @param addr Address to look up
+ * @param name_buf Buffer to store symbol name
+ * @param name_bufsize Size of name buffer
+ * @param offset Pointer to store offset from symbol (can be NULL)
+ * @return true if symbol found near address, false otherwise
+ */
+bool sailsim_addr_to_symbol(sailsim_context_t* ctx, uint64_t addr,
+                             char* name_buf, size_t name_bufsize,
+                             uint64_t* offset);
+
 #ifdef __cplusplus
 }
 #endif
