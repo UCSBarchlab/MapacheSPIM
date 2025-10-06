@@ -5,7 +5,7 @@ A Python-based interactive simulator similar to SPIM, but using the official
 Sail RISC-V formal specification as the ISA backend.
 """
 
-from .sail_backend import SailSimulator
+from .sail_backend import SailSimulator, StepResult
 
 __version__ = "0.1.0"
-__all__ = ["SailSimulator"]
+__all__ = ["SailSimulator", "StepResult"]
