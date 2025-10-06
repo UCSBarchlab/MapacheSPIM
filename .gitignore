@@ -1,0 +1,23 @@
+# Build artifacts
+*.o
+*.elf
+*.dis
+build/
+*.out
+
+# Example binaries
+examples/*/fibonacci
+examples/*/matrix_mult
+examples/*/*.o
+examples/*/*.dis
+
+# OS files
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
