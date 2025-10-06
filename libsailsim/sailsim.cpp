@@ -85,22 +85,28 @@ sailsim_context_t* sailsim_init(const char* config_file) {
         // Initialize Sail library (once)
         ensure_sail_library_initialized();
 
-        // Store config file path or use default
+        // Load configuration into Sail's global config system
         if (config_file && config_file[0] != '\0') {
             ctx->config_str = strdup(config_file);
+            sail_config_set_file(config_file);
         } else {
-            // Use a basic RV64 config (absolute path)
-            ctx->config_str = strdup("/Users/sherwood/Desktop/work-stuff/GitProjects/MapacheSail/sail-riscv/build/config/rv64d_v128_e32.json");
+            // No config file - use the built-in default config JSON string
+            const char* default_cfg = get_default_config();
+            ctx->config_str = strdup(default_cfg);
+            sail_config_set_string(default_cfg);
         }
 
-        // Set initial PC (required before zinit_model)
+        // Set configured types from loaded config (BEFORE model_init)
+        init_sail_configured_types();
+
+        // Initialize the Sail model (GMP variables, registers, etc.)
+        model_init();
+
+        // Set initial PC (must be BEFORE zinit_model because reset happens inside)
         zset_pc_reset_address(0x80000000);
 
-        // Initialize the Sail model (this calls model_init() and loads config)
+        // Initialize model with config (loads config string and resets)
         zinit_model(ctx->config_str);
-
-        // Initialize configured types (must be AFTER config is loaded)
-        init_sail_configured_types();
 
         // Boot requirements
         zinit_boot_requirements(UNIT);

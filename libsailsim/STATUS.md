@@ -1,72 +1,75 @@
 # libsailsim Build Status
 
-## ✅ Successfully Completed
+## ✅ Successfully Completed - POC 1 WORKING!
 
-1. **Library Architecture Designed**
+**Date:** October 6, 2025
+
+**Status:** 🎉 POC 1 Complete - Library fully functional!
+
+### Core Functionality ✅
+
+1. **Library Architecture**
    - Clean C API wrapper around Sail-generated C++ code
    - 15 core functions for simulator control
    - Proper type conversions (sbits ↔ uint64_t)
 
-2. **CMake Build System Created**
+2. **CMake Build System**
    - Links against Sail RISC-V model
    - Includes all required dependencies (GMP, softfloat, etc.)
-   - Builds shared library (libsailsim.dylib)
+   - Builds shared library (libsailsim.0.1.0.dylib - 5.4MB)
 
-3. **Core Functionality Implemented**
-   - ✅ Simulator initialization
+3. **Working Features**
+   - ✅ Simulator initialization with default config
    - ✅ ELF loading
-   - ✅ Step execution
+   - ✅ Step-by-step execution
    - ✅ Register access (get/set)
    - ✅ Memory access (read/write)
-   - ✅ PC access
+   - ✅ PC access and tracking
+   - ✅ Test program executes successfully
 
-4. **Successfully Built**
-   - libsailsim.0.1.0.dylib (5.4MB)
-   - test_sailsim executable
-   - No compilation errors (only format warnings)
+### Test Results
 
-## ⚠️ Current Issue: Segmentation Fault
+```
+Initializing Sail RISC-V simulator...
+Simulator initialized successfully!
+Loading ELF file: ../../examples/fibonacci/fibonacci
+Entry PC: 0x80000000
 
-**Status:** Library compiles successfully but crashes during initialization
+Single-stepping first 10 instructions:
+[0] PC = 0x0000000080000000
+[1] PC = 0x0000000080000004
+...
+[9] PC = 0x0000000080000044
 
-**Error:** Segmentation fault in `sailsim_init()`
+Register state: [all registers displayed correctly]
+```
 
-**Progress:**
-- ✅ Fixed GMP C++ linkage issues
-- ✅ Fixed header include paths
-- ✅ Fixed sbits type conversions
-- ✅ Fixed initialization order (config must be loaded before init_sail_configured_types)
-- ✅ Config error resolved
-- ❌ Segfault during initialization (likely in zinit_model or init_sail_configured_types)
+## 🔧 Technical Achievements
 
-**Last Known State:**
-- Prints "Initializing Sail RISC-V simulator..."
-- Segfaults before printing "Simulator initialized successfully!"
-- Crash happens after zinit_model() or during init_sail_configured_types()
+### Initialization Sequence (CRITICAL!)
 
-## 🔍 Next Steps for Debugging
+The correct initialization order was discovered through debugging:
 
-1. **Add more debug output** to pinpoint exact location of segfault:
-   ```cpp
-   printf("Before zinit_model\n"); fflush(stdout);
-   zinit_model(ctx->config_str);
-   printf("After zinit_model\n"); fflush(stdout);
-   ```
+```cpp
+1. setup_library()                     // Sail runtime
+2. sail_config_set_string(config_json) // Load config into global state
+3. init_sail_configured_types()        // Set abstract types from config
+4. model_init()                        // Initialize GMP variables
+5. zset_pc_reset_address(0x80000000)   // Set reset PC
+6. zinit_model(config_json)            // Initialize with config
+7. zinit_boot_requirements(UNIT)       // Boot setup
+```
 
-2. **Run with debugger:**
-   ```bash
-   lldb ./test_sailsim
-   run ../../examples/fibonacci/fibonacci
-   bt  # backtrace when it crashes
-   ```
+**Key insight:** `sail_config_set_string()` must be called BEFORE `model_init()` so the config is available when the model initializes.
 
-3. **Check if we need model_init()** - we might be double-initializing
+### Issues Resolved During Development
 
-4. **Verify config file** is valid and loads correctly
-
-5. **Alternative approach:** Skip init_sail_configured_types() and see if basic stepping works
-
-## 📊 Technical Details
+1. **GMP C++ linkage conflicts** - Removed `extern "C"` wrapper around sail.h
+2. **Missing headers** - Added correct include paths for riscv_platform_impl.h and elfio
+3. **sbits type conversion** - Created helper functions for struct conversion
+4. **Missing global variables** - Added all required config_* and trace_log globals
+5. **Segmentation fault** - Discovered correct initialization sequence using lldb
+6. **Config loading** - Must use `sail_config_set_string()` before `model_init()`
 
 ### Type Conversions
 ```cpp
@@ -79,26 +82,26 @@ static inline uint64_t get_sbits_value(sbits s) {
 }
 ```
 
-### Initialization Order (Correct)
-1. `setup_library()` - Sail runtime
-2. `zset_pc_reset_address()` - Set reset PC
-3. `zinit_model(config_file)` - Load config and init model
-4. `init_sail_configured_types()` - Set configured types from config
-5. `zinit_boot_requirements()` - Boot setup
-
 ### Global Variables Required
-- config_print_*
-- config_use_abi_names
-- config_enable_rvfi
-- trace_log
+```cpp
+bool config_print_instr = false;
+bool config_print_reg = false;
+bool config_print_mem_access = false;
+bool config_print_platform = false;
+bool config_print_rvfi = false;
+bool config_print_step = false;
+bool config_use_abi_names = false;
+bool config_enable_rvfi = false;
+FILE *trace_log = stdout;
+```
 
-## 🎯 Success Criteria (Not Yet Met)
+## 🎯 Success Criteria ✅ ALL MET!
 
-- [ ] Initialize simulator without crash
-- [ ] Load ELF file
-- [ ] Execute at least one instruction
-- [ ] Read register state
-- [ ] Display PC
+- [x] Initialize simulator without crash
+- [x] Load ELF file
+- [x] Execute at least one instruction
+- [x] Read register state
+- [x] Display PC
 
 ## Files Modified
 - `libsailsim/sailsim.h` - API header

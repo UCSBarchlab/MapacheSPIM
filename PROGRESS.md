@@ -122,22 +122,42 @@ bool sailsim_read_mem(sailsim_context_t* ctx, uint64_t addr, void* buf, size_t l
 
 ---
 
-### 🐛 Known Issues
+## Session 2: POC 1 Debugging and Completion
 
-**Segmentation Fault During Initialization**
-- Library compiles successfully (libsailsim.0.1.0.dylib built)
-- Runtime crash in `sailsim_init()` after loading config
-- Likely in `init_sail_configured_types()` or Sail model initialization
-- See [libsailsim/STATUS.md](libsailsim/STATUS.md) for debugging details
+### 🎉 POC 1 COMPLETE!
 
-**Next Debug Steps:**
-1. Run with lldb to get backtrace
-2. Add granular debug output around crash point
-3. Verify initialization order is correct
-4. Check if we're missing any global state setup
+**Breakthrough:** Fixed initialization segfault and successfully executed RISC-V code!
+
+**Debugging Process:**
+1. Used lldb to get backtrace - crash in `__gmpz_set_ui` called from `zset_pc_reset_address()`
+2. Root cause: GMP variables not initialized before use
+3. Analyzed reference implementation in `sail-riscv/c_emulator/riscv_sim.cpp`
+4. Discovered missing step: `sail_config_set_string()` must be called BEFORE `model_init()`
+
+**Correct Initialization Sequence:**
+```cpp
+1. setup_library()                      // Sail runtime
+2. sail_config_set_string(config_json)  // Load config into global state ⚠️ CRITICAL
+3. init_sail_configured_types()         // Set abstract types from config
+4. model_init()                         // Initialize GMP variables
+5. zset_pc_reset_address(0x80000000)    // Set reset PC (now safe!)
+6. zinit_model(config_json)             // Initialize with config
+7. zinit_boot_requirements(UNIT)        // Boot setup
+```
+
+**Test Results:**
+```
+✅ Simulator initialized successfully
+✅ Loaded fibonacci ELF file
+✅ Executed 10 instructions with correct PC advancement
+✅ Register state tracked correctly
+✅ Memory operations working
+```
+
+**Technical Achievement:** Created fully functional C wrapper around Sail RISC-V formal specification!
 
 ---
 
-**Date**: October 5, 2025
-**Status**: POC 1 Mostly Complete - Library builds, runtime debug needed
-**Next**: Fix initialization segfault, then proceed to POC 2 (Python bindings)
+**Date**: October 6, 2025
+**Status**: 🎉 POC 1 COMPLETE ✅
+**Next**: Proceed to POC 2 (Python bindings using ctypes)
