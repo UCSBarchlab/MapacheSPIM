@@ -4,12 +4,25 @@
 *.dis
 build/
 *.out
+*.a
+*.so
+*.dylib
 
 # Example binaries
 examples/*/fibonacci
 examples/*/matrix_mult
 examples/*/*.o
 examples/*/*.dis
+
+# libsailsim build artifacts
+libsailsim/build/
+libsailsim/*.dylib
+libsailsim/*.so
+libsailsim/*.a
+libsailsim/test_sailsim
+
+# Sail RISC-V build directory (submodule has its own .gitignore)
+sail-riscv/build/
 
 # OS files
 .DS_Store
@@ -21,3 +34,12 @@ examples/*/*.dis
 .vscode/
 .idea/
 *.sublime-*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.pytest_cache/
+venv/
+env/

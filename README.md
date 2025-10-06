@@ -12,6 +12,12 @@ This repository contains educational materials for teaching RISC-V assembly prog
 - **examples/** - Educational RISC-V assembly programs
   - Fibonacci calculator (recursive implementation)
   - Matrix multiplication (3x3 matrices with nested loops)
+- **libsailsim/** - C wrapper library for Sail RISC-V (work in progress)
+  - Python-friendly C API for interactive simulation
+  - See [libsailsim/STATUS.md](libsailsim/STATUS.md) for current status
+- **spec/** - Design specifications and implementation plan
+  - Original MapacheSim reference implementation
+  - Detailed technical implementation plan
 
 ## Getting Started
 
@@ -66,6 +72,20 @@ These examples are designed for undergraduate computer architecture courses to h
 - Learn calling conventions and stack management
 - Practice with memory operations and addressing modes
 - Trace instruction execution at the ISA level
+
+## Project Goals
+
+### Phase 1: Educational Examples ✅
+Simple RISC-V assembly programs with Sail emulator for tracing.
+
+### Phase 2: Interactive Simulator (In Progress)
+Building **libsailsim** - a C library wrapper around Sail RISC-V to enable:
+- Python-based interactive console (like SPIM for MIPS)
+- Step-by-step execution with state inspection
+- Breakpoints and debugging features
+- ISA-agnostic design for future extensions
+
+See [PROGRESS.md](PROGRESS.md) for detailed implementation status and [spec/IMPLEMENTATION_PLAN.md](spec/IMPLEMENTATION_PLAN.md) for technical details.
 
 ## License
 
