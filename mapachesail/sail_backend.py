@@ -120,6 +120,11 @@ class SailSimulator:
                                           ctypes.c_void_p, ctypes.c_size_t]
         lib.sailsim_write_mem.restype = ctypes.c_bool
 
+        # sailsim_disasm(sailsim_context_t* ctx, uint64_t addr, char* buf, size_t bufsize) -> bool
+        lib.sailsim_disasm.argtypes = [ctypes.c_void_p, ctypes.c_uint64,
+                                       ctypes.c_char_p, ctypes.c_size_t]
+        lib.sailsim_disasm.restype = ctypes.c_bool
+
         # sailsim_reset(sailsim_context_t* ctx) -> void
         lib.sailsim_reset.argtypes = [ctypes.c_void_p]
         lib.sailsim_reset.restype = None
@@ -238,6 +243,23 @@ class SailSimulator:
             error = self._lib.sailsim_get_error(self._ctx)
             raise RuntimeError(f"Failed to write memory: {error.decode('utf-8')}")
         return result
+
+    def disasm(self, addr):
+        """
+        Disassemble instruction at address
+
+        Args:
+            addr (int): Address of instruction to disassemble
+
+        Returns:
+            str: Disassembled instruction string
+        """
+        buf = ctypes.create_string_buffer(256)
+        result = self._lib.sailsim_disasm(self._ctx, addr, buf, 256)
+        if not result:
+            error = self._lib.sailsim_get_error(self._ctx)
+            raise RuntimeError(f"Failed to disassemble: {error.decode('utf-8')}")
+        return buf.value.decode('utf-8')
 
     def reset(self):
         """Reset the simulator to initial state"""

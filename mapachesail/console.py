@@ -478,6 +478,72 @@ class MapacheSailConsole(cmd.Cmd):
             print(f'{addr:#010x}:  {hex_row}')
         print()
 
+    def do_disasm(self, arg):
+        """Disassemble instructions at address
+
+        Usage:
+            disasm <address> [count]
+
+        Disassembles instructions starting at the given address.
+        Default count is 10 instructions if not specified.
+
+        Arguments:
+            address - Memory address in hex (0x...) or decimal
+            count   - Number of instructions to disassemble (optional, default=10)
+
+        Aliases:
+            d - Short alias for disasm
+
+        Examples:
+            disasm 0x80000000           # Disassemble 10 instructions
+            disasm 0x80000000 5         # Disassemble 5 instructions
+            d 0x80000000                # Using alias
+            pc                          # Get current PC
+            disasm 0x80000000 20        # Disassemble from entry
+
+        Tips:
+            - Use 'pc' to find current program counter
+            - Each RISC-V instruction is 4 bytes (some compressed are 2)
+            - Addresses should be 4-byte aligned
+            - Use 'mem <addr>' to see raw instruction bytes
+        """
+        if not arg:
+            self.print_error('Error: Please specify an address (e.g., "disasm 0x80000000").')
+            return
+
+        parts = arg.split()
+
+        # Parse address
+        try:
+            addr = int(parts[0], 0)
+        except ValueError:
+            self.print_error(f'Error: Invalid address "{parts[0]}".')
+            return
+
+        # Parse count (default 10)
+        count = 10
+        if len(parts) > 1:
+            try:
+                count = int(parts[1], 0)
+                if count <= 0:
+                    self.print_error('Error: Count must be positive.')
+                    return
+            except ValueError:
+                self.print_error(f'Error: Invalid count "{parts[1]}".')
+                return
+
+        # Disassemble instructions
+        print()
+        for i in range(count):
+            try:
+                instr_addr = addr + (i * 4)
+                disasm = self.sim.disasm(instr_addr)
+                print(f'[{instr_addr:#010x}]  {disasm}')
+            except Exception as e:
+                print(f'[{instr_addr:#010x}]  <error: {e}>')
+                break
+        print()
+
     # --- Breakpoints ---
 
     def do_break(self, arg):
@@ -686,6 +752,7 @@ class MapacheSailConsole(cmd.Cmd):
     do_s = do_step
     do_c = do_continue
     do_b = do_break
+    do_d = do_disasm
 
 
 def main():

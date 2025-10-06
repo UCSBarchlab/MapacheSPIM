@@ -54,8 +54,10 @@ struct sailsim_context {
     char* config_str;
 };
 
-// Global flag to track if Sail library is initialized
+// Global flags to track initialization
 static bool g_sail_library_initialized = false;
+static bool g_sail_model_initialized = false;
+static int g_simulator_instance_count = 0;
 
 /**
  * Initialize Sail library (call once)
@@ -64,6 +66,28 @@ static void ensure_sail_library_initialized() {
     if (!g_sail_library_initialized) {
         setup_library();
         g_sail_library_initialized = true;
+    }
+}
+
+/**
+ * Initialize Sail model (call once for all simulators)
+ */
+static void ensure_sail_model_initialized() {
+    if (!g_sail_model_initialized) {
+        model_init();
+        g_sail_model_initialized = true;
+    }
+    g_simulator_instance_count++;
+}
+
+/**
+ * Cleanup Sail model when last simulator is destroyed
+ */
+static void cleanup_sail_model_if_last() {
+    g_simulator_instance_count--;
+    if (g_simulator_instance_count == 0 && g_sail_model_initialized) {
+        model_fini();
+        g_sail_model_initialized = false;
     }
 }
 
@@ -99,8 +123,8 @@ sailsim_context_t* sailsim_init(const char* config_file) {
         // Set configured types from loaded config (BEFORE model_init)
         init_sail_configured_types();
 
-        // Initialize the Sail model (GMP variables, registers, etc.)
-        model_init();
+        // Initialize the Sail model ONCE globally (reference counted)
+        ensure_sail_model_initialized();
 
         // Set initial PC (must be BEFORE zinit_model because reset happens inside)
         zset_pc_reset_address(0x80000000);
@@ -125,7 +149,8 @@ void sailsim_destroy(sailsim_context_t* ctx) {
     if (!ctx) return;
 
     if (ctx->initialized) {
-        model_fini();
+        // Only call model_fini when the last simulator is destroyed
+        cleanup_sail_model_if_last();
     }
 
     if (ctx->config_str) {
@@ -336,10 +361,47 @@ bool sailsim_disasm(sailsim_context_t* ctx, uint64_t addr, char* buf, size_t buf
         return false;
     }
 
-    // TODO: Implement using Sail's disassembly functions
-    // For now, just return a placeholder
-    snprintf(buf, bufsize, "<disasm at 0x%lx not yet implemented>", addr);
-    return false;
+    try {
+        // Read instruction word from memory
+        uint32_t instr_word = 0;
+        if (!sailsim_read_mem(ctx, addr, &instr_word, 4)) {
+            snprintf(buf, bufsize, "<invalid address>");
+            return false;
+        }
+
+        // Decode the instruction using Sail's decoder
+        zinstruction decoded_instr;
+        zencdec_backwards(&decoded_instr, instr_word);
+
+        // Convert instruction to assembly string using Sail's formatter
+        sail_string asm_str;
+        CREATE(sail_string)(&asm_str);
+
+        // zassembly_forwards converts instruction struct to assembly string
+        zassembly_forwards(&asm_str, decoded_instr);
+
+        // Copy to output buffer
+        if (asm_str != NULL && *asm_str != '\0') {
+            snprintf(buf, bufsize, "%s", asm_str);
+        } else {
+            // Fallback to hex if assembly failed
+            snprintf(buf, bufsize, ".word 0x%08x", instr_word);
+        }
+
+        // Clean up Sail data structures
+        KILL(sail_string)(&asm_str);
+
+        return true;
+
+    } catch (const std::exception& e) {
+        ctx->last_error = std::string("Disassembly error: ") + e.what();
+        snprintf(buf, bufsize, "<error>");
+        return false;
+    } catch (...) {
+        ctx->last_error = "Unknown disassembly error";
+        snprintf(buf, bufsize, "<error>");
+        return false;
+    }
 }
 
 const char* sailsim_get_error(sailsim_context_t* ctx) {
