@@ -82,10 +82,21 @@ class MapacheSailConsole(cmd.Cmd):
     # --- File Loading ---
 
     def do_load(self, arg):
-        """Load a RISC-V ELF file: load <filename>
+        """Load a RISC-V ELF file
 
-        Example:
+        Usage:
+            load <filename>
+
+        Loads a compiled RISC-V ELF executable into the simulator.
+        The program counter is set to the entry point and all
+        breakpoints are cleared.
+
+        Examples:
             load examples/fibonacci/fibonacci
+            load examples/test_simple/simple
+            load /path/to/my_program
+
+        After loading, use 'pc' to see the entry point address.
         """
         if not arg:
             self.print_error('Error: Please specify an ELF file to load.')
@@ -109,11 +120,30 @@ class MapacheSailConsole(cmd.Cmd):
     # --- Execution Control ---
 
     def do_step(self, arg):
-        """Execute N instructions (default 1): step [n]
+        """Execute one or more instructions
+
+        Usage:
+            step [n]
+
+        Executes n instructions (default 1) and displays the program
+        counter for each step. If a breakpoint is hit, execution stops.
+
+        Arguments:
+            n - Number of instructions to execute (optional, default=1)
+
+        Aliases:
+            s - Short alias for step
 
         Examples:
-            step       # Execute 1 instruction
-            step 5     # Execute 5 instructions
+            step            # Execute 1 instruction
+            step 5          # Execute 5 instructions
+            s 10            # Execute 10 instructions (using alias)
+
+        Tips:
+            - Use 'step 1' to carefully trace through code
+            - Use 'step 10' to quickly skip over known-good code
+            - After stepping, use 'regs' to see register changes
+            - Set breakpoints before stepping to stop at key locations
         """
         if not self.loaded_file:
             self.print_error('Error: No program loaded. Use "load <file>" first.')
@@ -157,11 +187,32 @@ class MapacheSailConsole(cmd.Cmd):
             print(f'Executed {i+1} instruction(s)')
 
     def do_run(self, arg):
-        """Run until halt or max instructions: run [max]
+        """Run program until halt or maximum instructions
+
+        Usage:
+            run [max]
+
+        Executes instructions continuously until the program halts,
+        a breakpoint is hit, or the maximum instruction count is reached.
+        Press Ctrl-C to interrupt execution.
+
+        Arguments:
+            max - Maximum number of instructions (optional, default=unlimited)
+
+        Aliases:
+            r - Short alias for run
 
         Examples:
-            run        # Run until program halts
-            run 1000   # Run max 1000 instructions
+            run             # Run until program halts or breakpoint
+            run 1000        # Run maximum 1000 instructions
+            r 100           # Run max 100 instructions (using alias)
+
+        Tips:
+            - Set breakpoints before running to stop at specific addresses
+            - Use 'run 1000' to limit execution if program might loop
+            - Press Ctrl-C to interrupt a running program
+            - After running, use 'pc' and 'regs' to inspect state
+            - Use 'continue' to resume after hitting a breakpoint
         """
         if not self.loaded_file:
             self.print_error('Error: No program loaded. Use "load <file>" first.')
@@ -216,14 +267,55 @@ class MapacheSailConsole(cmd.Cmd):
             print(f'PC = {final_pc:#018x}')
 
     def do_continue(self, arg):
-        """Continue execution until next breakpoint or halt
+        """Continue execution after hitting a breakpoint
 
-        Same as 'run' but typically used after hitting a breakpoint.
+        Usage:
+            continue
+
+        Resumes execution from the current PC until the program halts,
+        another breakpoint is hit, or you interrupt with Ctrl-C.
+        Functionally equivalent to 'run' but semantically used to
+        resume after stopping at a breakpoint.
+
+        Aliases:
+            c - Short alias for continue
+
+        Examples:
+            break 0x80000010        # Set a breakpoint
+            run                     # Run until breakpoint
+            regs                    # Inspect state
+            continue                # Resume execution
+            c                       # Using alias
+
+        Tips:
+            - Same as 'run' but clearer intent when resuming
+            - Press Ctrl-C to interrupt execution
+            - Use 'step' for finer control after breakpoint
         """
         self.do_run('')
 
     def do_reset(self, arg):
-        """Reset the simulator to initial state"""
+        """Reset the simulator to initial state
+
+        Usage:
+            reset
+
+        Resets the simulator state, clearing all register values and
+        resetting the program counter. The loaded program remains in
+        memory but you may need to reload it to reset the entry point.
+
+        Examples:
+            load examples/test_simple/simple
+            step 5                  # Execute some instructions
+            reset                   # Reset simulator state
+            load examples/test_simple/simple  # Reload to restore entry point
+
+        Tips:
+            - Breakpoints are preserved (use 'clear' to remove them)
+            - Memory contents may be preserved (depends on Sail backend)
+            - Usually better to reload the file for a clean state
+            - Use to recover from error states
+        """
         self.sim.reset()
         print('Simulator reset.')
         if self.loaded_file:
@@ -232,9 +324,38 @@ class MapacheSailConsole(cmd.Cmd):
     # --- State Inspection ---
 
     def do_regs(self, arg):
-        """Display all registers
+        """Display all RISC-V registers
 
-        Shows all 32 RISC-V registers plus PC in a formatted display.
+        Usage:
+            regs
+
+        Shows all 32 general-purpose registers (x0-x31) with both
+        numeric names and ABI names, plus the program counter (PC).
+        Values are displayed in hexadecimal.
+
+        Register ABI Names:
+            x0  = zero (hard-wired 0)    x16-17 = a6-a7 (args)
+            x1  = ra (return addr)       x18-27 = s2-s11 (saved)
+            x2  = sp (stack pointer)     x28-31 = t3-t6 (temps)
+            x3  = gp (global pointer)
+            x4  = tp (thread pointer)
+            x5-7   = t0-t2 (temps)
+            x8     = s0/fp (saved/frame)
+            x9     = s1 (saved)
+            x10-11 = a0-a1 (args/return)
+            x12-15 = a2-a5 (args)
+
+        Examples:
+            regs                # Show all registers
+            step                # Execute an instruction
+            regs                # See what changed
+
+        Tips:
+            - Use after 'step' to see register changes
+            - a0-a7 (x10-x17) hold function arguments/return values
+            - sp (x2) is the stack pointer
+            - ra (x1) holds the return address
+            - x0 is always 0 (hard-wired)
         """
         print()
         regs = self.sim.get_all_regs()
@@ -259,16 +380,56 @@ class MapacheSailConsole(cmd.Cmd):
         print()
 
     def do_pc(self, arg):
-        """Display program counter"""
+        """Display program counter
+
+        Usage:
+            pc
+
+        Shows the current value of the program counter (PC), which
+        points to the next instruction to be executed.
+
+        Examples:
+            pc              # Show current PC
+            step            # Execute one instruction
+            pc              # See new PC value
+
+        Tips:
+            - PC increments by 4 for each instruction (32-bit encoding)
+            - Jump/branch instructions change PC non-sequentially
+            - Use 'mem <pc_value>' to see instructions at PC
+        """
         pc = self.sim.get_pc()
         print(f'pc = {pc:#018x}')
 
     def do_mem(self, arg):
-        """Display memory contents: mem <address> [length]
+        """Display memory contents in hex dump format
+
+        Usage:
+            mem <address> [length]
+
+        Displays memory contents starting at the given address in
+        hexadecimal format, grouped by 4-byte words. Default length
+        is 256 bytes if not specified.
+
+        Arguments:
+            address - Memory address in hex (0x...) or decimal
+            length  - Number of bytes to display (optional, default=256)
 
         Examples:
-            mem 0x80000000         # Display 256 bytes from address
-            mem 0x80000000 64      # Display 64 bytes from address
+            mem 0x80000000          # Show 256 bytes from 0x80000000
+            mem 0x80000000 64       # Show 64 bytes
+            mem 0x80000000 16       # Show just 16 bytes (4 words)
+
+        Common Addresses:
+            0x80000000 - Typical code (.text) segment start
+            0x83eff000 - Near stack area
+            pc         - Use 'pc' command first to find current PC
+
+        Tips:
+            - Use to examine code bytes at PC
+            - Check stack contents around SP
+            - Verify data was written correctly
+            - Each line shows 16 bytes (4 words of 4 bytes each)
         """
         if not arg:
             self.print_error('Error: Please specify an address (e.g., "mem 0x80000000").')
@@ -320,10 +481,32 @@ class MapacheSailConsole(cmd.Cmd):
     # --- Breakpoints ---
 
     def do_break(self, arg):
-        """Set a breakpoint at address: break <address>
+        """Set a breakpoint at an address
 
-        Example:
-            break 0x80000010
+        Usage:
+            break <address>
+
+        Sets a breakpoint at the specified address. When running or
+        stepping, execution will stop if the PC reaches this address.
+
+        Arguments:
+            address - Memory address in hex (0x...) or decimal
+
+        Aliases:
+            b - Short alias for break
+
+        Examples:
+            break 0x80000010        # Set breakpoint at address
+            b 0x8000001c            # Using alias
+            run                     # Will stop at breakpoint
+            info breakpoints        # List all breakpoints
+
+        Tips:
+            - Use 'info breakpoints' to see all set breakpoints
+            - Use 'delete <address>' to remove a specific breakpoint
+            - Use 'clear' to remove all breakpoints
+            - Breakpoints stop execution before the instruction executes
+            - Set breakpoints before running to stop at key locations
         """
         if not arg:
             self.print_error('Error: Please specify an address.')
@@ -337,10 +520,27 @@ class MapacheSailConsole(cmd.Cmd):
             self.print_error(f'Error: Invalid address "{arg}".')
 
     def do_info(self, arg):
-        """Show information: info breakpoints
+        """Show information about simulator state
 
-        Currently supports:
-            info breakpoints - List all breakpoints
+        Usage:
+            info breakpoints
+
+        Displays information about the current simulator state.
+        Currently supports viewing all set breakpoints.
+
+        Arguments:
+            breakpoints - List all set breakpoints (can abbreviate as 'break')
+
+        Examples:
+            info breakpoints        # List all breakpoints
+            info break              # Same, abbreviated
+            break 0x80000010        # Set a breakpoint
+            info breakpoints        # See it in the list
+
+        Tips:
+            - Shows breakpoints sorted by address
+            - Each breakpoint is numbered for reference
+            - Use 'delete <address>' to remove specific breakpoints
         """
         if arg == 'breakpoints' or arg == 'break':
             if not self.breakpoints:
@@ -354,10 +554,27 @@ class MapacheSailConsole(cmd.Cmd):
             self.print_error('Usage: info breakpoints')
 
     def do_delete(self, arg):
-        """Delete breakpoint at address: delete <address>
+        """Delete a specific breakpoint
 
-        Example:
-            delete 0x80000010
+        Usage:
+            delete <address>
+
+        Removes the breakpoint at the specified address. If no
+        breakpoint exists at that address, a message is displayed.
+
+        Arguments:
+            address - Memory address in hex (0x...) or decimal
+
+        Examples:
+            break 0x80000010        # Set a breakpoint
+            info breakpoints        # Verify it's set
+            delete 0x80000010       # Remove the breakpoint
+            info breakpoints        # Confirm it's gone
+
+        Tips:
+            - Use 'info breakpoints' to see all addresses with breakpoints
+            - Use 'clear' to remove all breakpoints at once
+            - Address must match exactly (including 0x prefix if used)
         """
         if not arg:
             self.print_error('Error: Please specify an address.')
@@ -374,14 +591,53 @@ class MapacheSailConsole(cmd.Cmd):
             self.print_error(f'Error: Invalid address "{arg}".')
 
     def do_clear(self, arg):
-        """Clear all breakpoints"""
+        """Clear all breakpoints
+
+        Usage:
+            clear
+
+        Removes all breakpoints that have been set. Use this when you
+        want to start fresh without any breakpoints.
+
+        Examples:
+            break 0x80000010        # Set breakpoint 1
+            break 0x80000020        # Set breakpoint 2
+            info breakpoints        # See both
+            clear                   # Remove all
+            info breakpoints        # None remain
+
+        Tips:
+            - Use 'delete <address>' to remove a specific breakpoint
+            - Breakpoints are also cleared when loading a new file
+            - No confirmation is required (immediate effect)
+        """
         self.breakpoints.clear()
         print('All breakpoints cleared.')
 
     # --- Utility Commands ---
 
     def do_status(self, arg):
-        """Show simulator status"""
+        """Show current simulator status
+
+        Usage:
+            status
+
+        Displays an overview of the simulator's current state including
+        the loaded file, program counter, and number of breakpoints.
+
+        Examples:
+            status                  # Show current status
+            load examples/test_simple/simple
+            status                  # See loaded file and PC
+            break 0x80000010
+            status                  # See breakpoint count
+
+        Tips:
+            - Quick way to see what's loaded and where you are
+            - Shows PC only if a file is loaded
+            - Use 'info breakpoints' for detailed breakpoint list
+            - Use 'regs' for full register state
+        """
         print(f'\nLoaded file: {self.loaded_file or "None"}')
         if self.loaded_file:
             pc = self.sim.get_pc()
@@ -390,12 +646,33 @@ class MapacheSailConsole(cmd.Cmd):
         print()
 
     def do_quit(self, arg):
-        """Exit the console"""
+        """Exit the console
+
+        Usage:
+            quit
+
+        Exits the MapacheSail console and returns to the shell.
+
+        Aliases:
+            exit - Same as quit
+            q    - Short alias for quit
+            Ctrl-D (EOF) - Also exits
+
+        Examples:
+            quit        # Exit the console
+            exit        # Same
+            q           # Using short alias
+
+        Tips:
+            - Press Ctrl-D for quick exit
+            - Simulator state is not saved
+            - No confirmation required
+        """
         print('Goodbye!')
         return True
 
     def do_exit(self, arg):
-        """Exit the console"""
+        """Exit the console (same as quit)"""
         return self.do_quit(arg)
 
     def do_EOF(self, arg):

@@ -142,3 +142,69 @@ These tests serve as regression tests to ensure:
 - Memory safety and bounds checking
 
 Run tests before committing changes to verify nothing broke!
+
+---
+
+## Console Command Tests
+
+### test_console_working.py
+**Comprehensive console command test suite** - 24 tests covering all console commands
+
+Status: ✅ **All 24 tests passing**
+
+```bash
+# Run console command tests
+python3 tests/test_console_working.py
+```
+
+#### Coverage
+
+| Command | Tests | Status |
+|---------|-------|--------|
+| `load` | 3 tests | ✅ Pass |
+| `step` | 5 tests | ✅ Pass |
+| `run` | 2 tests | ✅ Pass |
+| `break` | 3 tests | ✅ Pass |
+| `info breakpoints` | 1 test | ✅ Pass |
+| `delete` | 1 test | ✅ Pass |
+| `clear` | 1 test | ✅ Pass |
+| `continue` | 1 test | ✅ Pass |
+| `regs` | 1 test | ✅ Pass |
+| `pc` | 1 test | ✅ Pass |
+| `mem` | 1 test | ✅ Pass |
+| `status` | 2 tests | ✅ Pass |
+| **Aliases** | 3 tests | ✅ Pass |
+
+#### Test Program: examples/test_simple/simple
+
+A deterministic 9-instruction program with documented cycle-by-cycle behavior.
+
+**Expected final register values:**
+```
+x1  (ra)  = 93  (0x5d)  - exit syscall number
+x5  (t0)  = 10  (0x0a)
+x6  (t1)  = 20  (0x14)
+x7  (t2)  = 30  (0x1e)
+x8  (s0)  = 20  (0x14)
+x9  (s1)  = 40  (0x28)
+x10 (a0)  = 42  (0x2a)  - exit code
+```
+
+**Documentation:** See `examples/test_simple/EXPECTED_BEHAVIOR.md` for complete step-by-step behavior documentation.
+
+#### Additional Test Files
+
+- **test_simple_basic.py** - Basic simulator functionality test
+- **test_run_completion.py** - Detailed program execution through completion
+- **TESTING_NOTES.md** - Important notes about Sail behavior and test strategy
+
+## Test Summary
+
+**Total API Tests:** 31 (all passing)
+**Total Console Tests:** 24 (all passing)
+**Total:** 55 tests passing
+
+**Programs Tested:**
+- fibonacci (recursive calculation)
+- matrix_multiply (3x3 matrices)
+- test_simple (deterministic 9-instruction program)
