@@ -14,8 +14,8 @@ from io import StringIO
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachesail.console import MapacheSailConsole
-from mapachesail.sail_backend import StepResult
+from mapachespim.console import MapacheSPIMConsole
+from mapachespim.sail_backend import StepResult
 
 
 class TestConsoleCommands(unittest.TestCase):
@@ -38,7 +38,7 @@ class TestConsoleCommands(unittest.TestCase):
     def setUp(self):
         """Create a fresh console for each test"""
         # Suppress verbose output during tests
-        self.console = MapacheSailConsole(verbose=False)
+        self.console = MapacheSPIMConsole(verbose=False)
         self.console.stdout = StringIO()  # Capture output
 
     def tearDown(self):
@@ -488,7 +488,7 @@ class TestHelpExamples(unittest.TestCase):
 
     def setUp(self):
         """Create a fresh console for each test"""
-        self.console = MapacheSailConsole(verbose=False)
+        self.console = MapacheSPIMConsole(verbose=False)
         self.console.stdout = StringIO()
 
     def tearDown(self):

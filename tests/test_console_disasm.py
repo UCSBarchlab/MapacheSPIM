@@ -9,14 +9,14 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachesail.console import MapacheSailConsole
+from mapachespim.console import MapacheSPIMConsole
 
 
 def test_console_disasm():
     """Test the disasm console command"""
     print("Testing console disasm command...")
 
-    console = MapacheSailConsole(verbose=False)
+    console = MapacheSPIMConsole(verbose=False)
     console.stdout = sys.stdout
 
     # Load test program

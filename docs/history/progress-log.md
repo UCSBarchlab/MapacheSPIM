@@ -1,14 +1,14 @@
-# MapacheSail Implementation Progress
+# MapacheSPIM Implementation Progress
 
 ## Session 1: POC 1 - Sail Library Wrapper
 
 ### ✅ Completed Tasks
 
 1. **Repository Setup**
-   - Initialized MapacheSail repository
+   - Initialized MapacheSPIM repository
    - Configured sail-riscv as git submodule
    - Created comprehensive documentation
-   - Pushed to GitHub at UCSBarchlab/MapacheSail
+   - Pushed to GitHub at UCSBarchlab/MapacheSPIM
 
 2. **Sail RISC-V Build**
    - Installed Sail compiler (v0.19.1) via opam
@@ -39,7 +39,7 @@
 ### 📁 Files Created
 
 ```
-MapacheSail/
+MapacheSPIM/
 ├── libsailsim/
 │   ├── sailsim.h          # C API header (15 functions)
 │   ├── sailsim.cpp        # Implementation (360 lines)
@@ -82,7 +82,7 @@ bool sailsim_read_mem(sailsim_context_t* ctx, uint64_t addr, void* buf, size_t l
    ```
 
 3. **Create Python Bindings**
-   - `mapachesail/sail_backend.py` - ctypes wrapper
+   - `mapachespim/sail_backend.py` - ctypes wrapper
    - Handle type conversions (uint64_t ↔ Python int)
    - Test basic operations from Python
 
@@ -171,14 +171,14 @@ bool sailsim_read_mem(sailsim_context_t* ctx, uint64_t addr, void* buf, size_t l
 **Created Python ctypes bindings for libsailsim**
 
 **Files Created:**
-- `mapachesail/__init__.py` - Package initialization
-- `mapachesail/sail_backend.py` - Python wrapper using ctypes (300+ lines)
-- `mapachesail/README.md` - API documentation
+- `mapachespim/__init__.py` - Package initialization
+- `mapachespim/sail_backend.py` - Python wrapper using ctypes (300+ lines)
+- `mapachespim/README.md` - API documentation
 - `test_python_bindings.py` - Test script demonstrating all features
 
 **Python API Features:**
 ```python
-from mapachesail import SailSimulator
+from mapachespim import SailSimulator
 
 sim = SailSimulator()                    # Initialize
 sim.load_elf("program.elf")              # Load ELF
@@ -229,8 +229,8 @@ Python (SailSimulator) → ctypes → C API (libsailsim) → Sail RISC-V
 **Built SPIM-like interactive console for RISC-V programs**
 
 **Files Created:**
-- `mapachesail/console.py` - Full interactive console using cmd.Cmd (400+ lines)
-- `mapachesail_console` - Executable entry point
+- `mapachespim/console.py` - Full interactive console using cmd.Cmd (400+ lines)
+- `mapachespim_console` - Executable entry point
 - `CONSOLE_GUIDE.md` - Complete user guide with examples
 - Test scripts for validation
 
@@ -255,34 +255,34 @@ Essential Commands:
 
 **Example Console Session:**
 ```
-$ ./mapachesail_console
-Welcome to MapacheSail. Type help or ? to list commands.
+$ ./mapachespim_console
+Welcome to MapacheSPIM. Type help or ? to list commands.
 
-(mapachesail) load examples/fibonacci/fibonacci
+(mapachespim) load examples/fibonacci/fibonacci
 ✓ Loaded examples/fibonacci/fibonacci
 Entry point: 0x0000000080000000
 
-(mapachesail) step
+(mapachespim) step
 [0x0000000080000000] Executed 1 instruction
 
-(mapachesail) regs
+(mapachespim) regs
 x0  (zero) = 0x0000000000000000  x1  (  ra) = 0x0000000000000000
 x2  (  sp) = 0x0000000083f00000  x3  (  gp) = 0x0000000000000000
 ...
 pc                 = 0x0000000080000004
 
-(mapachesail) break 0x80000038
+(mapachespim) break 0x80000038
 Breakpoint set at 0x0000000080000038
 
-(mapachesail) run
+(mapachespim) run
 Breakpoint hit at 0x0000000080000038 after 5 instructions
 
-(mapachesail) continue
+(mapachespim) continue
 Executed 95 instructions
 ```
 
 **Technical Features:**
-- Built on Python's `cmd.Cmd` library (like original MapacheSim)
+- Built on Python's `cmd.Cmd` library (like original MapacheSPIM)
 - Signal handling for Ctrl-C during execution
 - Breakpoint support with address tracking
 - Pretty-formatted register display (4 columns with ABI names)
@@ -312,13 +312,13 @@ Executed 95 instructions
 **Usage:**
 ```bash
 # Interactive mode
-./mapachesail_console
+./mapachespim_console
 
 # Load file on startup
-./mapachesail_console examples/fibonacci/fibonacci
+./mapachespim_console examples/fibonacci/fibonacci
 
 # Quiet mode
-./mapachesail_console -q examples/fibonacci/fibonacci
+./mapachespim_console -q examples/fibonacci/fibonacci
 ```
 
 ---

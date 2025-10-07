@@ -1,4 +1,4 @@
-# MapacheSail Interactive Console Guide
+# MapacheSPIM Interactive Console Guide
 
 SPIM-like interactive console for RISC-V programs using the Sail formal specification.
 
@@ -6,10 +6,10 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 
 ```bash
 # Launch interactive console
-./mapachesail_console
+./mapachespim_console
 
 # Or load a program on startup
-./mapachesail_console examples/fibonacci/fibonacci
+./mapachespim_console examples/fibonacci/fibonacci
 ```
 
 ## Basic Commands
@@ -17,20 +17,20 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 ### File Loading
 - `load <file>` - Load a RISC-V ELF executable
   ```
-  (mapachesail) load examples/fibonacci/fibonacci
+  (mapachespim) load examples/fibonacci/fibonacci
   ```
 
 ### Execution
 - `step [n]` - Execute 1 or n instructions (alias: `s`)
   ```
-  (mapachesail) step       # Execute 1 instruction
-  (mapachesail) step 10    # Execute 10 instructions
+  (mapachespim) step       # Execute 1 instruction
+  (mapachespim) step 10    # Execute 10 instructions
   ```
 
 - `run [max]` - Run until halt or max instructions (alias: `r`)
   ```
-  (mapachesail) run        # Run until program halts
-  (mapachesail) run 1000   # Run max 1000 instructions
+  (mapachespim) run        # Run until program halts
+  (mapachespim) run 1000   # Run max 1000 instructions
   ```
 
 - `continue` - Continue after breakpoint (alias: `c`)
@@ -38,7 +38,7 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 ### State Inspection
 - `regs` - Display all 32 registers + PC with ABI names
   ```
-  (mapachesail) regs
+  (mapachespim) regs
 
   x0  (zero) = 0x0000000000000000  x1  (  ra) = 0x0000000080000018  ...
   x2  (  sp) = 0x0000000083efffe8  x3  (  gp) = 0x0000000000000000  ...
@@ -48,14 +48,14 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 
 - `pc` - Show just the program counter
   ```
-  (mapachesail) pc
+  (mapachespim) pc
   pc = 0x0000000080000004
   ```
 
 - `mem <addr> [len]` - Display memory contents (default 256 bytes)
   ```
-  (mapachesail) mem 0x80000000
-  (mapachesail) mem 0x80000000 64    # Show 64 bytes
+  (mapachespim) mem 0x80000000
+  (mapachespim) mem 0x80000000 64    # Show 64 bytes
 
   0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08
   0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07
@@ -65,13 +65,13 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 ### Breakpoints
 - `break <addr>` - Set breakpoint at address (alias: `b`)
   ```
-  (mapachesail) break 0x80000010
+  (mapachespim) break 0x80000010
   Breakpoint set at 0x0000000080000010
   ```
 
 - `info breakpoints` - List all breakpoints
   ```
-  (mapachesail) info break
+  (mapachespim) info break
 
   Breakpoints:
     1. 0x0000000080000010
@@ -80,7 +80,7 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 
 - `delete <addr>` - Remove breakpoint at address
   ```
-  (mapachesail) delete 0x80000010
+  (mapachespim) delete 0x80000010
   Breakpoint removed at 0x0000000080000010
   ```
 
@@ -95,39 +95,39 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 ## Example Session
 
 ```
-$ ./mapachesail_console
+$ ./mapachespim_console
 Sail RISC-V simulator initialized.
-Welcome to MapacheSail. Type help or ? to list commands.
+Welcome to MapacheSPIM. Type help or ? to list commands.
 
-(mapachesail) load examples/fibonacci/fibonacci
+(mapachespim) load examples/fibonacci/fibonacci
 ✓ Loaded examples/fibonacci/fibonacci
 Entry point: 0x0000000080000000
 
-(mapachesail) step
+(mapachespim) step
 [0x0000000080000000] Executed 1 instruction
 
-(mapachesail) regs
+(mapachespim) regs
 x0  (zero) = 0x0000000000000000  x1  (  ra) = 0x0000000000000000  ...
 ...
 pc                 = 0x0000000080000004
 
-(mapachesail) break 0x80000038
+(mapachespim) break 0x80000038
 Breakpoint set at 0x0000000080000038
 
-(mapachesail) run
+(mapachespim) run
 Breakpoint hit at 0x0000000080000038 after 5 instructions
 PC = 0x0000000080000038
 
-(mapachesail) continue
+(mapachespim) continue
 Executed 95 instruction(s)
 PC = 0x00000000800000f0
 
-(mapachesail) mem 0x80000000 32
+(mapachespim) mem 0x80000000 32
 
 0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08
 0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07
 
-(mapachesail) quit
+(mapachespim) quit
 Goodbye!
 ```
 
@@ -154,13 +154,13 @@ The console shows both numeric (x0-x31) and ABI names:
 
 ```bash
 # Launch console
-./mapachesail_console
+./mapachespim_console
 
 # Load file on startup
-./mapachesail_console examples/fibonacci/fibonacci
+./mapachespim_console examples/fibonacci/fibonacci
 
 # Quiet mode (less verbose)
-./mapachesail_console -q examples/fibonacci/fibonacci
+./mapachespim_console -q examples/fibonacci/fibonacci
 ```
 
 ## Keyboard Shortcuts
@@ -200,7 +200,7 @@ The console shows both numeric (x0-x31) and ABI names:
 
 ## Differences from SPIM
 
-MapacheSail is similar to SPIM but has key differences:
+MapacheSPIM is similar to SPIM but has key differences:
 
 1. **RISC-V instead of MIPS**: Uses RISC-V ISA with Sail formal spec
 2. **ELF files**: Loads compiled ELF binaries (not assembly source)
@@ -211,7 +211,7 @@ MapacheSail is similar to SPIM but has key differences:
 
 **Console won't start:**
 - Make sure libsailsim is built: `cd libsailsim/build && cmake .. && make`
-- Check Python path includes mapachesail package
+- Check Python path includes mapachespim package
 
 **Can't load ELF file:**
 - Verify file is RISC-V ELF: `file examples/fibonacci/fibonacci`

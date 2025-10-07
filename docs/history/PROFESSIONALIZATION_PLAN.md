@@ -1,8 +1,8 @@
-# MapacheSim Project Professionalization Plan
+# MapacheSPIM Project Professionalization Plan
 
 ## Executive Summary
 
-This document outlines a comprehensive plan to professionalize the MapacheSim project (formerly MapacheSail) before expanding to multiple ISAs and adding new features. The plan addresses documentation consolidation, multi-ISA architecture, student onboarding, and future C++ console development.
+This document outlines a comprehensive plan to professionalize the MapacheSPIM project (formerly MapacheSPIM) before expanding to multiple ISAs and adding new features. The plan addresses documentation consolidation, multi-ISA architecture, student onboarding, and future C++ console development.
 
 ---
 
@@ -15,7 +15,7 @@ Current documentation is scattered across multiple locations:
 ├── docs/ (2 docs): ENHANCEMENT_SUMMARY.md, SPIM_COMPARISON.md
 ├── spec/ (1 doc): IMPLEMENTATION_PLAN.md
 ├── libsailsim/ (1 doc): STATUS.md
-├── mapachesail/ (1 doc): README.md
+├── mapachespim/ (1 doc): README.md
 ├── tests/ (1 doc): README.md
 └── examples/ (1 doc + sub-READMEs): README.md
 ```
@@ -29,9 +29,9 @@ Current documentation is scattered across multiple locations:
 ### Architecture Issues
 ```
 Current structure:
-MapacheSail/
+MapacheSPIM/
 ├── libsailsim/          # ISA-agnostic C library ✅
-├── mapachesail/         # Python bindings ✅
+├── mapachespim/         # Python bindings ✅
 ├── sail-riscv/          # RISC-V backend (submodule) ⚠️
 ├── examples/            # RISC-V examples ⚠️
 └── tests/               # Tests ✅
@@ -44,9 +44,9 @@ MapacheSail/
 - No clear path to add new backends
 
 ### Naming Issues
-- Current name: **MapacheSail** (temporary, RISC-V focused)
-- Desired name: **MapacheSim** (ISA-agnostic)
-- Conflict: Existing older "MapacheSim" project needs to be renamed
+- Current name: **MapacheSPIM** (temporary, RISC-V focused)
+- Desired name: **MapacheSPIM** (ISA-agnostic)
+- Conflict: Existing older "MapacheSPIM" project needs to be renamed
 - All references need updating (code, docs, URLs)
 
 ---
@@ -55,7 +55,7 @@ MapacheSail/
 
 ### Directory Structure (Final State)
 ```
-MapacheSim/                          # New project name
+MapacheSPIM/                          # New project name
 ├── README.md                        # Main entry point (student-focused)
 ├── CONTRIBUTING.md                  # How to contribute
 ├── LICENSE                          # License file
@@ -157,7 +157,7 @@ MapacheSim/                          # New project name
 │   ├── setup.sh                    # One-command setup
 │   ├── build_all.sh               # Build all components
 │   ├── run_tests.sh               # Run all tests
-│   └── rename_project.sh          # Rename from MapacheSail to MapacheSim
+│   └── rename_project.sh          # Rename from MapacheSPIM to MapacheSPIM
 │
 └── config/                          # ⚙️ Configuration files
     ├── default.json                # Default simulator config
@@ -223,23 +223,23 @@ MapacheSim/                          # New project name
 ---
 
 ### Phase 3: Project Rename (1 day)
-**Goal:** Rename MapacheSail → MapacheSim
+**Goal:** Rename MapacheSPIM → MapacheSPIM
 
 **Prerequisites:**
-- ⚠️ Rename or archive old "MapacheSim" project first
+- ⚠️ Rename or archive old "MapacheSPIM" project first
 
 **Tasks:**
 1. ✅ Create rename script: `scripts/rename_project.sh`
 2. ✅ Rename all code identifiers:
-   - `mapachesail` → `mapachesim` (Python package name)
-   - `MapacheSail` → `MapacheSim` (class names)
+   - `mapachespim` → `mapachesim` (Python package name)
+   - `MapacheSPIM` → `MapacheSPIM` (class names)
    - `MAPACHESAIL` → `MAPACHESIM` (constants)
    - `sailsim` → `mapachesim` (C library prefix)
 3. ✅ Rename files:
    - `libsailsim/` → `lib/`
    - `libsailsim/sailsim.h` → `lib/include/mapachesim.h`
    - `libsailsim/sailsim.cpp` → `lib/src/mapachesim.cpp`
-   - `mapachesail/` → `python/mapachesim/`
+   - `mapachespim/` → `python/mapachesim/`
 4. ✅ Update all documentation references
 5. ✅ Update CMakeLists.txt
 6. ✅ Update Python setup.py
@@ -247,7 +247,7 @@ MapacheSim/                          # New project name
 8. ✅ Update git remote URLs if needed
 
 **Deliverables:**
-- Consistent MapacheSim naming throughout
+- Consistent MapacheSPIM naming throughout
 - No broken references
 - All tests passing
 
@@ -280,7 +280,7 @@ MapacheSim/                          # New project name
 **Goal:** Professional Python package structure
 
 **Tasks:**
-1. ✅ Move `mapachesail/` → `python/mapachesim/`
+1. ✅ Move `mapachespim/` → `python/mapachesim/`
 2. ✅ Create proper `setup.py` with:
    - Package metadata
    - Dependencies
@@ -477,13 +477,13 @@ ISA detect_isa_from_elf(const string& elf_path) {
 
 ## Naming Migration Plan
 
-### Step 1: Handle Old MapacheSim Project
+### Step 1: Handle Old MapacheSPIM Project
 **Options:**
-1. **Rename it:** MapacheSim → MapacheSim-Legacy or MapacheSim-Old
+1. **Rename it:** MapacheSPIM → MapacheSPIM-Legacy or MapacheSPIM-Old
 2. **Archive it:** Move to archived/ subdirectory
 3. **Delete it:** If no longer needed (with backup)
 
-**Recommendation:** Archive it as `MapacheSim-Archive` with clear README pointing to new project.
+**Recommendation:** Archive it as `MapacheSPIM-Archive` with clear README pointing to new project.
 
 ### Step 2: Rename Current Project
 Use the automated rename script (Phase 3) to ensure consistency.
@@ -504,7 +504,7 @@ Use the automated rename script (Phase 3) to ensure consistency.
 |------|--------|------------|
 | Breaking existing code during rename | High | Comprehensive test suite; rename script with rollback |
 | Submodule paths break after restructure | Medium | Test on clean checkout; update .gitmodules carefully |
-| Old MapacheSim name collision | Low | Archive old project first; clear naming |
+| Old MapacheSPIM name collision | Low | Archive old project first; clear naming |
 | Build system breaks in restructure | Medium | Phase by phase; test after each change |
 | Documentation becomes stale | Low | Single source of truth in docs/; automated checks |
 
@@ -515,7 +515,7 @@ Use the automated rename script (Phase 3) to ensure consistency.
 ### Phase Completion Criteria
 - [ ] Phase 1: All docs in docs/ hierarchy; student quick-start exists
 - [ ] Phase 2: Backends in backends/; all tests pass
-- [ ] Phase 3: No "mapachesail" or "sailsim" references; all tests pass
+- [ ] Phase 3: No "mapachespim" or "sailsim" references; all tests pass
 - [ ] Phase 4: Library in lib/; pkg-config works
 - [ ] Phase 5: Python package pip-installable
 - [ ] Phase 6: C++ console compiles and runs
@@ -538,7 +538,7 @@ Use the automated rename script (Phase 3) to ensure consistency.
 
 ### Immediate Actions (Before Starting Phase 1)
 1. ✅ Review this plan with stakeholders
-2. ✅ Decide on old MapacheSim project handling
+2. ✅ Decide on old MapacheSPIM project handling
 3. ✅ Create a backup/branch before major restructuring
 4. ✅ Set up tracking for plan progress
 
@@ -554,7 +554,7 @@ git checkout -b professionalization
 ```
 
 ### Questions to Resolve
-1. **Old MapacheSim:** Archive, rename, or delete?
+1. **Old MapacheSPIM:** Archive, rename, or delete?
 2. **Timeline:** Do all phases, or prioritize subset?
 3. **C++ Console:** Full implementation now, or just foundation?
 4. **Additional ISAs:** Plan ARM next, or wait?
@@ -563,7 +563,7 @@ git checkout -b professionalization
 
 ## Conclusion
 
-This plan transforms MapacheSail into a professional, multi-ISA educational simulator with clear documentation, extensible architecture, and student-friendly onboarding. The phased approach allows for incremental progress with testing at each stage.
+This plan transforms MapacheSPIM into a professional, multi-ISA educational simulator with clear documentation, extensible architecture, and student-friendly onboarding. The phased approach allows for incremental progress with testing at each stage.
 
 **Estimated Total Effort:** 2 weeks (10 days)
 **Can be parallelized:** Documentation and code changes can be done concurrently

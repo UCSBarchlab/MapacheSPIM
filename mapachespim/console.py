@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MapacheSail Interactive Console
+MapacheSPIM Interactive Console
 
 A SPIM-like interactive console for RISC-V programs using the Sail formal specification.
 """
@@ -20,7 +20,7 @@ def _chunk_list(lst, n):
         yield lst[i:i+n]
 
 
-class MapacheSailConsole(cmd.Cmd):
+class MapacheSPIMConsole(cmd.Cmd):
     """
     Interactive console for stepping through RISC-V programs.
 
@@ -28,8 +28,8 @@ class MapacheSailConsole(cmd.Cmd):
     stepping through execution, examining registers and memory.
     """
 
-    intro = 'Welcome to MapacheSail. Type help or ? to list commands.\n'
-    prompt = '(mapachesail) '
+    intro = 'Welcome to MapacheSPIM. Type help or ? to list commands.\n'
+    prompt = '(mapachespim) '
 
     # RISC-V ABI register names
     RISCV_ABI_NAMES = [
@@ -842,7 +842,7 @@ class MapacheSailConsole(cmd.Cmd):
         Usage:
             quit
 
-        Exits the MapacheSail console and returns to the shell.
+        Exits the MapacheSPIM console and returns to the shell.
 
         Aliases:
             exit - Same as quit
@@ -885,7 +885,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='MapacheSail - Interactive RISC-V Simulator using Sail'
+        description='MapacheSPIM - Interactive RISC-V Simulator using Sail'
     )
     parser.add_argument(
         'file',
@@ -901,7 +901,7 @@ def main():
     args = parser.parse_args()
 
     # Create console
-    console = MapacheSailConsole(verbose=not args.quiet)
+    console = MapacheSPIMConsole(verbose=not args.quiet)
 
     # Auto-load file if provided
     if args.file:

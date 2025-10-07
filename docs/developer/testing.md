@@ -1,4 +1,4 @@
-# MapacheSail Testing Notes
+# MapacheSPIM Testing Notes
 
 ## Test Program Behavior
 

@@ -48,10 +48,10 @@ class SailSimulator:
             raise RuntimeError("Failed to initialize Sail simulator")
 
     def _load_library(self):
-        """Load the libsailsim shared library"""
+        """Load the sailsim shared library"""
         # Get the package directory
         pkg_dir = Path(__file__).parent.parent
-        lib_dir = pkg_dir / "libsailsim" / "build"
+        lib_dir = pkg_dir / "lib" / "build"
 
         # Try different library names
         lib_names = [
@@ -67,7 +67,7 @@ class SailSimulator:
 
         raise FileNotFoundError(
             f"Could not find libsailsim in {lib_dir}. "
-            "Make sure you've built libsailsim first."
+            "Make sure you've built the library first (cd lib/build && cmake .. && make)."
         )
 
     def _setup_functions(self):

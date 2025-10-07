@@ -1,4 +1,4 @@
-# MapacheSail Architecture
+# MapacheSPIM Architecture
 
 This document describes the overall system architecture, component interactions, and design decisions.
 
@@ -6,14 +6,14 @@ This document describes the overall system architecture, component interactions,
 
 ## System Overview
 
-MapacheSail is a layered architecture for ISA-agnostic assembly debugging built on Sail formal specifications:
+MapacheSPIM is a layered architecture for ISA-agnostic assembly debugging built on Sail formal specifications:
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │              User Interfaces (Frontends)                │
 │  ┌──────────────────┐        ┌─────────────────────┐  │
 │  │  Python Console  │        │  C++ Console (TBD)  │  │
-│  │  (mapachesail/)  │        │  (future)           │  │
+│  │  (mapachespim/)  │        │  (future)           │  │
 │  └────────┬─────────┘        └──────────┬──────────┘  │
 └───────────┼────────────────────────────────┼───────────┘
             │                                │
@@ -147,9 +147,9 @@ bool sailsim_addr_to_symbol(sailsim_context_t* ctx, uint64_t addr, char* name, .
 
 ---
 
-### 3. Python Bindings (mapachesail/)
+### 3. Python Bindings (mapachespim/)
 
-**Location:** `mapachesail/`
+**Location:** `mapachespim/`
 
 **Purpose:** Python wrapper for libsailsim
 
@@ -188,7 +188,7 @@ class SailSimulator:
 **Console Architecture:**
 
 ```python
-class MapacheSailConsole(cmd.Cmd):
+class MapacheSPIMConsole(cmd.Cmd):
     """Interactive debugging console"""
 
     def __init__(self):
@@ -413,7 +413,7 @@ ISA detect_isa_from_elf(const string& path) {
 **CMake Structure:**
 
 ```cmake
-MapacheSail/
+MapacheSPIM/
 ├── CMakeLists.txt                 # Top-level
 ├── libsailsim/CMakeLists.txt     # C library
 └── cpp/CMakeLists.txt            # C++ console (future)

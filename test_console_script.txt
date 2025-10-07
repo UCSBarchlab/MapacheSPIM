@@ -1,8 +1,0 @@
-load examples/fibonacci/fibonacci
-step
-regs
-step 5
-pc
-mem 0x80000000 32
-status
-quit

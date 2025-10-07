@@ -1,4 +1,4 @@
-# MapacheSail Python API
+# MapacheSPIM Python API
 
 Python bindings for the Sail RISC-V simulator.
 
@@ -16,7 +16,7 @@ make
 ## Quick Start
 
 ```python
-from mapachesail import SailSimulator
+from mapachespim import SailSimulator
 
 # Initialize simulator
 sim = SailSimulator()
@@ -104,7 +104,7 @@ with SailSimulator() as sim:
 ## Example: Tracing Execution
 
 ```python
-from mapachesail import SailSimulator, StepResult
+from mapachespim import SailSimulator, StepResult
 
 sim = SailSimulator()
 sim.load_elf("examples/fibonacci/fibonacci")

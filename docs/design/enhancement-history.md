@@ -1,8 +1,8 @@
-# MapacheSail Student Debugging Enhancements
+# MapacheSPIM Student Debugging Enhancements
 
 ## Summary
 
-We've successfully implemented the top 3 priority features from the SPIM comparison, making MapacheSail significantly more useful for student assembly debugging. **All enhancements use Sail's ISA-agnostic infrastructure** - no RISC-V specific code!
+We've successfully implemented the top 3 priority features from the SPIM comparison, making MapacheSPIM significantly more useful for student assembly debugging. **All enhancements use Sail's ISA-agnostic infrastructure** - no RISC-V specific code!
 
 ## What Was Implemented
 
@@ -11,13 +11,13 @@ We've successfully implemented the top 3 priority features from the SPIM compari
 
 **Before:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x0000000080000000] Executed 1 instruction
 ```
 
 **After:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x80000000] <_start>  0x9302a000  addi x5, x0, 0xa
 Register changes:
   x5  (  t0) : 0x0000000000000000 → 0x000000000000000a  ★
@@ -39,7 +39,7 @@ Students had to manually compare register values after each step.
 
 **After:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x80000008]  0xb3836200  add x7, x5, x6
 Register changes:
   x7  (  t2) : 0x0000000000000000 → 0x000000000000001e  ★
@@ -63,19 +63,19 @@ Register changes:
 
 #### 1. Symbolic Breakpoints
 ```
-(mapachesail) break main
+(mapachespim) break main
 Breakpoint set at main (0x80000000)
 
-(mapachesail) break fibonacci
+(mapachespim) break fibonacci
 Breakpoint set at fibonacci (0x80000038)
 ```
 
 #### 2. Symbol Display in Step Output
 ```
-(mapachesail) step
+(mapachespim) step
 [0x80000000] <_start>  0x9302a000  addi x5, x0, 0xa
 
-(mapachesail) step 5
+(mapachespim) step 5
 [0x80000004] <_start+4>  0x13034001  addi x6, x0, 0x14
 [0x80000008] <_start+8>  0xb3836200  add x7, x5, x6
 ...
@@ -83,7 +83,7 @@ Breakpoint set at fibonacci (0x80000038)
 
 #### 3. Info Commands
 ```
-(mapachesail) info symbols
+(mapachespim) info symbols
 Symbols (22 total):
   0x80000000  $xrv64i2p1_m2p0_a2p1_f2p2_d2p2...
   0x80000000  _start
@@ -92,7 +92,7 @@ Symbols (22 total):
   0x80000038  fibonacci
   ...
 
-(mapachesail) info breakpoints
+(mapachespim) info breakpoints
 Breakpoints:
   1. 0x80000030  <main>
   2. 0x80000038  <fibonacci>
@@ -100,11 +100,11 @@ Breakpoints:
 
 #### 4. Configuration Command
 ```
-(mapachesail) set
+(mapachespim) set
 Current settings:
   show-changes : on
 
-(mapachesail) set show-changes off
+(mapachespim) set show-changes off
 Register change display disabled
 ```
 
@@ -145,7 +145,7 @@ bool sailsim_addr_to_symbol(sailsim_context_t* ctx, uint64_t addr,
                              uint64_t* offset);
 ```
 
-### Python Bindings Added (mapachesail/sail_backend.py)
+### Python Bindings Added (mapachespim/sail_backend.py)
 ```python
 def get_symbols(self) -> dict:
     """Get all symbols from symbol table"""
@@ -157,7 +157,7 @@ def addr_to_symbol(self, addr: int) -> tuple:
     """Convert address to (symbol_name, offset)"""
 ```
 
-### Console Integration (mapachesail/console.py)
+### Console Integration (mapachespim/console.py)
 - `break <symbol>` - Set breakpoint by name
 - `info symbols` - List all symbols
 - `info breakpoints` - Show breakpoints with symbol names
@@ -197,19 +197,19 @@ def test_symbolic_breakpoint(self):
 
 ### Use Case 1: Debugging a Simple Loop
 ```
-(mapachesail) load fibonacci
-(mapachesail) break main
+(mapachespim) load fibonacci
+(mapachespim) break main
 Breakpoint set at main (0x80000030)
 
-(mapachesail) run
+(mapachespim) run
 Breakpoint hit at main (0x80000030)
 
-(mapachesail) step
+(mapachespim) step
 [0x80000030] <main>  0x13050005  addi x10, x0, 0x5
 Register changes:
   x10 (  a0) : 0x0000000000000000 → 0x0000000000000005  ★
 
-(mapachesail) step
+(mapachespim) step
 [0x80000034] <main+4>  0x040000ef  jal ra, fibonacci
 Register changes:
   x1  (  ra) : 0x0000000000000000 → 0x0000000080000038  ★
@@ -223,13 +223,13 @@ Register changes:
 
 ### Use Case 2: Understanding Function Calls
 ```
-(mapachesail) break fibonacci
+(mapachespim) break fibonacci
 Breakpoint set at fibonacci (0x80000038)
 
-(mapachesail) run
+(mapachespim) run
 Breakpoint hit at fibonacci (0x80000038)
 
-(mapachesail) step 3
+(mapachespim) step 3
 [0x80000038] <fibonacci>  0x93063000  addi x13, x0, 0x3
 [0x8000003c] <fibonacci+4>  0x6346d002  blt x13, x10, 0x20
 [0x80000040] <fibonacci+8>  0x930a0000  addi x21, x0, 0x0
@@ -239,7 +239,7 @@ Breakpoint hit at fibonacci (0x80000038)
 
 ## Comparison to SPIM
 
-| Feature | SPIM | MapacheSail | Notes |
+| Feature | SPIM | MapacheSPIM | Notes |
 |---------|------|-------------|-------|
 | Enhanced step display | ✅ | ✅ | **DONE** - Shows instruction bytes + disassembly |
 | Register change tracking | ✅ | ✅ | **DONE** - Automatic highlighting |
@@ -264,7 +264,7 @@ Breakpoint hit at fibonacci (0x80000038)
 - `sailsim.cpp` - Implemented symbol table using Sail's `ELF::symbols()`
 - Built and tested successfully
 
-### Python Layer (mapachesail/)
+### Python Layer (mapachespim/)
 - `sail_backend.py` - Added 3 Python methods for symbols
 - `console.py` - Enhanced 3 commands (break, info, step) + added `set`
 
@@ -300,16 +300,16 @@ watch x10                # Break when register changes
 
 ### Phase 5: Call Stack / Backtrace (5-6 hours)
 ```
-(mapachesail) bt
+(mapachespim) bt
 #0  fibonacci+24 at 0x80000050
 #1  main+16 at 0x80000040
 ```
 
 ### Phase 6: Enhanced Display Modes (3-4 hours)
 ```
-(mapachesail) regs decimal    # Show in decimal
-(mapachesail) regs binary     # Show in binary
-(mapachesail) print x5 + x6   # Expression evaluation
+(mapachespim) regs decimal    # Show in decimal
+(mapachespim) regs binary     # Show in binary
+(mapachespim) print x5 + x6   # Expression evaluation
 ```
 
 ---
@@ -328,4 +328,4 @@ We've successfully implemented the **top 3 priority features** for student assem
 **Tests:** 24/24 passing (100%)
 **Lines of code:** ~500 lines (C + Python + tests)
 
-MapacheSail now provides a SPIM-like experience while maintaining its foundation in formal specification and ISA-agnostic design! 🎉
+MapacheSPIM now provides a SPIM-like experience while maintaining its foundation in formal specification and ISA-agnostic design! 🎉

@@ -12,7 +12,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachesail.console import MapacheSailConsole
+from mapachespim.console import MapacheSPIMConsole
 
 
 class TestConsoleCommands(unittest.TestCase):
@@ -22,7 +22,7 @@ class TestConsoleCommands(unittest.TestCase):
 
     def setUp(self):
         """Create a fresh console for each test"""
-        self.console = MapacheSailConsole(verbose=False)
+        self.console = MapacheSPIMConsole(verbose=False)
         self.console.stdout = sys.stdout  # Use real stdout for cmd.Cmd
 
     def tearDown(self):

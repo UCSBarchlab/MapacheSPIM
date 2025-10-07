@@ -1,6 +1,6 @@
 # Multi-ISA Strategy
 
-This document explains how MapacheSail supports multiple Instruction Set Architectures (ISAs) through a clean, extensible design based on Sail formal specifications.
+This document explains how MapacheSPIM supports multiple Instruction Set Architectures (ISAs) through a clean, extensible design based on Sail formal specifications.
 
 ---
 
@@ -15,9 +15,9 @@ This document explains how MapacheSail supports multiple Instruction Set Archite
 ## Current State (RISC-V Only)
 
 ```
-MapacheSail/
+MapacheSPIM/
 ├── libsailsim/            # ISA-agnostic core ✅
-├── mapachesail/           # ISA-agnostic Python ✅
+├── mapachespim/           # ISA-agnostic Python ✅
 ├── sail-riscv/            # RISC-V backend (submodule)
 └── examples/              # RISC-V examples
 ```
@@ -33,7 +33,7 @@ MapacheSail/
 ## Target State (Multi-ISA)
 
 ```
-MapacheSim/                # Note: Renamed from MapacheSail
+MapacheSPIM/                # Note: Renamed from MapacheSPIM
 ├── lib/                   # ISA-agnostic core ✅
 ├── python/                # ISA-agnostic Python ✅
 ├── backends/              # ISA backends (submodules)
@@ -505,7 +505,7 @@ def test_arm_conditional_execution():
 
 Adding ARM doesn't require modifying:
 - ✅ Core library (`libsailsim/`)
-- ✅ Python bindings (`mapachesail/`)
+- ✅ Python bindings (`mapachespim/`)
 - ✅ Symbol table code
 - ✅ Disassembly code
 - ✅ Console commands

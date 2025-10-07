@@ -1,4 +1,4 @@
-# MapacheSail Test Suite
+# MapacheSPIM Test Suite
 
 Comprehensive unit tests for the Sail RISC-V simulator Python API.
 

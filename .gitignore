@@ -14,15 +14,15 @@ examples/*/matrix_mult
 examples/*/*.o
 examples/*/*.dis
 
-# libsailsim build artifacts
-libsailsim/build/
-libsailsim/*.dylib
-libsailsim/*.so
-libsailsim/*.a
-libsailsim/test_sailsim
+# lib build artifacts
+lib/build/
+lib/*.dylib
+lib/*.so
+lib/*.a
+lib/test_sailsim
 
-# Sail RISC-V build directory (submodule has its own .gitignore)
-sail-riscv/build/
+# Backend build directories (submodules have their own .gitignore)
+backends/*/sail-*/build/
 
 # OS files
 .DS_Store
@@ -43,3 +43,12 @@ __pycache__/
 .pytest_cache/
 venv/
 env/
+dist/
+*.egg
+
+# Temporary/debug files
+*.txt
+!requirements.txt
+!CMakeLists.txt
+fault.txt
+*.log

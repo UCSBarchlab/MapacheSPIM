@@ -1,8 +1,8 @@
-# MapacheSail Implementation Plan
+# MapacheSPIM Implementation Plan
 ## Interactive RISC-V Simulator Using Sail Backend
 
 ### Overview
-Build a Python-based interactive console similar to the original MapacheSim (SPIM-like interface) but using the Sail RISC-V formal specification as the simulation engine. This provides a teaching tool with a formally verified ISA backend.
+Build a Python-based interactive console similar to the original MapacheSPIM (SPIM-like interface) but using the Sail RISC-V formal specification as the simulation engine. This provides a teaching tool with a formally verified ISA backend.
 
 ---
 
@@ -82,7 +82,7 @@ const char* sail_disasm(void* ctx, uint64_t addr);
 3. Handle type conversions (uint64_t ↔ Python int)
 4. Manage context lifecycle
 
-**File:** `mapachesail/sail_backend.py`
+**File:** `mapachespim/sail_backend.py`
 ```python
 import ctypes
 from ctypes import c_void_p, c_char_p, c_uint64, c_int
@@ -113,7 +113,7 @@ class SailSimulator:
 **Goal:** Interactive console that can step through RISC-V programs.
 
 **Tasks:**
-1. Create `MapacheSailConsole(cmd.Cmd)` class
+1. Create `MapacheSPIMConsole(cmd.Cmd)` class
 2. Implement essential commands:
    - `load <elf>` - Load RISC-V ELF file
    - `step [n]` - Execute n instructions
@@ -121,7 +121,7 @@ class SailSimulator:
    - `regs` - Display registers (x0-x31, pc)
    - `mem <addr>` - Display memory at address
 
-**File:** `mapachesail/console.py` (based on `original_console.py`)
+**File:** `mapachespim/console.py` (based on `original_console.py`)
 
 **Deliverable:** Working interactive console for stepping RISC-V ELF files
 
@@ -132,7 +132,7 @@ class SailSimulator:
 
 **Tasks:**
 1. Get all 32 RISC-V registers from Sail
-2. Format register display (like original MapacheSim)
+2. Format register display (like original MapacheSPIM)
 3. Read memory ranges
 4. Display memory in hex dump format
 
@@ -164,7 +164,7 @@ pc = 0x80000050
 
 **Example Output:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x80000000] 0x00000297   auipc x5, 0x0
 ```
 
@@ -241,7 +241,7 @@ pc = 0x80000050
 **Solution:** Access Sail's internal register array or use Sail's trace callbacks
 
 ### Challenge 4: No Assembly Support Initially
-**Problem:** Original MapacheSim assembled code, Sail only runs ELF
+**Problem:** Original MapacheSPIM assembled code, Sail only runs ELF
 **Solution:** Use GNU RISC-V assembler externally, load resulting ELF
 
 ### Challenge 5: Breakpoints
@@ -253,14 +253,14 @@ pc = 0x80000050
 ## File Structure (Proposed)
 
 ```
-MapacheSail/
+MapacheSPIM/
 ├── sail-riscv/              # Git submodule (existing)
 ├── libsailsim/              # C wrapper library
 │   ├── CMakeLists.txt
 │   ├── sailsim.h           # C API header
 │   ├── sailsim_wrapper.cpp # Implementation
 │   └── test_api.c          # C API tests
-├── mapachesail/             # Python package
+├── mapachespim/             # Python package
 │   ├── __init__.py
 │   ├── sail_backend.py     # ctypes bindings
 │   ├── console.py          # Interactive console

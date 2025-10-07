@@ -12,7 +12,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachesail import SailSimulator, StepResult
+from mapachespim import SailSimulator, StepResult
 
 
 class TestSimulatorBasic(unittest.TestCase):

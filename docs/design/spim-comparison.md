@@ -1,14 +1,14 @@
-# MapacheSail vs SPIM: Feature Comparison
+# MapacheSPIM vs SPIM: Feature Comparison
 
 ## Executive Summary
 
-MapacheSail aims to provide a SPIM-like debugging experience for RISC-V programs. This document compares our current functionality to SPIM and identifies gaps for student assembly debugging.
+MapacheSPIM aims to provide a SPIM-like debugging experience for RISC-V programs. This document compares our current functionality to SPIM and identifies gaps for student assembly debugging.
 
 ## Core Functionality Comparison
 
 ### ✅ Features We Have
 
-| Feature | MapacheSail | SPIM | Notes |
+| Feature | MapacheSPIM | SPIM | Notes |
 |---------|-------------|------|-------|
 | Load ELF files | ✅ `load` | ✅ | We load RISC-V ELF, SPIM loads MIPS assembly |
 | Single step | ✅ `step [n]` | ✅ `step [n]` | **BUT: We don't show the instruction!** |
@@ -29,7 +29,7 @@ MapacheSail aims to provide a SPIM-like debugging experience for RISC-V programs
 #### 1. **Step Should Show the Instruction** ⭐ MOST IMPORTANT
 **Current behavior:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x0000000080000000] Executed 1 instruction
 ```
 
@@ -56,7 +56,7 @@ SPIM shows which registers changed after each step. Students need to see:
 
 **Example:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x80000000]  0x00a00293  addi x5, x0, 0xa
   x5 (  t0) : 0x0000000000000000 → 0x000000000000000a  ★
 ```
@@ -75,10 +75,10 @@ We only support addresses: `break 0x80000000`
 
 **Example:**
 ```
-(mapachesail) break main
+(mapachespim) break main
 Breakpoint set at main (0x80000000)
 
-(mapachesail) step
+(mapachespim) step
 [main+0]  0x00a00293  addi x5, x0, 0xa
 ```
 
@@ -121,7 +121,7 @@ watch x10                # Break when a0 changes
 #### 7. **Backtrace / Call Stack**
 Show function call history:
 ```
-(mapachesail) bt
+(mapachespim) bt
 #0  fibonacci+24 at 0x80000030
 #1  main+16 at 0x80000010
 ```
@@ -129,8 +129,8 @@ Show function call history:
 #### 8. **Multiple Display Formats**
 SPIM shows registers in multiple bases (hex, decimal, binary, octal)
 ```
-(mapachesail) regs decimal    # Show in decimal
-(mapachesail) regs binary     # Show in binary
+(mapachespim) regs decimal    # Show in decimal
+(mapachespim) regs binary     # Show in binary
 ```
 
 #### 9. **Print Command with Expressions**
@@ -160,7 +160,7 @@ We could create a TUI (Text UI) with panels using `curses` or `rich`
 #### 12. **Instruction History**
 Keep log of last N instructions executed:
 ```
-(mapachesail) history 10
+(mapachespim) history 10
 Show last 10 instructions executed
 ```
 
@@ -170,7 +170,7 @@ Simulated cycle counts, cache stats (if we add cache model)
 #### 14. **Scripting Support**
 Run commands from a file:
 ```
-(mapachesail) source debug_script.txt
+(mapachespim) source debug_script.txt
 ```
 
 #### 15. **Conditional Breakpoints**
@@ -214,16 +214,16 @@ def do_step(self, arg):
 
 **Output format:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x80000000]  0x00a00293  addi x5, x0, 0xa
 
-(mapachesail) step
+(mapachespim) step
 [0x80000004]  0x01400313  addi x6, x0, 0x14
 ```
 
 **For multiple steps:**
 ```
-(mapachesail) step 5
+(mapachespim) step 5
 [0x80000000]  0x00a00293  addi x5, x0, 0xa
 [0x80000004]  0x01400313  addi x6, x0, 0x14
 [0x80000008]  0x006283b3  add x7, x5, x6
@@ -244,7 +244,7 @@ def do_step(self, arg):
 
 **Data structure:**
 ```python
-class MapacheSailConsole:
+class MapacheSPIMConsole:
     def __init__(self):
         # ...
         self.prev_regs = None  # Track previous register state
@@ -277,7 +277,7 @@ def do_step(self, arg):
 
 **Output:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x80000000]  0x00a00293  addi x5, x0, 0xa
 Register changes:
   x5 (  t0) : 0x0000000000000000 → 0x000000000000000a  ★
@@ -356,19 +356,19 @@ def do_break(self, arg):
 
 **Example:**
 ```
-(mapachesail) info symbols
+(mapachespim) info symbols
 Functions:
   main                 0x80000000
   fibonacci            0x80000050
   __start              0x80000000
 
-(mapachesail) break fibonacci
+(mapachespim) break fibonacci
 Breakpoint set at fibonacci (0x80000050)
 
-(mapachesail) run
+(mapachespim) run
 Breakpoint hit at fibonacci (0x80000050)
 
-(mapachesail) step
+(mapachespim) step
 [fibonacci+0]  0x00a00293  addi x5, x0, 0xa
 ```
 
@@ -411,30 +411,30 @@ Breakpoint hit at fibonacci (0x80000050)
 ### Use Case 1: Debugging a Simple Loop
 **Current experience:**
 ```
-(mapachesail) load fibonacci
-(mapachesail) break 0x80000020
-(mapachesail) run
+(mapachespim) load fibonacci
+(mapachespim) break 0x80000020
+(mapachespim) run
 Breakpoint hit at 0x80000020
-(mapachesail) step
+(mapachespim) step
 [0x0000000080000020] Executed 1 instruction
-(mapachesail) regs
+(mapachespim) regs
 ... 32 lines of registers ...
 ```
 
 **Desired experience:**
 ```
-(mapachesail) load fibonacci
-(mapachesail) break loop
+(mapachespim) load fibonacci
+(mapachespim) break loop
 Breakpoint set at loop (0x80000020)
-(mapachesail) run
+(mapachespim) run
 Breakpoint hit at loop (0x80000020)
 
-(mapachesail) step
+(mapachespim) step
 [loop+0]  0x00a58593  addi x11, x11, 0xa
 Register changes:
   x11 (  a1) : 0x0000000000000000 → 0x000000000000000a  ★
 
-(mapachesail) step
+(mapachespim) step
 [loop+4]  0xfff50513  addi x10, x10, -1
 Register changes:
   x10 (  a0) : 0x0000000000000005 → 0x0000000000000004  ★
@@ -447,21 +447,21 @@ Much clearer what's happening!
 ### Use Case 2: Understanding Function Calls
 **Current:**
 ```
-(mapachesail) step
+(mapachespim) step
 [0x0000000080000010] Executed 1 instruction
-(mapachesail) pc
+(mapachespim) pc
 pc = 0x0000000080000050
 ```
 
 **Desired:**
 ```
-(mapachesail) step
+(mapachespim) step
 [main+16]  0x040000ef  jal ra, fibonacci
 Register changes:
   x1  (  ra) : 0x0000000000000000 → 0x0000000080000014  ★
 Jumped to fibonacci (0x80000050)
 
-(mapachesail) bt
+(mapachespim) bt
 #0  fibonacci at 0x80000050
 #1  main+16 at 0x80000014
 ```
