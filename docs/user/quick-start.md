@@ -108,7 +108,7 @@ Breakpoint hit at main (0x80000030)
 
 ```
 (mapachespim) step
-[0x80000030] <main>  0x13050005  addi x10, x0, 0x5
+[0x80000030] 0x13050005  addi x10, x0, 0x5  <main>
 Register changes:
   x10 (  a0) : 0x0000000000000000 -> 0x0000000000000005  *
 ```
@@ -185,7 +185,7 @@ Much easier than memorizing addresses.
 Single-step automatically shows what changed:
 ```
 (mapachespim) step
-[0x80000000] <_start>  0x9302a000  addi x5, x0, 0xa
+[0x80000000] 0x9302a000  addi x5, x0, 0xa  <_start>
 Register changes:
   x5  (  t0) : 0x0000000000000000 -> 0x000000000000000a  *
 ```
@@ -233,12 +233,12 @@ Breakpoint set at main (0x80000030)
 Breakpoint hit at main (0x80000030)
 
 (mapachespim) step
-[0x80000030] <main>  0x13050005  addi x10, x0, 0x5
+[0x80000030] 0x13050005  addi x10, x0, 0x5  <main>
 Register changes:
   x10 (  a0) : 0x0000000000000000 -> 0x0000000000000005  *
 
 (mapachespim) step
-[0x80000034] <main+4>  0x040000ef  jal ra, fibonacci
+[0x80000034] 0x040000ef  jal ra, fibonacci  <main+4>
 Register changes:
   x1  (  ra) : 0x0000000000000000 -> 0x0000000080000038  *
 

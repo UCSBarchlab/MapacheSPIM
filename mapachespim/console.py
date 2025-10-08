@@ -338,11 +338,11 @@ class MapacheSPIMConsole(cmd.Cmd):
             # Try to show symbol name
             sym, offset = self.sim.addr_to_symbol(pc)
             if sym and offset == 0:
-                print(f'[{pc:#010x}] <{sym}>  0x{instr_hex}  {instr_disasm}')
+                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}>')
             elif sym:
-                print(f'[{pc:#010x}] <{sym}+{offset}>  0x{instr_hex}  {instr_disasm}')
+                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}+{offset}>')
             else:
-                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}')
+                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}')
 
             # Show register changes (only for single step)
             if prev_regs is not None and n_steps == 1:
