@@ -248,6 +248,48 @@ class SailSimulator:
 
         return False
 
+    def check_termination(self, step_result):
+        """
+        Check if program should terminate based on step result
+
+        Checks for:
+        - Syscall exits (syscall 10, 93)
+        - HALT result
+        - ERROR result
+        - tohost write (HTIF completion)
+
+        Args:
+            step_result: Result from step()
+
+        Returns:
+            tuple: (should_terminate: bool, reason: str or None)
+        """
+        # Handle syscall - perform I/O and check for exit
+        if step_result == StepResult.SYSCALL:
+            if self._handle_syscall():
+                return (True, 'syscall_exit')
+
+        # Check for HALT
+        if step_result == StepResult.HALT:
+            return (True, 'halt')
+
+        # Check for ERROR
+        if step_result == StepResult.ERROR:
+            return (True, 'error')
+
+        # Check for tohost write (HTIF mechanism)
+        tohost_addr = self.lookup_symbol('tohost')
+        if tohost_addr is not None:
+            try:
+                tohost_bytes = self.read_mem(tohost_addr, 8)
+                tohost_value = int.from_bytes(tohost_bytes, byteorder='little', signed=False)
+                if tohost_value != 0:
+                    return (True, 'tohost')
+            except Exception:
+                pass
+
+        return (False, None)
+
     def run(self, max_steps=None):
         """
         Run until halt, tohost write, or max_steps reached
@@ -262,9 +304,6 @@ class SailSimulator:
         Returns:
             int: Number of instructions executed
         """
-        # Try to find tohost address for halt detection
-        tohost_addr = self.lookup_symbol('tohost')
-
         steps_executed = 0
 
         while max_steps is None or steps_executed < max_steps:
@@ -272,34 +311,10 @@ class SailSimulator:
             result = self.step()
             steps_executed += 1
 
-            # Handle syscall if detected
-            if result == StepResult.SYSCALL:
-                if self._handle_syscall():
-                    break  # Syscall requested exit
-
-            # Check if step returned HALT
-            if result == StepResult.HALT:
+            # Check for termination (handles syscalls, halt, error, tohost)
+            should_terminate, reason = self.check_termination(result)
+            if should_terminate:
                 break
-
-            # Check if step returned ERROR
-            if result == StepResult.ERROR:
-                break
-
-            # Check if tohost was written (HTIF mechanism)
-            if tohost_addr is not None:
-                try:
-                    # Read tohost (8 bytes for 64-bit word)
-                    tohost_bytes = self.read_mem(tohost_addr, 8)
-                    tohost_value = int.from_bytes(tohost_bytes, byteorder='little', signed=False)
-
-                    # Non-zero value in tohost signals program completion
-                    if tohost_value != 0:
-                        # Program signaled completion via HTIF
-                        break
-                except Exception:
-                    # If reading tohost fails, ignore and continue
-                    # (might not be mapped yet, etc.)
-                    pass
 
         return steps_executed
 

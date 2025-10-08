@@ -423,11 +423,18 @@ class MapacheSPIMConsole(cmd.Cmd):
                 result = self.sim.step()
                 steps_executed += 1
 
-                if result == StepResult.HALT:
-                    print(f'Program halted after {steps_executed} instructions')
-                    break
-                elif result == StepResult.ERROR:
-                    print(f'Execution error at {pc:#018x} after {steps_executed} instructions')
+                # Check for termination using centralized logic
+                should_terminate, reason = self.sim.check_termination(result)
+                if should_terminate:
+                    # Print appropriate termination message
+                    if reason == 'syscall_exit':
+                        print(f'Program exited via syscall after {steps_executed} instructions')
+                    elif reason == 'halt':
+                        print(f'Program halted after {steps_executed} instructions')
+                    elif reason == 'error':
+                        print(f'Execution error at {pc:#018x} after {steps_executed} instructions')
+                    elif reason == 'tohost':
+                        print(f'Program completed (tohost) after {steps_executed} instructions')
                     break
         finally:
             self._running = False
