@@ -4,11 +4,11 @@ Python bindings for the Sail RISC-V simulator.
 
 ## Installation
 
-No installation required - just ensure `libsailsim` is built:
+No installation required - just ensure the C library is built:
 
 ```bash
-cd libsailsim
-mkdir build && cd build
+cd lib
+mkdir -p build && cd build
 cmake ..
 make
 ```
@@ -22,7 +22,7 @@ from mapachespim import SailSimulator
 sim = SailSimulator()
 
 # Load a RISC-V ELF file
-sim.load_elf("examples/fibonacci/fibonacci")
+sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
 # Single-step execution
 print(f"PC: 0x{sim.get_pc():x}")
@@ -107,7 +107,7 @@ with SailSimulator() as sim:
 from mapachespim import SailSimulator, StepResult
 
 sim = SailSimulator()
-sim.load_elf("examples/fibonacci/fibonacci")
+sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
 print(f"Entry: 0x{sim.get_pc():x}")
 

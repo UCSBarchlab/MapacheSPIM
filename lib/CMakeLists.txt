@@ -67,11 +67,13 @@ target_link_libraries(sailsim
     ${GMP_LIB}
 )
 
-# Set output name
+# Set output name and rpath
 set_target_properties(sailsim PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION 0
     OUTPUT_NAME "sailsim"
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR}"
 )
 
 # Install targets
@@ -86,3 +88,7 @@ install(FILES include/sailsim.h DESTINATION include)
 # Test executable (optional)
 add_executable(test_sailsim src/test_sailsim.c)
 target_link_libraries(test_sailsim sailsim)
+set_target_properties(test_sailsim PROPERTIES
+    INSTALL_RPATH_USE_LINK_PATH TRUE
+    BUILD_RPATH "${CMAKE_CURRENT_BINARY_DIR}"
+)

@@ -18,7 +18,7 @@ def test_basic_execution():
     sim = SailSimulator()
 
     print("Loading simple program...")
-    sim.load_elf('examples/test_simple/simple')
+    sim.load_elf('examples/riscv/test_simple/simple')
 
     pc = sim.get_pc()
     print(f"Entry point: {pc:#x}")
@@ -54,7 +54,7 @@ def test_basic_execution():
     # Now test running to completion with a limit
     print("\nResetting and running with step limit...")
     sim.reset()
-    sim.load_elf('examples/test_simple/simple')
+    sim.load_elf('examples/riscv/test_simple/simple')
 
     steps = 0
     max_steps = 100  # Safety limit

@@ -79,12 +79,12 @@ Tests using the `matrix_multiply` example program:
 ## Tested Programs
 
 ### Fibonacci (Recursive)
-- **Path:** `examples/fibonacci/fibonacci`
+- **Path:** `examples/riscv/fibonacci/fibonacci`
 - **Entry:** 0x80000000
 - **Tests:** Single-step, multi-step, run
 
 ### Matrix Multiplication (3x3)
-- **Path:** `examples/matrix_multiply/matrix_mult`
+- **Path:** `examples/riscv/matrix_multiply/matrix_mult`
 - **Entry:** 0x80000000
 - **Tests:** Single-step, multi-step, run
 
@@ -175,7 +175,7 @@ python3 tests/test_console_working.py
 | `status` | 2 tests | ✅ Pass |
 | **Aliases** | 3 tests | ✅ Pass |
 
-#### Test Program: examples/test_simple/simple
+#### Test Program: examples/riscv/test_simple/simple
 
 A deterministic 9-instruction program with documented cycle-by-cycle behavior.
 
@@ -190,7 +190,7 @@ x9  (s1)  = 40  (0x28)
 x10 (a0)  = 42  (0x2a)  - exit code
 ```
 
-**Documentation:** See `examples/test_simple/EXPECTED_BEHAVIOR.md` for complete step-by-step behavior documentation.
+**Documentation:** See `examples/riscv/test_simple/EXPECTED_BEHAVIOR.md` for complete step-by-step behavior documentation.
 
 #### Additional Test Files
 
@@ -202,7 +202,9 @@ x10 (a0)  = 42  (0x2a)  - exit code
 
 **Total API Tests:** 31 (all passing)
 **Total Console Tests:** 24 (all passing)
-**Total:** 55 tests passing
+**Total Symbol Tests:** 24 (all passing)
+**Total Disassembly Tests:** 30 (all passing)
+**Total:** 109 tests passing
 
 **Programs Tested:**
 - fibonacci (recursive calculation)

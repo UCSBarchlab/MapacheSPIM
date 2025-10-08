@@ -18,7 +18,7 @@ from mapachespim.console import MapacheSPIMConsole
 class TestConsoleCommands(unittest.TestCase):
     """Test suite for console commands using test_simple program"""
 
-    SIMPLE_PATH = 'examples/test_simple/simple'
+    SIMPLE_PATH = 'examples/riscv/test_simple/simple'
 
     def setUp(self):
         """Create a fresh console for each test"""

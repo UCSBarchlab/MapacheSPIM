@@ -23,7 +23,7 @@ class TestSymbolTableAPI(unittest.TestCase):
     def setUp(self):
         """Create a fresh simulator for each test"""
         self.sim = SailSimulator()
-        self.sim.load_elf('examples/fibonacci/fibonacci')
+        self.sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
     def test_get_symbols_returns_dict(self):
         """Test get_symbols returns a dictionary"""
@@ -136,7 +136,7 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
     def test_fibonacci_symbols(self):
         """Test fibonacci program has expected symbols"""
         sim = SailSimulator()
-        sim.load_elf('examples/fibonacci/fibonacci')
+        sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         symbols = sim.get_symbols()
         self.assertGreater(len(symbols), 0)
@@ -148,7 +148,7 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
     def test_test_simple_symbols(self):
         """Test test_simple program symbols"""
         sim = SailSimulator()
-        sim.load_elf('examples/test_simple/simple')
+        sim.load_elf('examples/riscv/test_simple/simple')
 
         symbols = sim.get_symbols()
         # Even simple programs may have symbols
@@ -157,7 +157,7 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
     def test_matrix_multiply_symbols(self):
         """Test matrix_multiply program symbols"""
         sim = SailSimulator()
-        sim.load_elf('examples/matrix_multiply/matrix_mult')
+        sim.load_elf('examples/riscv/matrix_multiply/matrix_mult')
 
         symbols = sim.get_symbols()
         self.assertGreater(len(symbols), 0)
@@ -165,10 +165,10 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
     def test_symbols_cleared_on_new_load(self):
         """Test that symbols are replaced when loading new ELF"""
         sim = SailSimulator()
-        sim.load_elf('examples/fibonacci/fibonacci')
+        sim.load_elf('examples/riscv/fibonacci/fibonacci')
         symbols1 = sim.get_symbols()
 
-        sim.load_elf('examples/matrix_multiply/matrix_mult')
+        sim.load_elf('examples/riscv/matrix_multiply/matrix_mult')
         symbols2 = sim.get_symbols()
 
         # Symbols should be different (different programs)
@@ -185,7 +185,7 @@ class TestSymbolsInConsole(unittest.TestCase):
         """Create a fresh console for each test"""
         self.console = MapacheSPIMConsole(verbose=False)
         self.console.stdout = sys.stdout
-        self.console.onecmd('load examples/fibonacci/fibonacci')
+        self.console.onecmd('load examples/riscv/fibonacci/fibonacci')
 
     def test_info_symbols_command(self):
         """Test 'info symbols' command lists symbols"""
@@ -266,7 +266,7 @@ class TestSymbolEdgeCases(unittest.TestCase):
     def test_symbol_with_special_characters(self):
         """Test symbols with special characters in names"""
         sim = SailSimulator()
-        sim.load_elf('examples/fibonacci/fibonacci')
+        sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         symbols = sim.get_symbols()
 
@@ -284,7 +284,7 @@ class TestSymbolSorting(unittest.TestCase):
     def test_symbols_by_address(self):
         """Test getting symbols sorted by address"""
         sim = SailSimulator()
-        sim.load_elf('examples/fibonacci/fibonacci')
+        sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         symbols = sim.get_symbols()
 
@@ -301,7 +301,7 @@ class TestSymbolSorting(unittest.TestCase):
     def test_symbols_by_name(self):
         """Test getting symbols sorted by name"""
         sim = SailSimulator()
-        sim.load_elf('examples/fibonacci/fibonacci')
+        sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         symbols = sim.get_symbols()
 

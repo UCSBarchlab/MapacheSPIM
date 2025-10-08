@@ -42,7 +42,7 @@ class TestFibonacci(unittest.TestCase):
 
     def setUp(self):
         self.sim = SailSimulator()
-        self.elf_path = "examples/fibonacci/fibonacci"
+        self.elf_path = "examples/riscv/fibonacci/fibonacci"
 
     def test_load_fibonacci(self):
         """Test loading fibonacci ELF file"""
@@ -93,7 +93,7 @@ class TestMatrixMultiply(unittest.TestCase):
 
     def setUp(self):
         self.sim = SailSimulator()
-        self.elf_path = "examples/matrix_multiply/matrix_mult"
+        self.elf_path = "examples/riscv/matrix_multiply/matrix_mult"
 
     def test_load_matrix(self):
         """Test loading matrix multiply ELF file"""
@@ -129,7 +129,7 @@ class TestRegisterAccess(unittest.TestCase):
 
     def setUp(self):
         self.sim = SailSimulator()
-        self.sim.load_elf("examples/fibonacci/fibonacci")
+        self.sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
     def test_get_all_registers(self):
         """Test getting all 32 registers"""
@@ -184,7 +184,7 @@ class TestMemoryAccess(unittest.TestCase):
 
     def setUp(self):
         self.sim = SailSimulator()
-        self.sim.load_elf("examples/fibonacci/fibonacci")
+        self.sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
     def test_read_memory_at_pc(self):
         """Test reading memory at program counter"""
@@ -226,7 +226,7 @@ class TestPCAccess(unittest.TestCase):
 
     def setUp(self):
         self.sim = SailSimulator()
-        self.sim.load_elf("examples/fibonacci/fibonacci")
+        self.sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
     def test_get_pc(self):
         """Test getting program counter"""
@@ -254,7 +254,7 @@ class TestReset(unittest.TestCase):
 
     def setUp(self):
         self.sim = SailSimulator()
-        self.sim.load_elf("examples/fibonacci/fibonacci")
+        self.sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
     def test_reset_clears_state(self):
         """Test that reset clears simulator state"""
@@ -289,7 +289,7 @@ class TestEdgeCases(unittest.TestCase):
     def test_run_zero_steps(self):
         """Test running with max_steps=0 (unlimited)"""
         sim = SailSimulator()
-        sim.load_elf("examples/fibonacci/fibonacci")
+        sim.load_elf("examples/riscv/fibonacci/fibonacci")
         # This would run forever, so we don't actually test it
         # Just verify the function signature accepts 0
         # steps = sim.run(max_steps=0)

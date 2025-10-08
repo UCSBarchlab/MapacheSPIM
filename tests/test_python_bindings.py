@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Test script for MapacheSail Python bindings
+Test script for MapacheSPIM Python bindings
 
 Demonstrates basic usage of the SailSimulator class.
 """
 
-from mapachesail import SailSimulator
+from mapachespim import SailSimulator
 
 
 def main():
     print("=" * 60)
-    print("MapacheSail Python Bindings Test")
+    print("MapacheSPIM Python Bindings Test")
     print("=" * 60)
     print()
 
@@ -21,7 +21,7 @@ def main():
     print()
 
     # Load ELF file
-    elf_path = "examples/fibonacci/fibonacci"
+    elf_path = "examples/riscv/fibonacci/fibonacci"
     print(f"2. Loading ELF file: {elf_path}")
     sim.load_elf(elf_path)
     print("   ✓ ELF loaded successfully!")

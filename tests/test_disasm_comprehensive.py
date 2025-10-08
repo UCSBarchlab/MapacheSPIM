@@ -20,7 +20,7 @@ class TestDisassemblyAPI(unittest.TestCase):
     def setUp(self):
         """Create a fresh simulator for each test"""
         self.sim = SailSimulator()
-        self.sim.load_elf('examples/test_simple/simple')
+        self.sim.load_elf('examples/riscv/test_simple/simple')
 
     def test_disasm_basic(self):
         """Test basic disassembly of first instruction"""
@@ -140,7 +140,7 @@ class TestDisassemblyConsole(unittest.TestCase):
         """Create a fresh console for each test"""
         self.console = MapacheSPIMConsole(verbose=False)
         self.console.stdout = sys.stdout
-        self.console.onecmd('load examples/test_simple/simple')
+        self.console.onecmd('load examples/riscv/test_simple/simple')
 
     def test_disasm_command_basic(self):
         """Test basic disasm command"""
@@ -201,7 +201,7 @@ class TestDisassemblyIntegration(unittest.TestCase):
     def setUp(self):
         """Create a fresh simulator for each test"""
         self.sim = SailSimulator()
-        self.sim.load_elf('examples/test_simple/simple')
+        self.sim.load_elf('examples/riscv/test_simple/simple')
 
     def test_disasm_at_pc(self):
         """Test disassembling instruction at current PC"""
@@ -270,7 +270,7 @@ class TestDisassemblyEdgeCases(unittest.TestCase):
     def setUp(self):
         """Create a fresh simulator for each test"""
         self.sim = SailSimulator()
-        self.sim.load_elf('examples/test_simple/simple')
+        self.sim.load_elf('examples/riscv/test_simple/simple')
 
     def test_disasm_unaligned_address(self):
         """Test disassembly of unaligned address"""
@@ -324,7 +324,7 @@ class TestDisassemblyWithDifferentPrograms(unittest.TestCase):
     def test_disasm_fibonacci(self):
         """Test disassembly with fibonacci program"""
         sim = SailSimulator()
-        sim.load_elf('examples/fibonacci/fibonacci')
+        sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         # Disassemble entry point
         pc = sim.get_pc()
@@ -336,7 +336,7 @@ class TestDisassemblyWithDifferentPrograms(unittest.TestCase):
     def test_disasm_matrix_multiply(self):
         """Test disassembly with matrix_multiply program"""
         sim = SailSimulator()
-        sim.load_elf('examples/matrix_multiply/matrix_mult')
+        sim.load_elf('examples/riscv/matrix_multiply/matrix_mult')
 
         # Disassemble entry point
         pc = sim.get_pc()
@@ -348,11 +348,11 @@ class TestDisassemblyWithDifferentPrograms(unittest.TestCase):
     def test_disasm_different_entry_points(self):
         """Test that different programs have different entry point disassembly"""
         sim1 = SailSimulator()
-        sim1.load_elf('examples/fibonacci/fibonacci')
+        sim1.load_elf('examples/riscv/fibonacci/fibonacci')
         disasm1 = sim1.disasm(sim1.get_pc())
 
         sim2 = SailSimulator()
-        sim2.load_elf('examples/matrix_multiply/matrix_mult')
+        sim2.load_elf('examples/riscv/matrix_multiply/matrix_mult')
         disasm2 = sim2.disasm(sim2.get_pc())
 
         # Entry points should disassemble to something

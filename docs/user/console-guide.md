@@ -9,7 +9,7 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 ./mapachespim_console
 
 # Or load a program on startup
-./mapachespim_console examples/fibonacci/fibonacci
+./mapachespim_console examples/riscv/fibonacci/fibonacci
 ```
 
 ## Basic Commands
@@ -17,7 +17,7 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 ### File Loading
 - `load <file>` - Load a RISC-V ELF executable
   ```
-  (mapachespim) load examples/fibonacci/fibonacci
+  (mapachespim) load examples/riscv/fibonacci/fibonacci
   ```
 
 ### Execution
@@ -99,8 +99,8 @@ $ ./mapachespim_console
 Sail RISC-V simulator initialized.
 Welcome to MapacheSPIM. Type help or ? to list commands.
 
-(mapachespim) load examples/fibonacci/fibonacci
-✓ Loaded examples/fibonacci/fibonacci
+(mapachespim) load examples/riscv/fibonacci/fibonacci
+✓ Loaded examples/riscv/fibonacci/fibonacci
 Entry point: 0x0000000080000000
 
 (mapachespim) step
@@ -157,10 +157,10 @@ The console shows both numeric (x0-x31) and ABI names:
 ./mapachespim_console
 
 # Load file on startup
-./mapachespim_console examples/fibonacci/fibonacci
+./mapachespim_console examples/riscv/fibonacci/fibonacci
 
 # Quiet mode (less verbose)
-./mapachespim_console -q examples/fibonacci/fibonacci
+./mapachespim_console -q examples/riscv/fibonacci/fibonacci
 ```
 
 ## Keyboard Shortcuts
@@ -210,11 +210,11 @@ MapacheSPIM is similar to SPIM but has key differences:
 ## Troubleshooting
 
 **Console won't start:**
-- Make sure libsailsim is built: `cd libsailsim/build && cmake .. && make`
+- Make sure the C library is built: `cd lib/build && cmake .. && make`
 - Check Python path includes mapachespim package
 
 **Can't load ELF file:**
-- Verify file is RISC-V ELF: `file examples/fibonacci/fibonacci`
+- Verify file is RISC-V ELF: `file examples/riscv/fibonacci/fibonacci`
 - Check file path is correct
 
 **Breakpoint not hit:**

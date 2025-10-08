@@ -41,14 +41,18 @@ cd backends/riscv/sail-riscv
 cd ../../..
 
 # Build C library
-cd libsailsim
+cd lib
 mkdir -p build && cd build
 cmake ..
 make
 cd ../..
 
+# Create virtual environment (recommended)
+python3 -m venv venv
+source venv/bin/activate
+
 # Install Python package
-pip3 install -e .
+pip install -e .
 
 # Verify installation
 mapachespim --version
@@ -290,7 +294,7 @@ gcc --version      # Any recent version
 
 Build the C library first:
 ```bash
-cd libsailsim/build
+cd lib/build
 cmake ..
 make
 cd ../..

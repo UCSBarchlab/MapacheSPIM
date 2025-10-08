@@ -20,7 +20,7 @@ def test_console_disasm():
     console.stdout = sys.stdout
 
     # Load test program
-    console.onecmd('load examples/test_simple/simple')
+    console.onecmd('load examples/riscv/test_simple/simple')
     print()
 
     # Test disasm command
