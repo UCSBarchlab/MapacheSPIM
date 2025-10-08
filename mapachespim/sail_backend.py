@@ -181,17 +181,56 @@ class SailSimulator:
         result = self._lib.sailsim_step(self._ctx)
         return StepResult(result)
 
-    def run(self, max_steps=0):
+    def run(self, max_steps=None):
         """
-        Run until halt or max_steps reached
+        Run until halt, tohost write, or max_steps reached
+
+        This method implements HTIF (Host-Target Interface) tohost detection.
+        When a program writes a non-zero value to the 'tohost' symbol, it
+        signals program completion and this method returns.
 
         Args:
-            max_steps (int): Maximum number of instructions to execute (0 = unlimited)
+            max_steps (int, optional): Maximum number of instructions to execute.
+                                      If None, runs until halt or tohost write.
 
         Returns:
             int: Number of instructions executed
         """
-        return self._lib.sailsim_run(self._ctx, max_steps)
+        # Try to find tohost address for halt detection
+        tohost_addr = self.lookup_symbol('tohost')
+
+        steps_executed = 0
+
+        while max_steps is None or steps_executed < max_steps:
+            # Execute one instruction
+            result = self.step()
+            steps_executed += 1
+
+            # Check if step returned HALT
+            if result == StepResult.HALT:
+                break
+
+            # Check if step returned ERROR
+            if result == StepResult.ERROR:
+                break
+
+            # Check if tohost was written (HTIF mechanism)
+            if tohost_addr is not None:
+                try:
+                    # Read tohost (8 bytes for 64-bit word)
+                    tohost_bytes = self.read_mem(tohost_addr, 8)
+                    tohost_value = int.from_bytes(tohost_bytes, byteorder='little', signed=False)
+
+                    # Non-zero value in tohost signals program completion
+                    if tohost_value != 0:
+                        # Program signaled completion via HTIF
+                        break
+                except Exception:
+                    # If reading tohost fails, ignore and continue
+                    # (might not be mapped yet, etc.)
+                    pass
+
+        return steps_executed
 
     def get_pc(self):
         """Get the program counter"""

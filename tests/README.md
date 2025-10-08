@@ -206,9 +206,56 @@ x10 (a0)  = 42  (0x2a)  - exit code
 **Total Console Tests:** 38 (all passing)
 **Total Symbol Tests:** 24 (all passing)
 **Total Disassembly Tests:** 30 (all passing)
-**Total:** 123 tests passing
+**Total Correctness Tests:** 10 (all passing)
+**Total:** 133 tests passing
 
 **Programs Tested:**
 - fibonacci (recursive calculation)
 - matrix_multiply (3x3 matrices)
 - test_simple (deterministic 9-instruction program)
+
+---
+
+## Program Correctness Tests
+
+### test_program_correctness.py
+**Critical validation tests** - 10 tests verifying programs produce correct results
+
+Status: All 10 tests passing
+
+```bash
+# Run program correctness tests
+python3 tests/test_program_correctness.py
+```
+
+#### Test Classes
+
+| Test Class | Tests | Status | Description |
+|------------|-------|--------|-------------|
+| `TestFibonacciCorrectness` | 4 tests | Pass | Verifies Fibonacci(7) = 13 |
+| `TestToHostMechanism` | 2 tests | Pass | Verifies HTIF exit mechanism |
+| `TestMatrixMultiplyCorrectness` | 2 tests | Pass | Verifies matrix result correct |
+| `TestProgramCompletion` | 2 tests | Pass | Verifies completion detection |
+
+#### Key Validations
+
+**Fibonacci Correctness:**
+- Fibonacci(7) returns 13 (correct result)
+- Program completes in ~462 steps (not infinite loop)
+- Result written to memory correctly
+- tohost mechanism works
+
+**Matrix Multiply Correctness:**
+- Computes correct 3x3 result matrix
+- All 9 elements verified individually
+- Completes in ~663 steps
+
+**Expected Results:**
+```
+Fibonacci(7) = 13
+Matrix C = [[30, 24, 18], [84, 69, 54], [138, 114, 90]]
+```
+
+These tests verify the simulator's HTIF (Host-Target Interface) tohost detection
+mechanism, which allows programs to signal completion by writing to the tohost
+symbol. Without this, programs would run indefinitely in their exit loops.

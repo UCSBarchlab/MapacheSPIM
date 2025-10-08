@@ -144,8 +144,9 @@ Goodbye!
 python3 tests/test_console_working.py      # Console tests (38 tests)
 python3 tests/test_disasm_comprehensive.py # Disassembly tests (30 tests)
 python3 tests/test_symbols.py              # Symbol tests (24 tests)
+python3 tests/test_program_correctness.py  # Correctness tests (10 tests)
 
-# All 123 tests passing
+# All 133 tests passing
 ```
 
 ## License
