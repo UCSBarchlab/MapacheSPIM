@@ -13,6 +13,12 @@ from pathlib import Path
 
 from .sail_backend import SailSimulator, StepResult
 
+try:
+    from elftools.elf.elffile import ELFFile
+    ELFTOOLS_AVAILABLE = True
+except ImportError:
+    ELFTOOLS_AVAILABLE = False
+
 
 def _chunk_list(lst, n):
     """Chunk a list into sublists of length n."""
@@ -441,44 +447,41 @@ class MapacheSPIMConsole(cmd.Cmd):
         """Display memory contents in hex dump format
 
         Usage:
-            mem <address> [length]
+            mem <address|section> [length]
 
-        Displays memory contents starting at the given address in
-        hexadecimal format, grouped by 4-byte words. Default length
-        is 256 bytes if not specified.
+        Displays memory contents starting at the given address or section
+        in hexadecimal format with ASCII sidebar. Default length is 256
+        bytes if not specified.
 
         Arguments:
             address - Memory address in hex (0x...) or decimal
+            section - ELF section name (e.g., .text, .data, .rodata)
             length  - Number of bytes to display (optional, default=256)
 
         Examples:
-            mem 0x80000000          # Show 256 bytes from 0x80000000
+            mem 0x80000000          # Show 256 bytes from address
+            mem .data               # Show .data section
+            mem .rodata             # Show read-only data section
             mem 0x80000000 64       # Show 64 bytes
-            mem 0x80000000 16       # Show just 16 bytes (4 words)
 
-        Common Addresses:
-            0x80000000 - Typical code (.text) segment start
-            0x83eff000 - Near stack area
-            pc         - Use 'pc' command first to find current PC
+        Common Sections:
+            .text   - Executable code
+            .data   - Initialized data
+            .rodata - Read-only data (strings, constants)
+            .bss    - Uninitialized data
 
         Tips:
-            - Use to examine code bytes at PC
-            - Check stack contents around SP
-            - Verify data was written correctly
-            - Each line shows 16 bytes (4 words of 4 bytes each)
+            - Use 'info sections' to see all available sections
+            - ASCII sidebar helps spot strings in data
+            - Each line shows 16 bytes with hex and ASCII
+            - Section names are shortcuts to their addresses
         """
         if not arg:
-            self.print_error('Error: Please specify an address (e.g., "mem 0x80000000").')
+            self.print_error('Error: Please specify an address or section (e.g., "mem 0x80000000" or "mem .data").')
             return
 
         parts = arg.split()
-
-        # Parse address
-        try:
-            addr = int(parts[0], 0)  # Auto-detect base (0x for hex, etc.)
-        except ValueError:
-            self.print_error(f'Error: Invalid address "{parts[0]}".')
-            return
+        addr_or_section = parts[0]
 
         # Parse length (default 256 bytes)
         length = 256
@@ -492,6 +495,47 @@ class MapacheSPIMConsole(cmd.Cmd):
                 self.print_error(f'Error: Invalid length "{parts[1]}".')
                 return
 
+        # Check if it's a section name (starts with .)
+        if addr_or_section.startswith('.'):
+            if not ELFTOOLS_AVAILABLE:
+                self.print_error('Error: pyelftools not available. Install with: pip install pyelftools')
+                return
+
+            if not self.loaded_file:
+                self.print_error('Error: No program loaded.')
+                return
+
+            # Look up section
+            try:
+                with open(self.loaded_file, 'rb') as f:
+                    elf = ELFFile(f)
+                    section = elf.get_section_by_name(addr_or_section)
+                    if not section:
+                        self.print_error(f'Error: Section "{addr_or_section}" not found. Use "info sections" to see available sections.')
+                        return
+
+                    addr = section['sh_addr']
+                    section_size = section['sh_size']
+
+                    if addr == 0:
+                        self.print_error(f'Error: Section "{addr_or_section}" is not loaded in memory (address is 0).')
+                        return
+
+                    # Limit length to section size if not specified
+                    if len(parts) == 1:  # No length given
+                        length = min(length, section_size)
+
+            except Exception as e:
+                self.print_error(f'Error reading section: {e}')
+                return
+        else:
+            # Parse as address
+            try:
+                addr = int(addr_or_section, 0)  # Auto-detect base (0x for hex, etc.)
+            except ValueError:
+                self.print_error(f'Error: Invalid address "{addr_or_section}".')
+                return
+
         # Read and display memory
         try:
             data = self.sim.read_mem(addr, length)
@@ -500,7 +544,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             self.print_error(f'Error reading memory: {e}')
 
     def _print_memory(self, start_addr, data, width=16):
-        """Pretty-print memory contents in hex dump format"""
+        """Pretty-print memory contents in hex dump format with ASCII sidebar"""
         print()
         for offset in range(0, len(data), width):
             addr = start_addr + offset
@@ -511,7 +555,18 @@ class MapacheSPIMConsole(cmd.Cmd):
             hex_groups = [' '.join(chunk) for chunk in _chunk_list(hex_bytes, 4)]
             hex_row = '  '.join(hex_groups)
 
-            print(f'{addr:#010x}:  {hex_row}')
+            # ASCII sidebar - show printable chars, '.' for non-printable
+            ascii_str = ''.join(chr(b) if 32 <= b < 127 else '.' for b in row)
+
+            # Pad hex if row is incomplete
+            if len(row) < width:
+                # Calculate padding needed
+                missing_bytes = width - len(row)
+                hex_row += '   ' * missing_bytes  # 3 chars per missing byte
+                if missing_bytes >= 4:  # Account for group separator
+                    hex_row += '  ' * (missing_bytes // 4)
+
+            print(f'{addr:#010x}:  {hex_row}  |{ascii_str}|')
         print()
 
     def do_disasm(self, arg):
@@ -640,27 +695,30 @@ class MapacheSPIMConsole(cmd.Cmd):
         Usage:
             info breakpoints
             info symbols
+            info sections
 
         Displays information about the current simulator state.
-        Supports viewing breakpoints and symbol table.
+        Supports viewing breakpoints, symbol table, and ELF sections.
 
         Arguments:
             breakpoints - List all set breakpoints (can abbreviate as 'break')
             symbols     - List all symbols from symbol table (can abbreviate as 'sym')
+            sections    - List all ELF sections (can abbreviate as 'sec')
 
         Examples:
             info breakpoints        # List all breakpoints
             info break              # Same, abbreviated
             info symbols            # List all symbols
             info sym                # Same, abbreviated
-            break 0x80000010        # Set a breakpoint
-            info breakpoints        # See it in the list
+            info sections           # List all ELF sections
+            info sec                # Same, abbreviated
 
         Tips:
             - Shows breakpoints sorted by address
             - Symbols are listed with their addresses
+            - Sections show address, size, and type
+            - Use section names with 'mem' (e.g., mem .data)
             - Each breakpoint is numbered for reference
-            - Use 'delete <address>' to remove specific breakpoints
         """
         if arg == 'breakpoints' or arg == 'break':
             if not self.breakpoints:
@@ -695,8 +753,52 @@ class MapacheSPIMConsole(cmd.Cmd):
             for name, addr in sorted_symbols:
                 print(f'  {addr:#010x}  {name}')
             print()
+        elif arg == 'sections' or arg == 'sec':
+            if not self.loaded_file:
+                print('No program loaded.')
+                return
+
+            if not ELFTOOLS_AVAILABLE:
+                self.print_error('Error: pyelftools not available. Install with: pip install pyelftools')
+                return
+
+            try:
+                with open(self.loaded_file, 'rb') as f:
+                    elf = ELFFile(f)
+
+                    print()
+                    print(f"ELF Sections:")
+                    print(f"{'Name':<20} {'Address':>18} {'Size':>12}  {'Flags'}")
+                    print("-" * 70)
+
+                    for section in elf.iter_sections():
+                        name = section.name
+                        addr = section['sh_addr']
+                        size = section['sh_size']
+                        flags = section['sh_flags']
+
+                        # Decode flags
+                        flag_str = ""
+                        if flags & 0x1:  # SHF_WRITE
+                            flag_str += "W"
+                        if flags & 0x2:  # SHF_ALLOC
+                            flag_str += "A"
+                        if flags & 0x4:  # SHF_EXECINSTR
+                            flag_str += "X"
+
+                        # Only show allocated sections (those loaded in memory)
+                        if addr > 0:
+                            print(f"{name:<20} {addr:#18x} {size:>12}  {flag_str}")
+
+                    print()
+                    print("Flags: W=Write, A=Alloc, X=Execute")
+                    print("Use 'mem <section>' to view section contents (e.g., mem .data)")
+                    print()
+
+            except Exception as e:
+                self.print_error(f'Error reading ELF sections: {e}')
         else:
-            self.print_error('Usage: info [breakpoints|symbols]')
+            self.print_error('Usage: info [breakpoints|symbols|sections]')
 
     def do_delete(self, arg):
         """Delete a specific breakpoint

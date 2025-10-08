@@ -38,6 +38,6 @@ setup(
         ],
     },
     install_requires=[
-        # No external dependencies - only uses standard library
+        "pyelftools>=0.29",  # ELF file parsing for section inspection
     ],
 )
