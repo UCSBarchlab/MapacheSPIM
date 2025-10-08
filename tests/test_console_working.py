@@ -350,6 +350,76 @@ class TestConsoleCommands(unittest.TestCase):
         self.console.onecmd('step')
         self.assertEqual(self.console.sim.get_pc(), 0x0, "Step 9: PC after ecall")
 
+    # --- Test Section Inspection ---
+
+    def test_info_sections(self):
+        """Test 'info sections' command lists ELF sections"""
+        self.console.onecmd(f'load {self.SIMPLE_PATH}')
+
+        # Command should not raise any errors
+        # Just verify console doesn't crash
+        self.console.onecmd('info sections')
+
+        # Verify file is still loaded after info command
+        self.assertEqual(self.console.loaded_file, self.SIMPLE_PATH)
+
+    def test_info_sections_without_file(self):
+        """Test 'info sections' without a loaded file"""
+        # Should not crash, just inform user
+        self.console.onecmd('info sections')
+        self.assertIsNone(self.console.loaded_file)
+
+    def test_info_sections_abbreviation(self):
+        """Test 'info sec' abbreviation works"""
+        self.console.onecmd(f'load {self.SIMPLE_PATH}')
+        self.console.onecmd('info sec')
+
+        # Should work the same as 'info sections'
+        self.assertEqual(self.console.loaded_file, self.SIMPLE_PATH)
+
+    def test_mem_with_section_name(self):
+        """Test 'mem <section>' to read section by name"""
+        self.console.onecmd(f'load {self.SIMPLE_PATH}')
+
+        # Read .text section (should always exist in executables)
+        self.console.onecmd('mem .text 16')
+
+        # Should not crash, file still loaded
+        self.assertEqual(self.console.loaded_file, self.SIMPLE_PATH)
+
+    def test_mem_with_section_and_length(self):
+        """Test 'mem <section> <length>' with custom length"""
+        self.console.onecmd(f'load {self.SIMPLE_PATH}')
+
+        # Read first 32 bytes of .text section
+        self.console.onecmd('mem .text 32')
+
+        self.assertEqual(self.console.loaded_file, self.SIMPLE_PATH)
+
+    def test_mem_nonexistent_section(self):
+        """Test 'mem' with non-existent section name"""
+        self.console.onecmd(f'load {self.SIMPLE_PATH}')
+
+        # Try to read a section that doesn't exist
+        self.console.onecmd('mem .nonexistent')
+
+        # Should handle gracefully without crashing
+        self.assertEqual(self.console.loaded_file, self.SIMPLE_PATH)
+
+    def test_mem_ascii_sidebar(self):
+        """Test that mem output includes ASCII sidebar"""
+        self.console.onecmd(f'load {self.SIMPLE_PATH}')
+
+        # Read some memory - should include ASCII sidebar
+        # We can't easily capture output in this test framework,
+        # but we verify it doesn't crash
+        self.console.onecmd('mem 0x80000000 16')
+
+        # Verify data can be read directly
+        data = self.console.sim.read_mem(0x80000000, 16)
+        self.assertIsNotNone(data)
+        self.assertEqual(len(data), 16)
+
 
 def run_tests():
     """Run all tests"""

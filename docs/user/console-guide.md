@@ -52,13 +52,15 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
   pc = 0x0000000080000004
   ```
 
-- `mem <addr> [len]` - Display memory contents (default 256 bytes)
+- `mem <addr|section> [len]` - Display memory contents with ASCII sidebar (default 256 bytes)
   ```
-  (mapachespim) mem 0x80000000
-  (mapachespim) mem 0x80000000 64    # Show 64 bytes
+  (mapachespim) mem 0x80000000           # By address
+  (mapachespim) mem 0x80000000 64        # Show 64 bytes
+  (mapachespim) mem .text                # By section name
+  (mapachespim) mem .data 128            # Section with length
 
-  0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08
-  0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07
+  0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08  |................|
+  0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07  |......@.........|
   ...
   ```
 
@@ -76,6 +78,32 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
   Breakpoints:
     1. 0x0000000080000010
     2. 0x0000000080000100
+  ```
+
+- `info symbols` - List all symbols from symbol table (alias: `info sym`)
+  ```
+  (mapachespim) info symbols
+
+  Symbols (22 total):
+    0x80000000  _start
+    0x80000030  main
+    0x80000038  fibonacci
+    ...
+  ```
+
+- `info sections` - List all ELF sections (alias: `info sec`)
+  ```
+  (mapachespim) info sections
+
+  ELF Sections:
+  Name                            Address         Size  Flags
+  ----------------------------------------------------------------------
+  .text                        0x80000000         2048  AX
+  .data                        0x80001000          256  WA
+  .rodata                      0x80001100          128  A
+
+  Flags: W=Write, A=Alloc, X=Execute
+  Use 'mem <section>' to view section contents (e.g., mem .data)
   ```
 
 - `delete <addr>` - Remove breakpoint at address
@@ -124,8 +152,8 @@ PC = 0x00000000800000f0
 
 (mapachespim) mem 0x80000000 32
 
-0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08
-0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07
+0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08  |................|
+0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07  |......@.........|
 
 (mapachespim) quit
 Goodbye!
@@ -187,10 +215,13 @@ The console shows both numeric (x0-x31) and ABI names:
    regs              # Check arguments in a0-a7
    ```
 
-3. **Memory inspection**: Use hex addresses
+3. **Memory inspection**: Use hex addresses or section names
    ```
-   mem 0x80000000    # Code section
-   mem 0x83efffe0    # Stack area
+   mem 0x80000000    # By address
+   mem .text         # Code section
+   mem .data         # Data section
+   mem .rodata       # Read-only data (strings, constants)
+   info sections     # List all available sections
    ```
 
 4. **Single-stepping**: Use `step n` for multiple steps
