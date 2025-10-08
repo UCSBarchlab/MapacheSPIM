@@ -1,20 +1,36 @@
 # MapacheSPIM Test Suite
 
-Comprehensive unit tests for the Sail RISC-V simulator Python API.
+Comprehensive unit tests for the MapacheSPIM simulator.
 
 ## Running Tests
 
+**Run all main test suites:**
+
 ```bash
-# Run all tests
-python3 tests/test_simulator.py
+# Run each test suite individually (137 tests total)
+python3 tests/test_simulator.py              # API tests (31 tests)
+python3 tests/test_console_working.py        # Console tests (38 tests)
+python3 tests/test_disasm_comprehensive.py   # Disassembly tests (30 tests)
+python3 tests/test_symbols.py                # Symbol tests (24 tests)
+python3 tests/test_program_correctness.py    # Correctness tests (10 tests)
+python3 tests/test_io_syscalls.py            # I/O syscall tests (4 tests)
+```
 
-# Run with verbose output
+**Run with verbose output:**
+
+```bash
 python3 tests/test_simulator.py -v
+```
 
-# Run specific test class
+**Run specific test class:**
+
+```bash
 python3 -m unittest tests.test_simulator.TestFibonacci
+```
 
-# Run specific test
+**Run specific test:**
+
+```bash
 python3 -m unittest tests.test_simulator.TestFibonacci.test_fibonacci_single_step
 ```
 
