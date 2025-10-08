@@ -45,7 +45,7 @@ SAIL_SIM = ../sail-riscv/build/c_emulator/sail_riscv_sim
 # ============================================================================
 
 # Default target: build all examples
-all: matrix_multiply/matrix_mult fibonacci/fibonacci
+all: matrix_multiply/matrix_mult fibonacci/fibonacci hello_world/hello
 
 # Matrix multiplication example
 matrix_multiply/matrix_mult: matrix_multiply/matrix_mult.o linker.ld
@@ -69,6 +69,18 @@ fibonacci/fibonacci: fibonacci/fibonacci.o linker.ld
 
 fibonacci/fibonacci.o: fibonacci/fibonacci.s
 	@echo "Assembling fibonacci program..."
+	$(AS) $(ASFLAGS) -o $@ $<
+
+# Hello World example
+hello_world/hello: hello_world/hello.o linker.ld
+	@echo "Linking hello world program..."
+	$(LD) $(LDFLAGS) -o $@ $<
+	@echo "Generating disassembly for hello world..."
+	$(OBJDUMP) -d $@ > hello_world/hello.dis
+	@echo "Hello world build complete!"
+
+hello_world/hello.o: hello_world/hello.s
+	@echo "Assembling hello world program..."
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # ============================================================================
@@ -105,6 +117,7 @@ clean:
 	@echo "Cleaning build artifacts..."
 	rm -f matrix_multiply/*.o matrix_multiply/matrix_mult matrix_multiply/*.dis
 	rm -f fibonacci/*.o fibonacci/fibonacci fibonacci/*.dis
+	rm -f hello_world/*.o hello_world/hello hello_world/*.dis
 	@echo "Clean complete!"
 
 # Show disassembly for matrix multiplication

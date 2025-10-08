@@ -30,6 +30,7 @@ typedef enum {
     SAILSIM_STEP_OK = 0,           /**< Step completed successfully */
     SAILSIM_STEP_HALT = 1,         /**< Execution halted (HTIF done) */
     SAILSIM_STEP_WAITING = 2,      /**< Processor is waiting */
+    SAILSIM_STEP_SYSCALL = 3,      /**< Syscall instruction executed */
     SAILSIM_STEP_ERROR = -1        /**< Error occurred during step */
 } sailsim_step_result_t;
 

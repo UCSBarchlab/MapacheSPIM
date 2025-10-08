@@ -15,6 +15,7 @@ class StepResult(IntEnum):
     OK = 0
     HALT = 1
     WAITING = 2
+    SYSCALL = 3
     ERROR = -1
 
 
@@ -181,13 +182,78 @@ class SailSimulator:
         result = self._lib.sailsim_step(self._ctx)
         return StepResult(result)
 
+    def _handle_syscall(self):
+        """
+        Handle SPIM-compatible syscalls
+
+        Returns:
+            bool: True if program should exit, False otherwise
+        """
+        # Get syscall number from a7
+        syscall_num = self.get_reg(17)  # a7 = x17
+
+        if syscall_num == 1:
+            # print_int - Print integer in a0
+            value = self.get_reg(10)  # a0 = x10
+            # Convert to signed 64-bit for proper display
+            if value & (1 << 63):
+                value = value - (1 << 64)
+            print(value, end='')
+
+        elif syscall_num == 4:
+            # print_string - Print null-terminated string at address in a0
+            addr = self.get_reg(10)  # a0 = x10
+            chars = []
+            try:
+                while True:
+                    byte = self.read_mem(addr, 1)[0]
+                    if byte == 0:
+                        break
+                    chars.append(chr(byte))
+                    addr += 1
+                    if len(chars) > 4096:  # Safety limit
+                        break
+                print(''.join(chars), end='')
+            except Exception:
+                pass
+
+        elif syscall_num == 5:
+            # read_int - Read integer from stdin, return in a0
+            try:
+                value = int(input())
+                self.set_reg(10, value & 0xFFFFFFFFFFFFFFFF)
+            except Exception:
+                self.set_reg(10, 0)
+
+        elif syscall_num == 10:
+            # exit - Terminate program
+            return True
+
+        elif syscall_num == 11:
+            # print_char - Print character in a0
+            char_code = self.get_reg(10) & 0xFF
+            print(chr(char_code), end='')
+
+        elif syscall_num == 12:
+            # read_char - Read character from stdin, return in a0
+            try:
+                char = input()[0] if input() else '\0'
+                self.set_reg(10, ord(char))
+            except Exception:
+                self.set_reg(10, 0)
+
+        elif syscall_num == 93:
+            # exit_code - Exit with code in a0
+            return True
+
+        return False
+
     def run(self, max_steps=None):
         """
         Run until halt, tohost write, or max_steps reached
 
-        This method implements HTIF (Host-Target Interface) tohost detection.
-        When a program writes a non-zero value to the 'tohost' symbol, it
-        signals program completion and this method returns.
+        This method implements HTIF (Host-Target Interface) tohost detection
+        and SPIM-compatible syscall emulation.
 
         Args:
             max_steps (int, optional): Maximum number of instructions to execute.
@@ -205,6 +271,11 @@ class SailSimulator:
             # Execute one instruction
             result = self.step()
             steps_executed += 1
+
+            # Handle syscall if detected
+            if result == StepResult.SYSCALL:
+                if self._handle_syscall():
+                    break  # Syscall requested exit
 
             # Check if step returned HALT
             if result == StepResult.HALT:

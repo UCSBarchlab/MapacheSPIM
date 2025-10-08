@@ -221,6 +221,15 @@ sailsim_step_result_t sailsim_step(sailsim_context_t* ctx) {
     }
 
     try {
+        // Check if current instruction is ecall (RISC-V syscall)
+        // ecall encoding: 0x00000073
+        bool is_syscall = false;
+        uint64_t pc = get_sbits_value(zPC);
+        uint32_t instr_word = 0;
+        if (sailsim_read_mem(ctx, pc, &instr_word, 4)) {
+            is_syscall = (instr_word == 0x00000073);
+        }
+
         // Create Sail integer for step number
         sail_int step_num;
         CREATE(sail_int)(&step_num);
@@ -240,6 +249,20 @@ sailsim_step_result_t sailsim_step(sailsim_context_t* ctx) {
             ctx->htif_done = true;
             ctx->htif_exit_code = zhtif_exit_code;
             return SAILSIM_STEP_HALT;
+        }
+
+        // Handle syscall detection
+        if (is_syscall && !is_waiting) {
+            // Sail executed ecall and trapped (PC jumped to trap handler)
+            // For user-level syscall emulation, we need to skip the trap
+            // and return to the instruction after ecall
+            //
+            // RISC-V: ecall is always 4 bytes (even with C extension)
+            // This is ISA-specific knowledge that belongs in the backend
+            uint64_t return_pc = pc + 4;
+            sailsim_set_pc(ctx, return_pc);
+
+            return SAILSIM_STEP_SYSCALL;
         }
 
         return is_waiting ? SAILSIM_STEP_WAITING : SAILSIM_STEP_OK;

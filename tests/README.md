@@ -207,12 +207,14 @@ x10 (a0)  = 42  (0x2a)  - exit code
 **Total Symbol Tests:** 24 (all passing)
 **Total Disassembly Tests:** 30 (all passing)
 **Total Correctness Tests:** 10 (all passing)
-**Total:** 133 tests passing
+**Total I/O Syscall Tests:** 4 (all passing)
+**Total:** 137 tests passing
 
 **Programs Tested:**
 - fibonacci (recursive calculation)
 - matrix_multiply (3x3 matrices)
 - test_simple (deterministic 9-instruction program)
+- hello_world (I/O syscall test program)
 
 ---
 
@@ -259,3 +261,57 @@ Matrix C = [[30, 24, 18], [84, 69, 54], [138, 114, 90]]
 These tests verify the simulator's HTIF (Host-Target Interface) tohost detection
 mechanism, which allows programs to signal completion by writing to the tohost
 symbol. Without this, programs would run indefinitely in their exit loops.
+
+---
+
+## I/O Syscall Tests
+
+### test_io_syscalls.py
+**SPIM-compatible syscall emulation tests** - 4 tests verifying I/O functionality
+
+Status: All 4 tests passing
+
+```bash
+# Run I/O syscall tests
+python3 tests/test_io_syscalls.py
+```
+
+#### Coverage
+
+| Test Class | Tests | Status | Description |
+|------------|-------|--------|-------------|
+| `TestPrintStringSyscall` | 2 tests | Pass | Syscall 4 (print_string) |
+| `TestSyscallDetection` | 1 test | Pass | SYSCALL step result |
+| `TestFibonacciStillWorks` | 1 test | Pass | Regression test |
+
+#### Syscalls Tested
+
+- **Syscall 4 (print_string)**: Print null-terminated string
+- **Syscall 10 (exit)**: Exit program cleanly
+- **StepResult.SYSCALL**: Verify ecall detection in C backend
+
+#### Test Program: examples/riscv/hello_world/hello
+
+Simple program that prints "Hello, World!\n" and exits.
+
+**Assembly:**
+```asm
+_start:
+    la a0, msg          # Load address of string
+    li a7, 4            # Syscall 4 = print_string
+    ecall
+
+    li a7, 10           # Syscall 10 = exit
+    ecall
+```
+
+**Expected behavior:**
+- Prints "Hello, World!\n" to stdout
+- Exits cleanly in 6 steps
+
+#### Implementation Details
+
+- **ISA-agnostic design**: Syscall detection in C backend (ecall opcode 0x00000073)
+- **PC advancement**: C backend advances PC by 4 bytes past ecall (RISC-V specific)
+- **Trap bypass**: User-level syscall emulation bypasses Sail's trap mechanism
+- **Clean exit**: Programs exit immediately on syscall 10, not hitting step limits

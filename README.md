@@ -34,6 +34,11 @@ Less useful if you want timing, power, or multicore operation.
 
 - **Automatic Register Tracking** - See what changed after each step
 
+- **I/O Syscalls** - SPIM-compatible syscalls for printing and input
+  - print_int, print_string, print_char
+  - read_int, read_char
+  - exit, exit_code
+
 - **SPIM-like Commands** - Familiar interface for MIPS students
   - load, step, run, break, continue
   - regs, mem, disasm, info
@@ -50,6 +55,7 @@ Less useful if you want timing, power, or multicore operation.
 ### For Users
 - [Quick Start Guide](docs/user/quick-start.md) - Get started in 5 minutes
 - [Console Guide](docs/user/console-guide.md) - Complete command reference
+- [Syscall Reference](docs/user/syscalls.md) - I/O syscalls for programs
 - [Examples Guide](examples/README.md) - Learn from example programs
 
 ## What Makes This Special?
@@ -145,8 +151,9 @@ python3 tests/test_console_working.py      # Console tests (38 tests)
 python3 tests/test_disasm_comprehensive.py # Disassembly tests (30 tests)
 python3 tests/test_symbols.py              # Symbol tests (24 tests)
 python3 tests/test_program_correctness.py  # Correctness tests (10 tests)
+python3 tests/test_io_syscalls.py          # I/O syscall tests (4 tests)
 
-# All 133 tests passing
+# All 137 tests passing
 ```
 
 ## License
