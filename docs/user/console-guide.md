@@ -64,6 +64,27 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
   ...
   ```
 
+- `list [location]` - Display source code (requires debug symbols) (alias: `l`)
+  ```
+  (mapachespim) list             # Show source around current PC
+  (mapachespim) list fibonacci   # Show source around function
+  (mapachespim) list 40          # Show source around line 40
+
+  fibonacci.s:
+     41:     blt  a0, t0, base_case
+     42:     # Recursive case: fib(n) = fib(n-1) + fib(n-2)
+     43:     addi sp, sp, -16
+     44:     sd   ra, 8(sp)         # <-- PC: 0x80000048
+     45:     sd   s0, 0(sp)
+     46:     mv   s0, a0
+     47:     addi a0, a0, -1
+     48:     call fibonacci
+     49:     mv   t0, a0
+     50:     addi a0, s0, -2
+
+  Tip: Compile with 'as -g' to include debug symbols
+  ```
+
 ### Breakpoints
 - `break <addr>` - Set breakpoint at address (alias: `b`)
   ```
@@ -224,10 +245,31 @@ The console shows both numeric (x0-x31) and ABI names:
    info sections     # List all available sections
    ```
 
-4. **Single-stepping**: Use `step n` for multiple steps
+4. **Source code viewing**: Requires debug symbols (compile with `-g`)
+   ```
+   list              # Show source around current PC
+   list main         # Show source around function
+   list 25           # Show source around line 25
+   ```
+
+5. **Single-stepping**: Use `step n` for multiple steps
    ```
    step 10           # Execute 10 instructions at once
    ```
+
+## Compiling with Debug Symbols
+
+To enable the `list` command for source code viewing, compile your assembly with debug symbols:
+
+```bash
+# Assemble with debug symbols
+riscv64-unknown-elf-as -march=rv64g -mabi=lp64 -g -o program.o program.s
+
+# Link as normal
+riscv64-unknown-elf-ld -T linker.ld -o program program.o
+```
+
+The `-g` flag adds DWARF debug information that maps machine addresses to source lines.
 
 ## Differences from SPIM
 
@@ -237,6 +279,7 @@ MapacheSPIM is similar to SPIM but has key differences:
 2. **ELF files**: Loads compiled ELF binaries (not assembly source)
 3. **Formal specification**: Uses Sail RISC-V model (not custom simulator)
 4. **64-bit**: Full RV64I support by default
+5. **Source display**: Optional via `list` command (requires `-g` flag)
 
 ## Troubleshooting
 

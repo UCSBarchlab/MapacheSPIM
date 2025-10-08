@@ -3,14 +3,17 @@
 ## Current Status (Oct 2025)
 
 ✅ **Project Fully Functional**
-- All 109 tests passing (31 API + 24 console + 24 symbol + 30 disasm)
+- All 123 tests passing (31 API + 38 console + 24 symbol + 30 disasm)
 - Documentation streamlined and up-to-date
 - Enhanced step display with symbols and register tracking
 - Symbol table support with symbolic breakpoints
 - Disassembly using Sail formal specification
 - Interactive console with SPIM-like commands
+- **ELF section inspection** - View sections, use section names in mem command
+- **ASCII sidebar in memory dumps** - Educational hex dump format
+- **Source code display** - GDB-style `list` command with DWARF debug info
 
-**Recent Completion:** Documentation cleanup, path fixes, venv setup guide
+**Recent Completion:** Source Code Display feature (list command with DWARF parsing, 7 new tests)
 
 ---
 
@@ -29,7 +32,8 @@
 | Continue | ✅ `continue` | ✅ `continue` | Same functionality |
 | Register display | ✅ `regs` | ✅ | We show all 32 registers with ABI names |
 | PC display | ✅ `pc` | ✅ | Program counter inspection |
-| Memory dump | ✅ `mem <addr> [len]` | ✅ | Hex dump format |
+| Memory dump | ✅ `mem <addr\|section> [len]` | ✅ | Hex dump with ASCII sidebar |
+| Section inspection | ✅ `info sections` | ❌ | List ELF sections (.text, .data, etc.) |
 | Disassembly | ✅ `disasm <addr> [n]` | ✅ | Using Sail's formal spec |
 | Symbol table | ✅ `info symbols` | ✅ | List all functions/labels |
 | Reset | ✅ `reset` | ✅ | Clear state |
@@ -50,42 +54,38 @@ Register changes:
 
 ### 🎯 High Priority (Next Sprint)
 
-#### 1. **Data Segment Inspection** ⭐ RECOMMENDED NEXT
+#### 1. ✅ **Data Segment Inspection** - COMPLETED
 Parse ELF sections and provide smart memory views.
 
-**Implementation:**
-- Parse ELF section headers (ELFIO already included)
-- Add commands:
-  - `sections` - List all ELF sections (.text, .data, .bss, etc.)
-  - `data [addr]` - Smart display of .data segment (detect strings, arrays)
-  - `stack [size]` - Show stack contents relative to SP
-- Display format helpers:
-  - Auto-detect null-terminated strings
-  - Show ASCII alongside hex for data
-  - Annotate with symbols when available
+**Completed Implementation:**
+- ✅ Parse ELF section headers using pyelftools
+- ✅ Added `info sections` - List all ELF sections (.text, .data, .bss, etc.)
+- ✅ Enhanced `mem <section>` - Use section names (e.g., `mem .data`)
+- ✅ ASCII sidebar for hex dumps - See printable characters alongside hex
+- ✅ 7 new tests (31 console tests total)
+- ✅ Documentation updated (console-guide.md)
 
-**Why this?** Low-hanging fruit, very useful for students debugging data structures.
-
-**Estimated effort:** 1-2 days
+**Result:** Students can now easily inspect program sections and see string data in memory dumps.
 
 ---
 
-#### 2. **Source Code Display (if available)**
+#### 2. ✅ **Source Code Display** - COMPLETED
 Show original assembly source alongside execution.
 
-**Implementation:**
-- Parse DWARF debug info if present
-- Add command: `list [func]` - Show source around current PC
-- Integrate into step: optionally show source line with each step
-- Maintain source file cache
+**Completed Implementation:**
+- ✅ Parse DWARF line programs using pyelftools
+- ✅ Build address-to-source mapping cache
+- ✅ Added `list` command (GDB-style)
+  - `list` - Show source around current PC
+  - `list <function>` - Show source around function entry
+  - `list <line>` - Show source around specific line number
+- ✅ Source file caching with smart path search
+- ✅ Graceful fallback when no debug info
+- ✅ PC marker shows current execution line
+- ✅ 7 new tests (38 console tests total)
+- ✅ Documentation updated
 
-**Challenges:**
-- Requires debug symbols in ELF (-g flag)
-- Need DWARF parser (pyelftools)
-
-**Why this?** Students benefit from seeing source alongside execution.
-
-**Estimated effort:** 2-3 days
+**Result:** Students can now view source code alongside execution, just like GDB!
 
 ---
 

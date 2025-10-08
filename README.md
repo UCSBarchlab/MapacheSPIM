@@ -141,11 +141,11 @@ Goodbye!
 
 ```bash
 # Run all tests
-python3 tests/test_console_working.py      # Console tests (24 tests)
+python3 tests/test_console_working.py      # Console tests (38 tests)
 python3 tests/test_disasm_comprehensive.py # Disassembly tests (30 tests)
 python3 tests/test_symbols.py              # Symbol tests (24 tests)
 
-# All 109 tests passing
+# All 123 tests passing
 ```
 
 ## License

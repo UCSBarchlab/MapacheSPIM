@@ -148,9 +148,9 @@ Run tests before committing changes to verify nothing broke!
 ## Console Command Tests
 
 ### test_console_working.py
-**Comprehensive console command test suite** - 24 tests covering all console commands
+**Comprehensive console command test suite** - 38 tests covering all console commands
 
-Status: ✅ **All 24 tests passing**
+Status: ✅ **All 38 tests passing**
 
 ```bash
 # Run console command tests
@@ -171,7 +171,9 @@ python3 tests/test_console_working.py
 | `continue` | 1 test | ✅ Pass |
 | `regs` | 1 test | ✅ Pass |
 | `pc` | 1 test | ✅ Pass |
-| `mem` | 1 test | ✅ Pass |
+| `mem` | 4 tests | ✅ Pass |
+| `info sections` | 3 tests | ✅ Pass |
+| `list` (source display) | 7 tests | ✅ Pass |
 | `status` | 2 tests | ✅ Pass |
 | **Aliases** | 3 tests | ✅ Pass |
 
@@ -201,10 +203,10 @@ x10 (a0)  = 42  (0x2a)  - exit code
 ## Test Summary
 
 **Total API Tests:** 31 (all passing)
-**Total Console Tests:** 24 (all passing)
+**Total Console Tests:** 38 (all passing)
 **Total Symbol Tests:** 24 (all passing)
 **Total Disassembly Tests:** 30 (all passing)
-**Total:** 109 tests passing
+**Total:** 123 tests passing
 
 **Programs Tested:**
 - fibonacci (recursive calculation)

@@ -15,9 +15,126 @@ from .sail_backend import SailSimulator, StepResult
 
 try:
     from elftools.elf.elffile import ELFFile
+    from elftools.dwarf.descriptions import describe_form_class
     ELFTOOLS_AVAILABLE = True
 except ImportError:
     ELFTOOLS_AVAILABLE = False
+
+
+class SourceInfo:
+    """Cached source code information from DWARF debug info"""
+
+    def __init__(self):
+        self.addr_to_line = {}  # address -> (filename, line_number)
+        self.source_cache = {}  # filename -> list of source lines
+        self.has_debug_info = False
+
+    def get_location(self, addr):
+        """Get source location for an address. Returns (filename, line_num) or None"""
+        return self.addr_to_line.get(addr)
+
+    def get_source_lines(self, filename, start_line, count=10):
+        """Get source lines from cached file. Returns list of (line_num, text)"""
+        if filename not in self.source_cache:
+            return None
+
+        lines = self.source_cache[filename]
+        result = []
+
+        # Adjust to 0-indexed
+        start_idx = max(0, start_line - 1)
+        end_idx = min(len(lines), start_idx + count)
+
+        for i in range(start_idx, end_idx):
+            result.append((i + 1, lines[i]))
+
+        return result
+
+
+def _parse_dwarf_line_info(elf_path):
+    """Parse DWARF debug info and return SourceInfo object"""
+    source_info = SourceInfo()
+
+    if not ELFTOOLS_AVAILABLE:
+        return source_info
+
+    try:
+        with open(elf_path, 'rb') as f:
+            elf = ELFFile(f)
+
+            if not elf.has_dwarf_info():
+                return source_info
+
+            dwarf_info = elf.get_dwarf_info()
+            source_info.has_debug_info = True
+
+            # Parse line programs from all compilation units
+            for CU in dwarf_info.iter_CUs():
+                line_program = dwarf_info.line_program_for_CU(CU)
+                if not line_program:
+                    continue
+
+                # Get file entry table
+                file_entries = line_program['file_entry']
+
+                # Version-specific delta for file indexing
+                if line_program['version'] < 5:
+                    delta = 1
+                else:
+                    delta = 0
+
+                # Iterate through line program entries
+                prev_state = None
+                for entry in line_program.get_entries():
+                    if entry.state is None:
+                        continue
+
+                    state = entry.state
+                    if not state.end_sequence:
+                        # Map this address to source location
+                        if state.file > 0 and state.file <= len(file_entries) + delta:
+                            file_entry = file_entries[state.file - delta]
+                            filename = file_entry.name.decode('utf-8') if isinstance(file_entry.name, bytes) else file_entry.name
+
+                            # Store mapping
+                            source_info.addr_to_line[state.address] = (filename, state.line)
+
+                            # Cache source file content if not already cached
+                            if filename not in source_info.source_cache:
+                                _load_source_file(source_info, filename, elf_path)
+
+                    prev_state = state
+
+            return source_info
+
+    except Exception as e:
+        # If DWARF parsing fails, just return empty source info
+        return source_info
+
+
+def _load_source_file(source_info, filename, elf_path):
+    """Try to load source file contents into cache"""
+    # Try to find source file relative to ELF location
+    elf_dir = Path(elf_path).parent
+
+    # Try multiple search paths
+    search_paths = [
+        Path(filename),  # Absolute or relative to CWD
+        elf_dir / filename,  # Relative to ELF
+        elf_dir / Path(filename).name,  # Just filename in ELF dir
+    ]
+
+    for path in search_paths:
+        try:
+            if path.exists() and path.is_file():
+                with open(path, 'r') as f:
+                    source_info.source_cache[filename] = f.read().splitlines()
+                return
+        except Exception:
+            continue
+
+    # If we couldn't find the file, store empty list
+    source_info.source_cache[filename] = []
 
 
 def _chunk_list(lst, n):
@@ -57,6 +174,9 @@ class MapacheSPIMConsole(cmd.Cmd):
         # Register change tracking
         self.show_reg_changes = True
         self.prev_regs = None
+
+        # Source code information (DWARF debug info)
+        self.source_info = SourceInfo()
 
         # Set up signal handler for Ctrl-C
         signal.signal(signal.SIGINT, self._handler_sigint)
@@ -124,6 +244,16 @@ class MapacheSPIMConsole(cmd.Cmd):
             print(f'✓ Loaded {filepath}')
             print(f'Entry point: {pc:#018x}')
             self.breakpoints.clear()
+
+            # Parse DWARF debug information
+            self.source_info = _parse_dwarf_line_info(str(filepath))
+            if self.source_info.has_debug_info:
+                num_files = len(self.source_info.source_cache)
+                if num_files > 0:
+                    file_list = ', '.join(self.source_info.source_cache.keys())
+                    print(f'Source info: {file_list} ({len(self.source_info.addr_to_line)} address mappings)')
+                else:
+                    print('Debug info present but source files not found')
         except Exception as e:
             self.print_error(f'Error loading ELF file: {e}')
 
@@ -634,6 +764,123 @@ class MapacheSPIMConsole(cmd.Cmd):
                 print(f'[{instr_addr:#010x}]  <error: {e}>')
                 break
         print()
+
+    def do_list(self, arg):
+        """Display source code from assembly file
+
+        Usage:
+            list [location]
+
+        Shows source code around the current PC or specified location.
+        Requires the program to be compiled with debug symbols (-g flag).
+
+        Arguments:
+            location - Optional line number, function name, or blank for PC
+
+        Aliases:
+            l - Short alias for list
+
+        Examples:
+            list            # Show source around current PC
+            list main       # Show source around 'main' function
+            list 25         # Show source around line 25
+            l               # Using alias
+
+        Tips:
+            - Compile with 'as -g' to include debug symbols
+            - Source file must be in same directory as ELF file
+            - Shows 10 lines by default
+            - Current PC is marked with '# <-- PC: 0xXXXXXXXX'
+        """
+        if not self.loaded_file:
+            self.print_error('Error: No program loaded. Use "load <file>" first.')
+            return
+
+        if not ELFTOOLS_AVAILABLE:
+            self.print_error('Error: pyelftools not available.')
+            return
+
+        if not self.source_info.has_debug_info:
+            print()
+            print('No source information available.')
+            print('Compile your program with debug symbols (use -g flag):')
+            print('  as -g -o program.o program.s')
+            print('  ld -o program program.o')
+            print()
+            return
+
+        # Determine what to show
+        pc = self.sim.get_pc()
+
+        if arg:
+            # User specified a location
+            # Try to parse as line number first
+            try:
+                line_num = int(arg)
+                # Find first file in cache
+                if self.source_info.source_cache:
+                    filename = list(self.source_info.source_cache.keys())[0]
+                    self._show_source_lines(filename, line_num, pc, center=True)
+                else:
+                    print('No source files available.')
+                return
+            except ValueError:
+                # Not a number, try as function name
+                # Look up function in symbol table
+                func_addr = self.sim.lookup_symbol(arg)
+                if func_addr is not None:
+                    location = self.source_info.get_location(func_addr)
+                    if location:
+                        filename, line_num = location
+                        self._show_source_lines(filename, line_num, pc, center=True)
+                    else:
+                        print(f'No source location found for function "{arg}".')
+                else:
+                    print(f'Function "{arg}" not found.')
+                return
+        else:
+            # Show around current PC
+            location = self.source_info.get_location(pc)
+            if location:
+                filename, line_num = location
+                self._show_source_lines(filename, line_num, pc, center=True)
+            else:
+                print(f'No source location for current PC ({pc:#010x}).')
+                print('Try stepping to an instruction with debug info.')
+
+    def _show_source_lines(self, filename, center_line, current_pc, center=True, count=10):
+        """Helper to display source lines with PC marker"""
+        if center:
+            # Show lines centered around center_line
+            start_line = max(1, center_line - count // 2)
+        else:
+            start_line = center_line
+
+        lines = self.source_info.get_source_lines(filename, start_line, count)
+
+        if not lines:
+            print(f'Source file "{filename}" not available.')
+            return
+
+        print()
+        print(f'{filename}:')
+
+        # Find which line corresponds to current PC (if any)
+        pc_line = None
+        pc_location = self.source_info.get_location(current_pc)
+        if pc_location and pc_location[0] == filename:
+            pc_line = pc_location[1]
+
+        for line_num, text in lines:
+            # Mark current PC line
+            if line_num == pc_line:
+                print(f'{line_num:5d}: {text}  # <-- PC: {current_pc:#010x}')
+            else:
+                print(f'{line_num:5d}: {text}')
+
+        print()
+
+    do_l = do_list  # Alias
 
     # --- Breakpoints ---
 
