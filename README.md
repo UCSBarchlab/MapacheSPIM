@@ -1,4 +1,4 @@
-# MapacheSPIM
+# MapacheSPIM <img src="docs/Mapache.png" alt="MapacheSPIM Logo" width="100">
 
 MapacheSPIM is a simulator for assembly programming built on the Sail formal specification.  The goals of the project
 are ease of use for begginers and students, extensibility for researchers, ISA independence, and ease of debugging.
@@ -167,9 +167,5 @@ python3 tests/test_io_syscalls.py          # I/O syscall tests (4 tests)
 - Issues: [GitHub Issues](https://github.com/your-org/MapacheSPIM/issues)
 - Discussions: [GitHub Discussions](https://github.com/your-org/MapacheSPIM/discussions)
 
----
-
-<p align="center">
-  <img src="docs/Mapache.png" alt="MapacheSPIM Logo" width="150">
-</p>
+<img src="docs/Mapache.png" alt="MapacheSPIM Logo">
 
