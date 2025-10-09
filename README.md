@@ -167,3 +167,9 @@ python3 tests/test_io_syscalls.py          # I/O syscall tests (4 tests)
 - Issues: [GitHub Issues](https://github.com/your-org/MapacheSPIM/issues)
 - Discussions: [GitHub Discussions](https://github.com/your-org/MapacheSPIM/discussions)
 
+---
+
+<p align="center">
+  <img src="docs/Mapache.png" alt="MapacheSPIM Logo" width="150">
+</p>
+
