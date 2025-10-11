@@ -162,7 +162,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         's8', 's9', 's10', 's11', 't3', 't4', 't5', 't6'
     ]
 
-    def __init__(self, verbose=True):
+    def __init__(self, verbose=False):
         super().__init__()
         self._verbose = verbose
         self.sim = None
@@ -174,6 +174,10 @@ class MapacheSPIMConsole(cmd.Cmd):
         # Register change tracking
         self.show_reg_changes = True
         self.prev_regs = None
+
+        # Register display options
+        self.regs_base = 'hex'  # hex, decimal, or binary
+        self.regs_leading_zeros = 'default'  # default, show, cut, or dot
 
         # Source code information (DWARF debug info)
         self.source_info = SourceInfo()
@@ -241,7 +245,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             self.sim.load_elf(str(filepath))
             self.loaded_file = str(filepath)
             pc = self.sim.get_pc()
-            print(f'✓ Loaded {filepath}')
+            print(f'Loaded {filepath}')
             print(f'Entry point: {pc:#018x}')
             self.breakpoints.clear()
 
@@ -304,8 +308,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         for i in range(n_steps):
             pc = self.sim.get_pc()
 
-            # Check for breakpoint
-            if pc in self.breakpoints:
+            # Check for breakpoint (but skip if this is the first step and we're already at a breakpoint)
+            if i > 0 and pc in self.breakpoints:
                 print(f'Breakpoint hit at {pc:#018x}')
                 break
 
@@ -318,20 +322,22 @@ class MapacheSPIMConsole(cmd.Cmd):
                 instr_disasm = "<error>"
                 instr_hex = "????????"
 
-            # Snapshot registers before execution (only for single step with tracking enabled)
-            prev_regs = None
-            if self.show_reg_changes and n_steps == 1:
-                prev_regs = self.sim.get_all_regs()
+            # Snapshot registers before execution (for tracking changes)
+            prev_regs = self.sim.get_all_regs()
 
             result = self.sim.step()
 
             if result == StepResult.HALT:
                 print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}')
                 print(f'Program halted')
+                # Update prev_regs even on halt
+                self.prev_regs = prev_regs
                 break
             elif result == StepResult.ERROR:
                 print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}')
                 print(f'Execution error')
+                # Update prev_regs even on error
+                self.prev_regs = prev_regs
                 break
 
             # Show the instruction that was executed
@@ -344,19 +350,38 @@ class MapacheSPIMConsole(cmd.Cmd):
             else:
                 print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}')
 
-            # Show register changes (only for single step)
-            if prev_regs is not None and n_steps == 1:
-                curr_regs = self.sim.get_all_regs()
-                changed = []
-                for reg_num in range(32):
-                    if prev_regs[reg_num] != curr_regs[reg_num]:
-                        abi = self.RISCV_ABI_NAMES[reg_num]
-                        changed.append((reg_num, abi, prev_regs[reg_num], curr_regs[reg_num]))
+            # Store prev_regs for the regs command to show changes
+            self.prev_regs = prev_regs
 
-                if changed:
-                    print('Register changes:')
-                    for reg_num, abi, old_val, new_val in changed:
-                        print(f'  x{reg_num:<2} ({abi:>4}) : {old_val:#018x} → {new_val:#018x}  ★')
+    def do_stepreg(self, arg):
+        """Execute instructions and show registers
+
+        Usage:
+            stepreg [n]
+
+        Executes n instructions (default 1) and then displays all registers.
+        This is a convenience command equivalent to running 'step' followed
+        by 'regs'. Useful for stepping through code while tracking register
+        changes.
+
+        Arguments:
+            n - Number of instructions to execute (optional, default=1)
+
+        Aliases:
+            sr - Short alias for stepreg
+
+        Examples:
+            stepreg         # Execute 1 instruction and show registers
+            stepreg 5       # Execute 5 instructions and show registers
+            sr              # Using alias
+
+        Tips:
+            - Stars (★) mark registers that changed with the last instruction
+            - Use 'step' alone if you don't need to see registers each time
+            - Combine with breakpoints for efficient debugging workflow
+        """
+        self.do_step(arg)
+        self.do_regs('')
 
     def do_run(self, arg):
         """Run program until halt or maximum instructions
@@ -502,15 +527,62 @@ class MapacheSPIMConsole(cmd.Cmd):
 
     # --- State Inspection ---
 
+    def _format_reg_value(self, value, show_mode, leading_zeros_mode):
+        """Format a register value according to display settings"""
+        if show_mode == 'hex':
+            # Format as hex with 0x prefix
+            formatted = f'{value:016x}'
+            prefix = '0x'
+        elif show_mode == 'decimal':
+            # Format as decimal (max 20 digits for 64-bit)
+            formatted = f'{value:020d}'
+            prefix = ''
+        elif show_mode == 'binary':
+            # Format as binary with 0b prefix
+            formatted = f'{value:064b}'
+            prefix = '0b'
+        else:
+            formatted = f'{value:016x}'
+            prefix = '0x'
+
+        # Handle 'default' mode: show for hex/binary, dot for decimal
+        resolved_mode = leading_zeros_mode
+        if leading_zeros_mode == 'default':
+            if show_mode == 'decimal':
+                resolved_mode = 'dot'
+            else:
+                resolved_mode = 'show'
+
+        # Apply leading zeros mode
+        if resolved_mode == 'cut':
+            # Strip leading zeros but keep at least one digit
+            formatted = formatted.lstrip('0') or '0'
+        elif resolved_mode == 'dot':
+            # Replace leading zeros with dots
+            stripped = formatted.lstrip('0') or '0'
+            num_leading = len(formatted) - len(stripped)
+            formatted = '.' * num_leading + stripped
+
+        return prefix + formatted
+
     def do_regs(self, arg):
         """Display all RISC-V registers
 
         Usage:
-            regs
+            regs [options]
 
         Shows all 32 general-purpose registers (x0-x31) with both
         numeric names and ABI names, plus the program counter (PC).
-        Values are displayed in hexadecimal.
+        Display format can be controlled with arguments or 'set' command.
+
+        Options (override current settings for this call only):
+            hex      - Show values in hexadecimal
+            decimal  - Show values in decimal
+            binary   - Show values in binary
+            default  - Use default leading zeros (show for hex/binary, dot for decimal)
+            show     - Show all leading zeros
+            cut      - Remove leading zeros
+            dot      - Replace leading zeros with dots
 
         Register ABI Names:
             x0  = zero (hard-wired 0)    x16-17 = a6-a7 (args)
@@ -525,37 +597,79 @@ class MapacheSPIMConsole(cmd.Cmd):
             x12-15 = a2-a5 (args)
 
         Examples:
-            regs                # Show all registers
+            regs                # Show all registers (default format)
+            regs decimal        # Show in decimal (temporary)
+            regs binary cut     # Show in binary without leading zeros
+            regs dot            # Use dots for leading zeros
             step                # Execute an instruction
-            regs                # See what changed
+            regs                # See what changed (★ marks changes)
 
         Tips:
-            - Use after 'step' to see register changes
+            - Use 'set regs-base' to change default format globally
+            - Use 'set regs-leading-zeros' to change leading zero display
+            - Stars (★) mark registers that changed with last instruction
             - a0-a7 (x10-x17) hold function arguments/return values
             - sp (x2) is the stack pointer
             - ra (x1) holds the return address
             - x0 is always 0 (hard-wired)
         """
+        # Parse arguments for temporary overrides
+        show_mode = self.regs_base
+        leading_zeros_mode = self.regs_leading_zeros
+
+        if arg:
+            parts = arg.split()
+            for part in parts:
+                part_lower = part.lower()
+                if part_lower in ('hex', 'decimal', 'binary'):
+                    show_mode = part_lower
+                elif part_lower in ('default', 'show', 'cut', 'dot'):
+                    leading_zeros_mode = part_lower
+                else:
+                    self.print_error(f'Error: Unknown option "{part}". Use: hex, decimal, binary, default, show, cut, or dot')
+                    return
+
         print()
         regs = self.sim.get_all_regs()
         pc = self.sim.get_pc()
 
-        # Format registers in 4 columns
+        # Determine the width needed for values based on format
+        if show_mode == 'hex':
+            value_width = 18  # 0x + 16 hex digits
+        elif show_mode == 'decimal':
+            value_width = 20  # max 20 decimal digits for 64-bit
+        elif show_mode == 'binary':
+            value_width = 66  # 0b + 64 binary digits
+        else:
+            value_width = 18
+
+        # Format registers in 2 columns (or 1 if binary is too wide)
+        cols = 1 if show_mode == 'binary' else 2
+
         reg_lines = []
-        for i in range(0, 32, 4):
+        for i in range(0, 32, cols):
             line_parts = []
-            for j in range(4):
+            for j in range(cols):
                 if i + j < 32:
                     reg_num = i + j
                     abi_name = self.RISCV_ABI_NAMES[reg_num]
                     value = regs[reg_num]
-                    line_parts.append(f'x{reg_num:<2} ({abi_name:>4}) = {value:#018x}')
-            reg_lines.append('  '.join(line_parts))
+
+                    # Format the value
+                    formatted_value = self._format_reg_value(value, show_mode, leading_zeros_mode)
+
+                    # Check if this register changed with the last instruction
+                    star = ' ★ ' if (self.prev_regs is not None and self.prev_regs[reg_num] != value) else '   '
+
+                    line_parts.append(f'x{reg_num:<2} ({abi_name:>4}) = {formatted_value:<{value_width}}{star}')
+            reg_lines.append(' '.join(line_parts))
 
         for line in reg_lines:
             print(line)
 
-        print(f'\npc                 = {pc:#018x}')
+        # Format PC
+        formatted_pc = self._format_reg_value(pc, show_mode, leading_zeros_mode)
+        print(f'\npc = {formatted_pc}')
         print()
 
     def do_pc(self, arg):
@@ -1154,22 +1268,28 @@ class MapacheSPIMConsole(cmd.Cmd):
             set                    # Show all current settings
 
         Options:
-            show-changes  [on|off]  - Show register changes after each step
+            show-changes         [on|off]                     - Show register changes after each step
+            regs-base            [hex|decimal|binary]         - Default format for register values
+            regs-leading-zeros   [default|show|cut|dot]       - How to display leading zeros
 
         Examples:
-            set                     # Show current settings
-            set show-changes on     # Enable register change display
-            set show-changes off    # Disable register change display
+            set                          # Show current settings
+            set show-changes on          # Enable register change display
+            set regs-base decimal        # Show registers in decimal by default
+            set regs-leading-zeros dot   # Use dots for leading zeros
+            set regs-leading-zeros cut   # Remove leading zeros
 
         Tips:
-            - Register changes only shown for single steps
-            - Use 'regs' command to manually check registers
+            - Use 'regs <option>' to temporarily override format for one call
+            - Binary format uses single column due to width
         """
         if not arg:
             # Show all settings
             print()
             print('Current settings:')
-            print(f'  show-changes : {"on" if self.show_reg_changes else "off"}')
+            print(f'  show-changes       : {"on" if self.show_reg_changes else "off"}')
+            print(f'  regs-base          : {self.regs_base}')
+            print(f'  regs-leading-zeros : {self.regs_leading_zeros}')
             print()
             return
 
@@ -1189,6 +1309,18 @@ class MapacheSPIMConsole(cmd.Cmd):
                 print('Register change display disabled')
             else:
                 self.print_error('Error: Value must be on or off')
+        elif option == 'regs-base':
+            if value in ('hex', 'decimal', 'binary'):
+                self.regs_base = value
+                print(f'Register display format set to {value}')
+            else:
+                self.print_error('Error: Value must be hex, decimal, or binary')
+        elif option == 'regs-leading-zeros':
+            if value in ('default', 'show', 'cut', 'dot'):
+                self.regs_leading_zeros = value
+                print(f'Register leading zeros display set to {value}')
+            else:
+                self.print_error('Error: Value must be default, show, cut, or dot')
         else:
             self.print_error(f'Error: Unknown option "{option}"')
 
@@ -1231,6 +1363,7 @@ class MapacheSPIMConsole(cmd.Cmd):
     do_q = do_quit
     do_r = do_run
     do_s = do_step
+    do_sr = do_stepreg
     do_c = do_continue
     do_b = do_break
     do_d = do_disasm
@@ -1249,15 +1382,15 @@ def main():
         help='ELF file to load on startup'
     )
     parser.add_argument(
-        '-q', '--quiet',
+        '-v', '--verbose',
         action='store_true',
-        help='Quiet mode (less verbose)'
+        help='Verbose mode (show extra messages)'
     )
 
     args = parser.parse_args()
 
     # Create console
-    console = MapacheSPIMConsole(verbose=not args.quiet)
+    console = MapacheSPIMConsole(verbose=args.verbose)
 
     # Auto-load file if provided
     if args.file:
