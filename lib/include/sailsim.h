@@ -19,6 +19,15 @@ extern "C" {
 #include <stddef.h>
 
 /**
+ * Supported ISAs
+ */
+typedef enum {
+    SAILSIM_ISA_RISCV = 0,
+    SAILSIM_ISA_ARM = 1,
+    SAILSIM_ISA_UNKNOWN = -1
+} sailsim_isa_t;
+
+/**
  * Opaque simulator context handle
  */
 typedef struct sailsim_context sailsim_context_t;
@@ -50,10 +59,18 @@ sailsim_context_t* sailsim_init(const char* config_file);
 void sailsim_destroy(sailsim_context_t* ctx);
 
 /**
+ * Get ISA type of loaded ELF
+ *
+ * @param ctx Simulator context
+ * @return ISA type (SAILSIM_ISA_UNKNOWN if no ELF loaded)
+ */
+sailsim_isa_t sailsim_get_isa(sailsim_context_t* ctx);
+
+/**
  * Load an ELF file into simulator memory
  *
  * @param ctx Simulator context
- * @param elf_path Path to RISC-V ELF file
+ * @param elf_path Path to RISC-V or ARM ELF file
  * @return true on success, false on failure
  */
 bool sailsim_load_elf(sailsim_context_t* ctx, const char* elf_path);
