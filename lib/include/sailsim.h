@@ -59,6 +59,17 @@ sailsim_context_t* sailsim_init(const char* config_file);
 void sailsim_destroy(sailsim_context_t* ctx);
 
 /**
+ * Detect ISA from ELF file without loading it
+ *
+ * This function can be called before creating a simulator to determine
+ * which library (libsailsim_riscv or libsailsim_arm) to use.
+ *
+ * @param elf_path Path to ELF file
+ * @return ISA type (SAILSIM_ISA_UNKNOWN if file cannot be read or is unsupported)
+ */
+sailsim_isa_t sailsim_detect_elf_isa(const char* elf_path);
+
+/**
  * Get ISA type of loaded ELF
  *
  * @param ctx Simulator context

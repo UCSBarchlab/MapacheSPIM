@@ -10,6 +10,13 @@ from enum import IntEnum
 from pathlib import Path
 
 
+class ISA(IntEnum):
+    """ISA types supported by sailsim"""
+    RISCV = 0
+    ARM = 1
+    UNKNOWN = -1
+
+
 class StepResult(IntEnum):
     """Result codes from sailsim_step()"""
     OK = 0
@@ -17,6 +24,41 @@ class StepResult(IntEnum):
     WAITING = 2
     SYSCALL = 3
     ERROR = -1
+
+
+def detect_elf_isa(elf_path):
+    """
+    Detect the ISA of an ELF file without loading it
+
+    Args:
+        elf_path (str): Path to ELF file
+
+    Returns:
+        ISA: ISA type (ISA.RISCV, ISA.ARM, or ISA.UNKNOWN)
+    """
+    # Get the package directory
+    pkg_dir = Path(__file__).parent.parent
+    lib_dir = pkg_dir / "lib" / "build"
+
+    # Try to load either library (both have the detect function)
+    lib_names = ["libsailsim_riscv.dylib", "libsailsim_riscv.so",
+                 "libsailsim_arm.dylib", "libsailsim_arm.so"]
+
+    for lib_name in lib_names:
+        lib_path = lib_dir / lib_name
+        if lib_path.exists():
+            try:
+                lib = ctypes.CDLL(str(lib_path))
+                lib.sailsim_detect_elf_isa.argtypes = [ctypes.c_char_p]
+                lib.sailsim_detect_elf_isa.restype = ctypes.c_int
+
+                result = lib.sailsim_detect_elf_isa(elf_path.encode('utf-8'))
+                return ISA(result)
+            except Exception:
+                continue
+
+    # If we can't load any library, return UNKNOWN
+    return ISA.UNKNOWN
 
 
 class SailSimulator:
@@ -27,16 +69,21 @@ class SailSimulator:
     for RISC-V programs using the formal Sail specification.
     """
 
-    def __init__(self, config_file=None):
+    def __init__(self, isa=None, config_file=None):
         """
         Initialize the simulator
 
         Args:
+            isa (ISA, optional): ISA to use (ISA.RISCV or ISA.ARM).
+                                If None, will be auto-detected from ELF file during load_elf()
             config_file (str, optional): Path to Sail config JSON file.
                                         If None, uses built-in default config.
         """
+        # Store ISA for library selection
+        self._isa = isa
+
         # Find the libsailsim shared library
-        self._lib = self._load_library()
+        self._lib = self._load_library(isa)
 
         # Define ctypes function signatures
         self._setup_functions()
@@ -48,27 +95,47 @@ class SailSimulator:
         if not self._ctx:
             raise RuntimeError("Failed to initialize Sail simulator")
 
-    def _load_library(self):
-        """Load the sailsim shared library"""
+    def _load_library(self, isa=None):
+        """
+        Load the sailsim shared library for the specified ISA
+
+        Args:
+            isa (ISA, optional): ISA to load library for. If None, tries RISC-V first.
+
+        Returns:
+            ctypes.CDLL: Loaded library
+        """
         # Get the package directory
         pkg_dir = Path(__file__).parent.parent
         lib_dir = pkg_dir / "lib" / "build"
 
-        # Try different library names
-        lib_names = [
-            "libsailsim.dylib",      # macOS
-            "libsailsim.so",         # Linux
-            "libsailsim.dll"         # Windows
-        ]
+        # Build library names based on ISA
+        if isa == ISA.ARM:
+            lib_names = [
+                "libsailsim_arm.dylib",   # macOS
+                "libsailsim_arm.so",      # Linux
+            ]
+        elif isa == ISA.RISCV:
+            lib_names = [
+                "libsailsim_riscv.dylib",  # macOS
+                "libsailsim_riscv.so",     # Linux
+            ]
+        else:
+            # Try RISC-V first, then ARM
+            lib_names = [
+                "libsailsim_riscv.dylib", "libsailsim_riscv.so",
+                "libsailsim_arm.dylib", "libsailsim_arm.so",
+            ]
 
         for lib_name in lib_names:
             lib_path = lib_dir / lib_name
             if lib_path.exists():
                 return ctypes.CDLL(str(lib_path))
 
+        isa_str = f" for ISA {isa.name}" if isa else ""
         raise FileNotFoundError(
-            f"Could not find libsailsim in {lib_dir}. "
-            "Make sure you've built the library first (cd lib/build && cmake .. && make)."
+            f"Could not find libsailsim{isa_str} in {lib_dir}. "
+            "Make sure you've built the library first (cd lib && make build)."
         )
 
     def _setup_functions(self):
@@ -161,10 +228,14 @@ class SailSimulator:
         Load an ELF file into simulator memory
 
         Args:
-            elf_path (str): Path to RISC-V ELF executable
+            elf_path (str): Path to RISC-V or ARM ELF executable
 
         Returns:
             bool: True if successful, False otherwise
+
+        Note:
+            The ELF file's ISA must match the simulator's ISA (set during initialization).
+            Use create_simulator() factory function for automatic ISA detection.
         """
         result = self._lib.sailsim_load_elf(self._ctx, elf_path.encode('utf-8'))
         if not result:
@@ -488,3 +559,44 @@ class SailSimulator:
         if self._ctx:
             self._lib.sailsim_destroy(self._ctx)
             self._ctx = None
+
+
+def create_simulator(elf_path=None, config_file=None):
+    """
+    Factory function to create a simulator with automatic ISA detection
+
+    If elf_path is provided, detects the ISA from the ELF file and creates
+    the appropriate simulator (RISC-V or ARM). If elf_path is None, creates
+    a RISC-V simulator by default.
+
+    Args:
+        elf_path (str, optional): Path to ELF file for ISA auto-detection
+        config_file (str, optional): Path to Sail config JSON file
+
+    Returns:
+        SailSimulator: Initialized simulator instance
+
+    Example:
+        # Auto-detect ISA and load ELF
+        sim = create_simulator("program.elf")
+
+        # Create RISC-V simulator explicitly
+        sim = create_simulator()
+        sim.load_elf("riscv_program.elf")
+    """
+    if elf_path:
+        # Detect ISA from ELF file
+        isa = detect_elf_isa(elf_path)
+        if isa == ISA.UNKNOWN:
+            raise RuntimeError(f"Could not detect ISA from ELF file: {elf_path}")
+
+        # Create simulator with detected ISA
+        sim = SailSimulator(isa=isa, config_file=config_file)
+
+        # Load the ELF file
+        sim.load_elf(elf_path)
+
+        return sim
+    else:
+        # Default to RISC-V
+        return SailSimulator(isa=ISA.RISCV, config_file=config_file)

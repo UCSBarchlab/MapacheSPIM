@@ -25,13 +25,13 @@ echo "Using Sail directory: $SAIL_DIR"
 GMP_CFLAGS=$(pkg-config --cflags gmp 2>/dev/null || echo "-I/opt/homebrew/include -I/usr/local/include")
 GMP_LDFLAGS=$(pkg-config --libs gmp 2>/dev/null || echo "-L/opt/homebrew/lib -L/usr/local/lib -lgmp")
 
-# Compiler flags
-CFLAGS="-O2 -I$SAIL_DIR/lib/ -DHAVE_SETCONFIG $GMP_CFLAGS"
+# Compiler flags (ARM v9.4 needs deep bracket nesting)
+CFLAGS="-O2 -I$SAIL_DIR/lib/ -DHAVE_SETCONFIG -fbracket-depth=512 $GMP_CFLAGS"
 LDFLAGS="$GMP_LDFLAGS -lz"
 
 # Source files
 SAIL_RUNTIME="$SAIL_DIR/lib/sail.c $SAIL_DIR/lib/rts.c $SAIL_DIR/lib/elf.c"
-ARM_MODEL="sail-arm/arm-v8.5-a/snapshots/c/aarch64.c"
+ARM_MODEL="sail-arm/arm-v9.4-a/snapshots/c/armv9.c"
 TEST_PROGRAM="test_arm_sail.c"
 
 # Build in steps to avoid conflicts
@@ -43,16 +43,16 @@ echo "Step 1/3: Patching and compiling ARM Sail model..."
 echo "   Patching SetConfig signature and removing main()..."
 sed -e 's/unit z__SetConfig(sail_string/unit z__SetConfig(const_sail_string/g' \
     -e '/^int main(int argc, char \*argv\[\])/,/^}/d' \
-    $ARM_MODEL > aarch64_patched.c
+    $ARM_MODEL > armv9_patched.c
 
-gcc -c $CFLAGS -Wno-everything aarch64_patched.c -o aarch64.o
+gcc -c $CFLAGS -Wno-everything armv9_patched.c -o armv9.o
 if [ $? -ne 0 ]; then
     echo "✗ ARM model compilation failed"
-    rm -f aarch64_patched.c
+    rm -f armv9_patched.c
     exit 1
 fi
-echo "   ✓ aarch64.o created"
-rm -f aarch64_patched.c
+echo "   ✓ armv9.o created"
+rm -f armv9_patched.c
 
 echo "Step 2/3: Compiling Sail runtime..."
 gcc -c $CFLAGS $SAIL_DIR/lib/sail.c -o sail.o
@@ -66,7 +66,7 @@ fi
 echo "   ✓ Sail runtime objects created"
 
 echo "Step 3/3: Compiling test program and linking..."
-gcc $CFLAGS $TEST_PROGRAM aarch64.o sail.o rts.o elf.o sail_failure.o $LDFLAGS -o test_arm_sail
+gcc $CFLAGS $TEST_PROGRAM armv9.o sail.o rts.o elf.o sail_failure.o $LDFLAGS -o test_arm_sail
 
 if [ $? -eq 0 ]; then
     echo "✓ Build succeeded"
@@ -74,7 +74,7 @@ if [ $? -eq 0 ]; then
     echo "Run the test with: ./test_arm_sail"
     echo ""
     echo "Generated files:"
-    ls -lh test_arm_sail aarch64.o
+    ls -lh test_arm_sail armv9.o
 else
     echo "✗ Build failed"
     exit 1
