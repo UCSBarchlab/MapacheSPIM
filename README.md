@@ -2,7 +2,7 @@
 
 MapacheSPIM is a SPIM-like simulator for assembly programming built on the Sail formal specification. It provides 
 an interactive, console-based environment for learning assembly language, debugging programs 
-instruction-by-instruction, and exploring computer architecture concepts.
+instruction-by-instruction, and exploring computer architecture concepts.  This is code is experimental and not supported just yet.
 
 ### Why MapacheSPIM?
 
