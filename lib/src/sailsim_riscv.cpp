@@ -106,17 +106,9 @@ sailsim_isa_t sailsim_detect_elf_isa(const char* elf_path) {
     }
 
     try {
-        ELF elf = ELF::open(elf_path);
-        ISA elf_isa = elf.isa();
-
-        switch (elf_isa) {
-            case ISA::RISCV:
-                return SAILSIM_ISA_RISCV;
-            case ISA::ARM:
-                return SAILSIM_ISA_ARM;
-            default:
-                return SAILSIM_ISA_UNKNOWN;
-        }
+	// this throws if the elf isnt RISC-V
+        ELF _elf = ELF::open(elf_path);
+	return SAILSIM_ISA_RISCV;
     } catch (const std::exception& e) {
         return SAILSIM_ISA_UNKNOWN;
     }
@@ -205,14 +197,8 @@ bool sailsim_load_elf(sailsim_context_t* ctx, const char* elf_path) {
 
     try {
         // Load ELF file using ELF class from elf_loader.h
+	// Throws if elf is not RISC-V
         ELF elf = ELF::open(elf_path);
-
-        // Validate this is a RISC-V ELF file
-        ISA elf_isa = elf.isa();
-        if (elf_isa != ISA::RISCV) {
-            ctx->last_error = "ELF file is not RISC-V (this library only supports RISC-V)";
-            return false;
-        }
 
         // Load segments into memory using RISC-V write_mem
         elf.load([](uint64_t addr, const uint8_t* data, uint64_t len) {
