@@ -106,7 +106,7 @@ sailsim_isa_t sailsim_detect_elf_isa(const char* elf_path) {
     }
 
     try {
-	// this throws if the elf isnt RISC-V
+        // throws if the elf isnt RISC-V
         ELF _elf = ELF::open(elf_path);
 	return SAILSIM_ISA_RISCV;
     } catch (const std::exception& e) {
@@ -197,7 +197,7 @@ bool sailsim_load_elf(sailsim_context_t* ctx, const char* elf_path) {
 
     try {
         // Load ELF file using ELF class from elf_loader.h
-	// Throws if elf is not RISC-V
+        // throws if the elf isnt RISC-V
         ELF elf = ELF::open(elf_path);
 
         // Load segments into memory using RISC-V write_mem
