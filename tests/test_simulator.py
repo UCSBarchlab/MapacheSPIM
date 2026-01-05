@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for MapacheSail simulator
+Unit tests for MapacheSPIM simulator
 
 Tests the Python API with multiple RISC-V programs and edge cases.
 """

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive disassembly tests for MapacheSail
+Comprehensive disassembly tests for MapacheSPIM
 """
 
 import sys

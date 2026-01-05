@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Working comprehensive test suite for MapacheSail console commands.
+Working comprehensive test suite for MapacheSPIM console commands.
 
 Tests account for actual Sail behavior where ecall doesn't return HALT.
 """

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive test suite for MapacheSail console commands.
+Comprehensive test suite for MapacheSPIM console commands.
 
 Tests all console commands using the test_simple program with known
 cycle-by-cycle behavior documented in examples/riscv/test_simple/EXPECTED_BEHAVIOR.md

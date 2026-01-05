@@ -2,13 +2,12 @@
 """
 MapacheSPIM Interactive Console
 
-A SPIM-like interactive console for RISC-V programs using the Sail formal specification.
+A SPIM-like interactive console for RISC-V and ARM programs using the Unicorn Engine.
 """
 
 import cmd
 import signal
 import sys
-import math
 from pathlib import Path
 
 from . import SailSimulator, StepResult
@@ -192,7 +191,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         """Initialize or reset the simulator"""
         try:
             self.sim = SailSimulator()
-            self.print_verbose('Sail RISC-V simulator initialized.')
+            self.print_verbose('Unicorn Engine simulator initialized.')
         except Exception as e:
             print(f'Error initializing simulator: {e}', file=self.stdout)
             sys.exit(1)
@@ -516,7 +515,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         Tips:
             - Breakpoints are preserved (use 'clear' to remove them)
-            - Memory contents may be preserved (depends on Sail backend)
+            - Memory contents may be preserved (depends on simulator state)
             - Usually better to reload the file for a clean state
             - Use to recover from error states
         """
@@ -1374,7 +1373,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='MapacheSPIM - Interactive RISC-V Simulator using Sail'
+        description='MapacheSPIM - Interactive RISC-V/ARM Simulator'
     )
     parser.add_argument(
         'file',
@@ -1400,7 +1399,7 @@ def main():
     try:
         console.cmdloop()
     except KeyboardInterrupt:
-        print('\nGoodbye!', file=self.stdout)
+        print('\nGoodbye!')
 
 
 if __name__ == '__main__':

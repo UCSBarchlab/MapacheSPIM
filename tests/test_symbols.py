@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Symbol table tests for MapacheSail
+Symbol table tests for MapacheSPIM
 
-Tests the symbol table functionality provided by Sail's ELF loader,
-which is ISA-agnostic and works for any architecture Sail supports.
+Tests the symbol table functionality provided by the ELF loader.
 """
 
 import sys

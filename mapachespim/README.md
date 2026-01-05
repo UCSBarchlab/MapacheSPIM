@@ -1,27 +1,30 @@
 # MapacheSPIM Python API
 
-Python bindings for the Sail RISC-V simulator.
+Python simulator for RISC-V and ARM programs, powered by the Unicorn Engine.
 
 ## Installation
 
-No installation required - just ensure the C library is built:
-
 ```bash
-cd lib
-mkdir -p build && cd build
-cmake ..
-make
+pip install -e .
 ```
+
+Dependencies (installed automatically):
+- `unicorn>=2.0.0` - CPU emulator framework
+- `capstone>=5.0.0` - Disassembler
+- `pyelftools>=0.29` - ELF file parsing
 
 ## Quick Start
 
 ```python
-from mapachespim import SailSimulator
+from mapachespim import SailSimulator, ISA
 
-# Initialize simulator
+# Initialize simulator (defaults to RISC-V)
 sim = SailSimulator()
 
-# Load a RISC-V ELF file
+# Or specify ISA explicitly
+sim = SailSimulator(isa=ISA.ARM)
+
+# Load an ELF file
 sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
 # Single-step execution
@@ -45,61 +48,51 @@ print(f"Executed {steps} instructions")
 ### SailSimulator Class
 
 #### Initialization
-- `SailSimulator(config_file=None)` - Create simulator instance
-  - `config_file`: Optional path to Sail config JSON
+- `SailSimulator(isa=None)` - Create simulator instance
+  - `isa`: `ISA.RISCV` or `ISA.ARM` (default: RISCV)
 
 #### Program Loading
-- `load_elf(elf_path)` - Load RISC-V ELF executable
-  - Returns: `True` on success
-  - Raises: `RuntimeError` on failure
+- `load_elf(elf_path)` - Load ELF executable
+  - Automatically detects ISA from ELF headers
+  - Raises: `FileNotFoundError` if file doesn't exist
+  - Raises: `RuntimeError` on invalid ELF
 
 #### Execution Control
 - `step()` - Execute one instruction
-  - Returns: `StepResult` (OK, HALT, WAITING, or ERROR)
+  - Returns: `StepResult` (OK, HALT, SYSCALL, or ERROR)
 
 - `run(max_steps=0)` - Run until halt or max steps
-  - `max_steps`: Maximum instructions to execute (0 = unlimited)
+  - `max_steps`: Maximum instructions (0 = unlimited)
   - Returns: Number of instructions executed
 
-- `reset()` - Reset simulator to initial state
+- `reset()` - Reset simulator state
 
 #### State Inspection
-- `get_pc()` - Get program counter
-  - Returns: 64-bit PC value
-
+- `get_pc()` - Get program counter (64-bit)
 - `set_pc(pc)` - Set program counter
-  - `pc`: 64-bit address
-
-- `get_reg(reg_num)` - Get register value
-  - `reg_num`: Register number (0-31)
-  - Returns: 64-bit register value
-
-- `set_reg(reg_num, value)` - Set register value
-  - `reg_num`: Register number (1-31, x0 is read-only)
-  - `value`: 64-bit value to set
-
-- `get_all_regs()` - Get all 32 register values
-  - Returns: List of 32 integers (x0-x31)
+- `get_reg(reg_num)` - Get register value (0-31)
+- `set_reg(reg_num, value)` - Set register value (1-31)
+- `get_all_regs()` - Get all 32 registers as list
 
 #### Memory Access
-- `read_mem(addr, length)` - Read memory
-  - `addr`: Memory address
-  - `length`: Number of bytes to read
-  - Returns: `bytes` object
-
+- `read_mem(addr, length)` - Read memory, returns `bytes`
 - `write_mem(addr, data)` - Write memory
-  - `addr`: Memory address
-  - `data`: bytes or str to write
-  - Returns: `True` on success
 
-#### Context Manager Support
+#### Symbol Table
+- `get_symbols()` - Get all symbols as `{name: address}` dict
+- `lookup_symbol(name)` - Look up symbol address by name
+- `addr_to_symbol(addr)` - Convert address to `(name, offset)` tuple
 
-```python
-with SailSimulator() as sim:
-    sim.load_elf("program.elf")
-    sim.run(1000)
-# Automatically cleaned up
-```
+#### Disassembly
+- `disasm(addr)` - Disassemble instruction at address
+
+### ISA Enum
+- `ISA.RISCV` - RISC-V 64-bit
+- `ISA.ARM` - ARM64 (AArch64)
+
+### Helper Functions
+- `create_simulator(elf_path)` - Create simulator and load ELF in one call
+- `detect_elf_isa(elf_path)` - Detect ISA from ELF file
 
 ## Example: Tracing Execution
 
@@ -109,33 +102,31 @@ from mapachespim import SailSimulator, StepResult
 sim = SailSimulator()
 sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
-print(f"Entry: 0x{sim.get_pc():x}")
-
 # Trace first 10 instructions
 for i in range(10):
     pc = sim.get_pc()
-    print(f"[{i}] PC=0x{pc:x}")
+    disasm = sim.disasm(pc)
+    print(f"[{i}] 0x{pc:x}: {disasm}")
 
     result = sim.step()
     if result == StepResult.HALT:
         print("Program halted")
         break
 
-# Show final register state
+# Show result
 regs = sim.get_all_regs()
 print(f"\nReturn value (a0): {regs[10]}")
 ```
 
 ## Architecture
 
-The Python bindings use `ctypes` to wrap the C API from `libsailsim`:
-
 ```
-Python (SailSimulator)
-    ↓ ctypes
-C API (libsailsim)
+Python API (SailSimulator)
     ↓
-Sail RISC-V Model (formal specification)
+Unicorn Engine (CPU emulation)
+    ↓
+Capstone (disassembly)
 ```
 
-This provides a clean Pythonic interface while maintaining the performance and correctness of the underlying Sail formal specification.
+The simulator uses Unicorn Engine for accurate CPU emulation and Capstone for
+disassembly. Both RISC-V 64-bit and ARM64 are supported with the same API.
