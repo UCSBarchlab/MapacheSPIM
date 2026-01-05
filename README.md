@@ -1,17 +1,17 @@
 # MapacheSPIM <img src="docs/Mapache.png" alt="MapacheSPIM Logo" width="100">
 
-MapacheSPIM is a SPIM-like simulator for assembly programming built on the Sail formal specification. It provides 
-an interactive, console-based environment for learning assembly language, debugging programs 
-instruction-by-instruction, and exploring computer architecture concepts.
+MapacheSPIM is a SPIM-like simulator for assembly programming built on the Unicorn Engine CPU emulator. It provides
+an interactive, console-based environment for learning assembly language, debugging programs
+instruction-by-instruction, and exploring computer architecture concepts across multiple ISAs.
 
 ### Why MapacheSPIM?
 
-When teaching computer architecture or learning a new ISA, you need a simple, interactive way to see exactly 
-what's happening at the machine level. Traditional simulators are often complex, opaque, or tied to a single 
-architecture. MapacheSPIM provides a 
-[SPIM](https://en.wikipedia.org/wiki/SPIM)-like experience - familiar 
-commands, clear output, and the ability to step through code one instruction at a time - but built on formally 
-verified ISA specifications using the [Sail language](https://github.com/rems-project/sail).
+When teaching computer architecture or learning a new ISA, you need a simple, interactive way to see exactly
+what's happening at the machine level. Traditional simulators are often complex, opaque, or tied to a single
+architecture. MapacheSPIM provides a
+[SPIM](https://en.wikipedia.org/wiki/SPIM)-like experience - familiar
+commands, clear output, and the ability to step through code one instruction at a time - powered by the
+battle-tested [Unicorn Engine](https://www.unicorn-engine.org/) CPU emulator.
 
 MapacheSPIM is designed for:
 - **Students** learning assembly programming and computer architecture
@@ -34,9 +34,12 @@ pip install -e .
 
 **Prerequisites:**
 - Python 3.8+
-- CMake 3.10+ (for building the C backend)
-- C++ compiler (GCC or Clang)
-- RISC-V toolchain (optional, for compiling your own assembly)
+- RISC-V or ARM toolchain (optional, for compiling your own assembly)
+
+**Dependencies** (automatically installed):
+- `unicorn>=2.0.0` - CPU emulator framework
+- `capstone>=5.0.0` - Disassembler
+- `pyelftools>=0.29` - ELF file parsing
 
 ### Running MapacheSPIM
 

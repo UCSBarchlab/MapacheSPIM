@@ -11,7 +11,7 @@ import sys
 import math
 from pathlib import Path
 
-from .sail_backend import SailSimulator, StepResult
+from . import SailSimulator, StepResult
 
 try:
     from elftools.elf.elffile import ELFFile
