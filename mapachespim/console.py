@@ -164,6 +164,17 @@ class MapacheSPIMConsole(cmd.Cmd):
     def __init__(self, verbose=False):
         super().__init__()
         self._verbose = verbose
+
+        # Configure readline to not treat / as a word delimiter
+        # This allows tab completion to work properly with file paths
+        try:
+            import readline
+            # Remove / from delimiters so paths complete correctly
+            delims = readline.get_completer_delims()
+            readline.set_completer_delims(delims.replace('/', ''))
+        except ImportError:
+            pass  # readline not available on all platforms
+
         self.sim = None
         self.loaded_file = None
         self.breakpoints = set()
