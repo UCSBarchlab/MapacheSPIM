@@ -37,7 +37,7 @@ endif
 # ============================================================================
 
 # Default target: build all examples
-all: test_simple/simple
+all: test_simple/simple matrix_multiply/matrix_mult
 
 # Simple test example
 test_simple/simple: test_simple/simple.o linker.ld
@@ -51,6 +51,18 @@ test_simple/simple.o: test_simple/simple.S
 	@echo "Assembling simple test program..."
 	$(AS) $(ASFLAGS) -o $@ $<
 
+# Matrix multiply example
+matrix_multiply/matrix_mult: matrix_multiply/matrix_mult.o linker.ld
+	@echo "Linking matrix multiply program..."
+	$(LD) $(LDFLAGS) -o $@ $<
+	@echo "Generating disassembly..."
+	objdump -d $@ > matrix_multiply/matrix_mult.dis
+	@echo "Matrix multiply build complete!"
+
+matrix_multiply/matrix_mult.o: matrix_multiply/matrix_mult.S
+	@echo "Assembling matrix multiply program..."
+	$(AS) $(ASFLAGS) -o $@ $<
+
 # ============================================================================
 # Utility targets
 # ============================================================================
@@ -59,6 +71,7 @@ test_simple/simple.o: test_simple/simple.S
 clean:
 	@echo "Cleaning build artifacts..."
 	rm -f test_simple/*.o test_simple/simple test_simple/*.dis
+	rm -f matrix_multiply/*.o matrix_multiply/matrix_mult matrix_multiply/*.dis
 	@echo "Clean complete!"
 
 # Show disassembly
@@ -67,4 +80,9 @@ dis-simple: test_simple/simple
 	@echo "============================"
 	objdump -d $<
 
-.PHONY: all clean dis-simple
+dis-matrix: matrix_multiply/matrix_mult
+	@echo "Disassembly of matrix multiply:"
+	@echo "==============================="
+	objdump -d $<
+
+.PHONY: all clean dis-simple dis-matrix

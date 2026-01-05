@@ -1000,8 +1000,6 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         print(file=self.stdout)
 
-    do_l = do_list  # Alias
-
     # --- Breakpoints ---
 
     def do_break(self, arg):
@@ -1358,14 +1356,239 @@ class MapacheSPIMConsole(cmd.Cmd):
         print(file=self.stdout)
         return self.do_quit(arg)
 
-    # --- Aliases ---
-    do_q = do_quit
-    do_r = do_run
-    do_s = do_step
-    do_sr = do_stepreg
-    do_c = do_continue
-    do_b = do_break
-    do_d = do_disasm
+    # --- Aliases (hidden from help) ---
+    # These are implemented via _ALIASES dict and do_help override
+    _ALIASES = {
+        'q': 'quit',
+        'r': 'run',
+        's': 'step',
+        'sr': 'stepreg',
+        'c': 'continue',
+        'b': 'break',
+        'd': 'disasm',
+        'l': 'list',
+    }
+
+    def default(self, line):
+        """Handle aliases and unknown commands"""
+        cmd = line.split()[0] if line.split() else ''
+        if cmd in self._ALIASES:
+            # Replace alias with full command and re-execute
+            full_cmd = self._ALIASES[cmd]
+            rest = line[len(cmd):].strip()
+            return self.onecmd(f'{full_cmd} {rest}'.strip())
+        return super().default(line)
+
+    def do_help(self, arg):
+        """Show help for commands
+
+        Usage:
+            help [command]
+
+        Shows a list of available commands, or detailed help for a
+        specific command if provided.
+
+        Examples:
+            help            # List all commands
+            help step       # Detailed help for step command
+            help load       # Detailed help for load command
+        """
+        if arg:
+            # Check if asking about an alias
+            if arg in self._ALIASES:
+                arg = self._ALIASES[arg]
+            # Use default help for specific command
+            super().do_help(arg)
+        else:
+            # Custom help listing that groups aliases
+            print(file=self.stdout)
+            print('MapacheSPIM Commands:', file=self.stdout)
+            print('=' * 60, file=self.stdout)
+            print(file=self.stdout)
+
+            # Group commands by category
+            categories = {
+                'Loading & Running': [
+                    ('load', 'Load an ELF file'),
+                    ('run (r)', 'Run program until halt or breakpoint'),
+                    ('step (s)', 'Execute one or more instructions'),
+                    ('stepreg (sr)', 'Step and show registers'),
+                    ('continue (c)', 'Continue after breakpoint'),
+                    ('reset', 'Reset simulator state'),
+                ],
+                'Inspection': [
+                    ('regs', 'Display all registers'),
+                    ('pc', 'Display program counter'),
+                    ('mem', 'Display memory contents'),
+                    ('disasm (d)', 'Disassemble instructions'),
+                    ('list (l)', 'Show source code (if debug info)'),
+                    ('status', 'Show simulator status'),
+                    ('info', 'Show breakpoints/symbols/sections'),
+                ],
+                'Breakpoints': [
+                    ('break (b)', 'Set a breakpoint'),
+                    ('delete', 'Delete a breakpoint'),
+                    ('clear', 'Clear all breakpoints'),
+                ],
+                'Configuration': [
+                    ('set', 'Configure display options'),
+                ],
+                'Other': [
+                    ('help', 'Show this help'),
+                    ('quickstart', 'Tutorial for new users'),
+                    ('quit (q)', 'Exit the console'),
+                ],
+            }
+
+            for category, commands in categories.items():
+                print(f'{category}:', file=self.stdout)
+                for cmd, desc in commands:
+                    print(f'  {cmd:<16} {desc}', file=self.stdout)
+                print(file=self.stdout)
+
+            print('Type "help <command>" for detailed help on any command.', file=self.stdout)
+            print('Shortcuts shown in parentheses (e.g., "s" for "step").', file=self.stdout)
+            print(file=self.stdout)
+
+    # --- Tab Completion ---
+
+    def complete_load(self, text, line, begidx, endidx):
+        """Tab completion for load command - completes file paths"""
+        import glob
+
+        # Get the partial path being typed
+        if text:
+            # Expand ~ to home directory
+            expanded = Path(text).expanduser()
+            if text.endswith('/'):
+                # User typed a directory, list its contents
+                pattern = str(expanded) + '*'
+            else:
+                pattern = str(expanded) + '*'
+        else:
+            # No text yet, list current directory
+            pattern = '*'
+
+        # Get matching paths
+        matches = glob.glob(pattern)
+
+        # Format completions
+        completions = []
+        for match in matches:
+            path = Path(match)
+            if path.is_dir():
+                # Add trailing slash for directories
+                completions.append(match + '/')
+            elif path.is_file():
+                # Include files (could filter for ELF files)
+                completions.append(match)
+
+        # If user typed partial text, only return the part after what they typed
+        if text:
+            prefix_len = len(text) - len(Path(text).name)
+            completions = [c[prefix_len:] if c.startswith(text[:prefix_len]) else c for c in completions]
+
+        return completions
+
+    def complete_break(self, text, line, begidx, endidx):
+        """Tab completion for break command - completes symbol names"""
+        if not self.loaded_file:
+            return []
+
+        symbols = self.sim.get_symbols()
+        if text:
+            return [s for s in symbols.keys() if s.startswith(text)]
+        return list(symbols.keys())
+
+    def complete_info(self, text, line, begidx, endidx):
+        """Tab completion for info command"""
+        options = ['breakpoints', 'break', 'symbols', 'sym', 'sections', 'sec']
+        if text:
+            return [o for o in options if o.startswith(text)]
+        return options
+
+    def complete_set(self, text, line, begidx, endidx):
+        """Tab completion for set command"""
+        parts = line.split()
+        if len(parts) <= 2:
+            # Completing option name
+            options = ['show-changes', 'regs-base', 'regs-leading-zeros']
+            if text:
+                return [o for o in options if o.startswith(text)]
+            return options
+        elif len(parts) == 3 or (len(parts) == 2 and text):
+            # Completing value for option
+            option = parts[1] if len(parts) >= 2 else ''
+            if option == 'show-changes':
+                values = ['on', 'off']
+            elif option == 'regs-base':
+                values = ['hex', 'decimal', 'binary']
+            elif option == 'regs-leading-zeros':
+                values = ['default', 'show', 'cut', 'dot']
+            else:
+                return []
+            if text:
+                return [v for v in values if v.startswith(text)]
+            return values
+        return []
+
+    def complete_mem(self, text, line, begidx, endidx):
+        """Tab completion for mem command - completes section names"""
+        sections = ['.text', '.data', '.rodata', '.bss']
+        if text:
+            return [s for s in sections if s.startswith(text)]
+        return sections
+
+    # --- Quick Start Guide ---
+
+    def do_quickstart(self, arg):
+        """Show a quick start tutorial for new users
+
+        Usage:
+            quickstart
+
+        Displays a step-by-step guide for common operations,
+        perfect for students learning assembly for the first time.
+        """
+        print(file=self.stdout)
+        print('=' * 60, file=self.stdout)
+        print('MapacheSPIM Quick Start Guide', file=self.stdout)
+        print('=' * 60, file=self.stdout)
+        print(file=self.stdout)
+        print('1. LOAD A PROGRAM', file=self.stdout)
+        print('   load examples/riscv/fibonacci/fibonacci', file=self.stdout)
+        print('   (Use Tab to autocomplete file paths!)', file=self.stdout)
+        print(file=self.stdout)
+        print('2. SEE WHERE YOU ARE', file=self.stdout)
+        print('   pc              - Show program counter', file=self.stdout)
+        print('   disasm <addr>   - Disassemble instructions', file=self.stdout)
+        print('   regs            - Show all registers', file=self.stdout)
+        print(file=self.stdout)
+        print('3. EXECUTE CODE', file=self.stdout)
+        print('   step (s)        - Execute one instruction', file=self.stdout)
+        print('   step 5          - Execute 5 instructions', file=self.stdout)
+        print('   run             - Run until program ends', file=self.stdout)
+        print('   run 100         - Run at most 100 instructions', file=self.stdout)
+        print(file=self.stdout)
+        print('4. SET BREAKPOINTS', file=self.stdout)
+        print('   break <addr>    - Set breakpoint at address', file=self.stdout)
+        print('   break main      - Set breakpoint at symbol', file=self.stdout)
+        print('   info break      - List all breakpoints', file=self.stdout)
+        print('   continue (c)    - Resume after breakpoint', file=self.stdout)
+        print(file=self.stdout)
+        print('5. EXAMINE MEMORY', file=self.stdout)
+        print('   mem 0x80000000  - Show memory at address', file=self.stdout)
+        print('   mem .data       - Show data section', file=self.stdout)
+        print(file=self.stdout)
+        print('6. TIPS FOR DEBUGGING', file=self.stdout)
+        print('   - Stars (★) in regs show changed registers', file=self.stdout)
+        print('   - Use stepreg (sr) to step and see registers', file=self.stdout)
+        print('   - Use Ctrl-C to interrupt a running program', file=self.stdout)
+        print('   - Most commands have short aliases (s, r, c, b)', file=self.stdout)
+        print(file=self.stdout)
+        print('Type "help <command>" for detailed help.', file=self.stdout)
+        print('=' * 60, file=self.stdout)
+        print(file=self.stdout)
 
 
 def main():
