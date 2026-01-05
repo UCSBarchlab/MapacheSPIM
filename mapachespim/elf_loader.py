@@ -2,7 +2,7 @@
 Pure Python ELF file loader using pyelftools
 
 Replaces the C++ ELFIO-based loader with a clean Python implementation.
-Supports RISC-V and ARM64 ELF binaries.
+Supports RISC-V, ARM64, and x86-64 ELF binaries.
 """
 
 from dataclasses import dataclass
@@ -24,7 +24,8 @@ class ISA(IntEnum):
     """ISA types - matches the C++ enum"""
     RISCV = 0
     ARM = 1
-    UNKNOWN = 2
+    X86_64 = 2
+    UNKNOWN = -1
 
 
 class Architecture(IntEnum):
@@ -33,7 +34,8 @@ class Architecture(IntEnum):
     RV64 = 1
     ARM32 = 2
     ARM64 = 3
-    UNKNOWN = 4
+    X86_64 = 4
+    UNKNOWN = -1
 
 
 @dataclass
@@ -74,6 +76,8 @@ def detect_isa_from_elf(elf):
         return ISA.ARM
     elif machine == 'EM_ARM':
         return ISA.ARM  # 32-bit ARM (we'll treat as ARM for now)
+    elif machine == 'EM_X86_64':
+        return ISA.X86_64
     else:
         return ISA.UNKNOWN
 
@@ -101,6 +105,9 @@ def detect_architecture(elf, isa):
             return Architecture.ARM64
         elif elf_class == 'ELFCLASS32':
             return Architecture.ARM32
+    elif isa == ISA.X86_64:
+        # x86-64 is always 64-bit
+        return Architecture.X86_64
 
     return Architecture.UNKNOWN
 

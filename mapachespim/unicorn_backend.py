@@ -11,10 +11,18 @@ from pathlib import Path
 
 try:
     from unicorn import Uc, UcError, UC_ARCH_RISCV, UC_MODE_RISCV64, UC_ARCH_ARM64, UC_MODE_ARM
+    from unicorn import UC_ARCH_X86, UC_MODE_64
     from unicorn import UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE
     from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_UNMAPPED
     from unicorn.riscv_const import UC_RISCV_REG_PC, UC_RISCV_REG_X0, UC_RISCV_REG_SP
     from unicorn.arm64_const import UC_ARM64_REG_PC, UC_ARM64_REG_X0, UC_ARM64_REG_SP
+    from unicorn.x86_const import (
+        UC_X86_REG_RIP, UC_X86_REG_RSP,
+        UC_X86_REG_RAX, UC_X86_REG_RBX, UC_X86_REG_RCX, UC_X86_REG_RDX,
+        UC_X86_REG_RSI, UC_X86_REG_RDI, UC_X86_REG_RBP,
+        UC_X86_REG_R8, UC_X86_REG_R9, UC_X86_REG_R10, UC_X86_REG_R11,
+        UC_X86_REG_R12, UC_X86_REG_R13, UC_X86_REG_R14, UC_X86_REG_R15
+    )
 except ImportError as e:
     raise ImportError(
         "Unicorn Engine not installed. Install with: pip install unicorn\n"
@@ -23,6 +31,7 @@ except ImportError as e:
 
 try:
     from capstone import Cs, CS_ARCH_RISCV, CS_MODE_RISCV64, CS_ARCH_ARM64, CS_MODE_ARM
+    from capstone import CS_ARCH_X86, CS_MODE_64 as CS_MODE_X86_64
 except ImportError as e:
     raise ImportError(
         "Capstone not installed. Install with: pip install capstone\n"
@@ -36,6 +45,7 @@ class ISA(IntEnum):
     """ISA types supported by the simulator"""
     RISCV = 0
     ARM = 1
+    X86_64 = 2
     UNKNOWN = -1
 
 
@@ -158,16 +168,65 @@ class ARM64Config(ISAConfig):
             return False
 
 
+class X86_64Config(ISAConfig):
+    """x86-64 configuration"""
+
+    # x86-64 register constants ordered for our API
+    _GPR_REGS = [
+        UC_X86_REG_RAX, UC_X86_REG_RCX, UC_X86_REG_RDX, UC_X86_REG_RBX,
+        UC_X86_REG_RSP, UC_X86_REG_RBP, UC_X86_REG_RSI, UC_X86_REG_RDI,
+        UC_X86_REG_R8, UC_X86_REG_R9, UC_X86_REG_R10, UC_X86_REG_R11,
+        UC_X86_REG_R12, UC_X86_REG_R13, UC_X86_REG_R14, UC_X86_REG_R15
+    ]
+
+    _GPR_NAMES = [
+        "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
+        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
+    ]
+
+    def __init__(self):
+        super().__init__(UC_ARCH_X86, UC_MODE_64)
+
+    def get_pc_reg(self):
+        return UC_X86_REG_RIP
+
+    def get_sp_reg(self):
+        return UC_X86_REG_RSP
+
+    def get_gpr_reg(self, n):
+        """Get x86-64 register constant for register n (0-15)"""
+        if not 0 <= n <= 15:
+            raise ValueError(f"Register number must be 0-15 for x86-64, got {n}")
+        return self._GPR_REGS[n]
+
+    def get_reg_name(self, n):
+        """Get x86-64 register name"""
+        if 0 <= n <= 15:
+            return self._GPR_NAMES[n]
+        return f"?{n}"
+
+    def detect_syscall(self, uc, pc):
+        """Check if instruction at PC is 'syscall' (0x0F 0x05)"""
+        try:
+            instr_bytes = uc.mem_read(pc, 2)
+            return instr_bytes[0] == 0x0F and instr_bytes[1] == 0x05
+        except Exception:
+            return False
+
+
 class Disassembler:
-    """Capstone-based disassembler for RISC-V and ARM64"""
+    """Capstone-based disassembler for RISC-V, ARM64, and x86-64"""
 
     def __init__(self, isa):
         if isa == ISA.RISCV:
             self._cs = Cs(CS_ARCH_RISCV, CS_MODE_RISCV64)
         elif isa == ISA.ARM:
             self._cs = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
+        elif isa == ISA.X86_64:
+            self._cs = Cs(CS_ARCH_X86, CS_MODE_X86_64)
         else:
             raise ValueError(f"Unsupported ISA for disassembly: {isa}")
+        self._isa = isa
 
         self._cs.detail = False  # We don't need detailed instruction info
 
@@ -183,8 +242,9 @@ class Disassembler:
             str: Disassembled instruction string
         """
         try:
-            # Read 4 bytes (standard RISC-V and ARM instruction size)
-            code = simulator.read_mem(addr, 4)
+            # Read bytes - x86 instructions can be up to 15 bytes, RISC-V/ARM are 4
+            read_size = 15 if self._isa == ISA.X86_64 else 4
+            code = simulator.read_mem(addr, read_size)
         except Exception:
             return "<invalid address>"
 
@@ -193,7 +253,11 @@ class Disassembler:
             return f"{instr.mnemonic} {instr.op_str}".strip()
 
         # If disassembly failed, show raw bytes
-        word = int.from_bytes(code, byteorder='little')
+        if self._isa == ISA.X86_64:
+            # Show first 4 bytes for x86
+            word = int.from_bytes(code[:4], byteorder='little')
+        else:
+            word = int.from_bytes(code, byteorder='little')
         return f".word 0x{word:08x}"
 
 
@@ -234,6 +298,8 @@ class UnicornSimulator:
             self._config = RISCVConfig()
         elif isa == ISA.ARM:
             self._config = ARM64Config()
+        elif isa == ISA.X86_64:
+            self._config = X86_64Config()
         else:
             raise ValueError(f"Unsupported ISA: {isa}")
 
@@ -280,6 +346,17 @@ class UnicornSimulator:
             # Map 1MB at address 0 for ARM tests
             try:
                 self._uc.mem_map(0x0, 0x100000, UC_PROT_ALL)
+            except UcError:
+                pass
+        elif self._config.arch == UC_ARCH_X86:
+            # Map main region (4MB from 0x400000) for x86-64 executables
+            try:
+                self._uc.mem_map(0x400000, 0x400000, UC_PROT_ALL)
+            except UcError:
+                pass
+            # Map stack region (2MB ending near 0x7FFFFFFFFFFF - typical Linux)
+            try:
+                self._uc.mem_map(0x7FFFFE00000, 0x200000, UC_PROT_ALL)
             except UcError:
                 pass
         else:  # RISC-V
@@ -355,6 +432,8 @@ class UnicornSimulator:
             detected_isa = ISA.RISCV
         elif elf_info.isa == ELF_ISA.ARM:
             detected_isa = ISA.ARM
+        elif elf_info.isa == ELF_ISA.X86_64:
+            detected_isa = ISA.X86_64
         else:
             raise RuntimeError(f"Unknown ISA in ELF file: {elf_path}")
 
@@ -399,17 +478,21 @@ class UnicornSimulator:
         pc = self.get_pc()
 
         try:
-            # Execute one instruction (assume 4-byte instructions for RISC-V/ARM)
+            # Execute one instruction
+            # x86 instructions can be up to 15 bytes, RISC-V/ARM are 4 bytes
+            max_instr_size = 15 if self._isa == ISA.X86_64 else 4
             # The hook will stop execution if a syscall is detected
-            self._uc.emu_start(pc, pc + 4, count=1)
+            self._uc.emu_start(pc, pc + max_instr_size, count=1)
         except UcError as e:
             self._last_error = f"Execution error at PC=0x{pc:x}: {e}"
             return StepResult.ERROR
 
         # Check if we hit a syscall
         if self._pending_syscall:
-            # Advance PC past the syscall instruction before returning
-            self.set_pc(pc + 4)
+            # Advance PC past the syscall instruction
+            # x86-64 syscall is 2 bytes, RISC-V ecall/ARM svc are 4 bytes
+            syscall_size = 2 if self._isa == ISA.X86_64 else 4
+            self.set_pc(pc + syscall_size)
             return StepResult.SYSCALL
 
         return StepResult.OK
@@ -453,7 +536,7 @@ class UnicornSimulator:
         Get register value
 
         Args:
-            reg_num (int): Register number (0-31)
+            reg_num (int): Register number (0-31 for RISC-V/ARM, 0-15 for x86-64)
 
         Returns:
             int: Register value (64-bit)
@@ -461,8 +544,9 @@ class UnicornSimulator:
         if self._uc is None:
             return 0
 
-        if not 0 <= reg_num <= 31:
-            raise ValueError(f"Register number must be 0-31, got {reg_num}")
+        max_reg = 15 if self._isa == ISA.X86_64 else 31
+        if not 0 <= reg_num <= max_reg:
+            raise ValueError(f"Register number must be 0-{max_reg}, got {reg_num}")
 
         reg = self._config.get_gpr_reg(reg_num)
         return self._uc.reg_read(reg)
@@ -472,14 +556,21 @@ class UnicornSimulator:
         Set register value
 
         Args:
-            reg_num (int): Register number (1-31, x0 is read-only)
+            reg_num (int): Register number (1-31 for RISC-V, 0-15 for x86-64)
+                          x0 is read-only on RISC-V
             value (int): Value to set (64-bit)
         """
         if self._uc is None:
             return
 
-        if not 1 <= reg_num <= 31:
-            raise ValueError(f"Register number must be 1-31, got {reg_num}")
+        if self._isa == ISA.X86_64:
+            # x86-64: all 16 registers (0-15) are writable
+            if not 0 <= reg_num <= 15:
+                raise ValueError(f"Register number must be 0-15, got {reg_num}")
+        else:
+            # RISC-V/ARM: x0 is read-only
+            if not 1 <= reg_num <= 31:
+                raise ValueError(f"Register number must be 1-31, got {reg_num}")
 
         reg = self._config.get_gpr_reg(reg_num)
         self._uc.reg_write(reg, value & 0xFFFFFFFFFFFFFFFF)
@@ -612,9 +703,25 @@ class UnicornSimulator:
         Get all register values as a list
 
         Returns:
-            list: List of 32 register values (x0-x31)
+            list: List of register values (32 for RISC-V/ARM, 16 for x86-64)
         """
-        return [self.get_reg(i) for i in range(32)]
+        num_regs = 16 if self._isa == ISA.X86_64 else 32
+        return [self.get_reg(i) for i in range(num_regs)]
+
+    def _get_syscall_regs(self):
+        """
+        Get syscall register mappings for current ISA
+
+        Returns:
+            tuple: (syscall_num_reg, arg0_reg, result_reg)
+        """
+        if self._isa == ISA.X86_64:
+            # x86-64 Linux syscall ABI: rax=syscall#, rdi=arg0, return in rax
+            # Our register indices: rax=0, rdi=7
+            return (0, 7, 0)
+        else:
+            # RISC-V/ARM: a7=syscall# (x17), a0=arg0 (x10), return in a0
+            return (17, 10, 10)
 
     def _handle_syscall(self):
         """
@@ -623,20 +730,20 @@ class UnicornSimulator:
         Returns:
             bool: True if program should exit, False otherwise
         """
-        # Get syscall number from a7 (x17)
-        syscall_num = self.get_reg(17)
+        syscall_reg, arg_reg, result_reg = self._get_syscall_regs()
+        syscall_num = self.get_reg(syscall_reg)
 
         if syscall_num == 1:
-            # print_int - Print integer in a0
-            value = self.get_reg(10)  # a0 = x10
+            # print_int - Print integer in arg0
+            value = self.get_reg(arg_reg)
             # Convert to signed 64-bit for proper display
             if value & (1 << 63):
                 value = value - (1 << 64)
             print(value, end='')
 
         elif syscall_num == 4:
-            # print_string - Print null-terminated string at address in a0
-            addr = self.get_reg(10)  # a0 = x10
+            # print_string - Print null-terminated string at address in arg0
+            addr = self.get_reg(arg_reg)
             chars = []
             try:
                 while True:
@@ -652,29 +759,29 @@ class UnicornSimulator:
                 pass
 
         elif syscall_num == 5:
-            # read_int - Read integer from stdin, return in a0
+            # read_int - Read integer from stdin, return in result reg
             try:
                 value = int(input())
-                self.set_reg(10, value & 0xFFFFFFFFFFFFFFFF)
+                self.set_reg(result_reg, value & 0xFFFFFFFFFFFFFFFF)
             except Exception:
-                self.set_reg(10, 0)
+                self.set_reg(result_reg, 0)
 
         elif syscall_num == 10:
             # exit - Terminate program
             return True
 
         elif syscall_num == 11:
-            # print_char - Print character in a0
-            char_code = self.get_reg(10) & 0xFF
+            # print_char - Print character in arg0
+            char_code = self.get_reg(arg_reg) & 0xFF
             print(chr(char_code), end='')
 
         elif syscall_num == 12:
-            # read_char - Read character from stdin, return in a0
+            # read_char - Read character from stdin, return in result reg
             try:
                 char = input()[0] if input() else '\0'
-                self.set_reg(10, ord(char))
+                self.set_reg(result_reg, ord(char))
             except Exception:
-                self.set_reg(10, 0)
+                self.set_reg(result_reg, 0)
 
         elif syscall_num == 93:
             # exit_code - Exit with code in a0
@@ -741,7 +848,7 @@ def detect_elf_isa(elf_path):
         elf_path (str): Path to ELF file
 
     Returns:
-        ISA: ISA type (ISA.RISCV, ISA.ARM, or ISA.UNKNOWN)
+        ISA: ISA type (ISA.RISCV, ISA.ARM, ISA.X86_64, or ISA.UNKNOWN)
     """
     try:
         elf_info = load_elf_file(elf_path)
@@ -749,6 +856,8 @@ def detect_elf_isa(elf_path):
             return ISA.RISCV
         elif elf_info.isa == ELF_ISA.ARM:
             return ISA.ARM
+        elif elf_info.isa == ELF_ISA.X86_64:
+            return ISA.X86_64
     except Exception:
         pass
 
