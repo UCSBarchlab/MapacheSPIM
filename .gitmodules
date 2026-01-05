@@ -1,6 +1,0 @@
-[submodule "sail-riscv"]
-	path = backends/riscv/sail-riscv
-	url = https://github.com/riscv/sail-riscv.git
-[submodule "backends/arm/sail-arm"]
-	path = backends/arm/sail-arm
-	url = https://github.com/rems-project/sail-arm

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """
-Symbol table tests for MapacheSail
+Symbol table tests for MapacheSPIM
 
-Tests the symbol table functionality provided by Sail's ELF loader,
-which is ISA-agnostic and works for any architecture Sail supports.
+Tests the symbol table functionality provided by the ELF loader.
 """
 
 import sys
@@ -13,7 +12,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim.sail_backend import SailSimulator
+from mapachespim import SailSimulator
 from mapachespim.console import MapacheSPIMConsole
 
 
@@ -217,24 +216,19 @@ class TestSymbolsInConsole(unittest.TestCase):
         # Step from entry point
         # Output should include symbol name if available
         import io
-        import sys
 
-        # Capture output
+        # Capture output by redirecting console's stdout
         captured = io.StringIO()
-        old_stdout = sys.stdout
-        sys.stdout = captured
+        self.console.stdout = captured
 
-        try:
-            self.console.onecmd('step')
-            output = captured.getvalue()
+        self.console.onecmd('step')
+        output = captured.getvalue()
 
-            # Output should contain an address
-            self.assertIn('[0x', output)
+        # Output should contain an address
+        self.assertIn('[0x', output)
 
-            # If there's a symbol at PC, it should be shown
-            # (This is an integration test for enhanced step display)
-        finally:
-            sys.stdout = old_stdout
+        # If there's a symbol at PC, it should be shown
+        # (This is an integration test for enhanced step display)
 
 
 class TestSymbolEdgeCases(unittest.TestCase):

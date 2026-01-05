@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unit tests for MapacheSail simulator
+Unit tests for MapacheSPIM simulator
 
 Tests the Python API with multiple RISC-V programs and edge cases.
 """
@@ -276,7 +276,7 @@ class TestEdgeCases(unittest.TestCase):
     def test_load_nonexistent_file(self):
         """Test loading a file that doesn't exist"""
         sim = SailSimulator()
-        with self.assertRaises(RuntimeError):
+        with self.assertRaises((FileNotFoundError, RuntimeError)):
             sim.load_elf("nonexistent.elf")
 
     def test_step_before_load(self):

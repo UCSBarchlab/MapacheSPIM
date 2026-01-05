@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Comprehensive disassembly tests for MapacheSail
+Comprehensive disassembly tests for MapacheSPIM
 """
 
 import sys
@@ -10,7 +10,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim.sail_backend import SailSimulator
+from mapachespim import SailSimulator
 from mapachespim.console import MapacheSPIMConsole
 
 
@@ -26,20 +26,23 @@ class TestDisassemblyAPI(unittest.TestCase):
         """Test basic disassembly of first instruction"""
         disasm = self.sim.disasm(0x80000000)
         self.assertIn('addi', disasm.lower())
-        self.assertIn('x5', disasm)
+        # Capstone uses ABI names (t0) instead of numeric (x5)
+        self.assertIn('t0', disasm)
 
     def test_disasm_all_test_simple_instructions(self):
         """Test disassembly of all 9 instructions in test_simple"""
+        # Using ABI register names (Capstone default)
+        # Note: Capstone uses pseudo-instructions like 'j' instead of 'jal zero'
         expected = [
-            ('0x80000000', 'addi', 'x5'),  # li t0, 10
-            ('0x80000004', 'addi', 'x6'),  # li t1, 20
-            ('0x80000008', 'add', 'x7'),   # add t2, t0, t1
-            ('0x8000000c', 'sub', 'x8'),   # sub s0, t2, t0
-            ('0x80000010', 'slli', 'x9'),  # slli s1, t0, 2
-            ('0x80000014', 'addi', 'x10'), # li a0, 42
-            ('0x80000018', 'jal', 'x0'),   # j done
-            ('0x8000001c', 'addi', 'x1'),  # li ra, 93
-            ('0x80000020', 'ecall'),       # ecall
+            ('0x80000000', 'addi', 't0'),   # li t0, 10
+            ('0x80000004', 'addi', 't1'),   # li t1, 20
+            ('0x80000008', 'add', 't2'),    # add t2, t0, t1
+            ('0x8000000c', 'sub', 's0'),    # sub s0, t2, t0
+            ('0x80000010', 'slli', 's1'),   # slli s1, t0, 2
+            ('0x80000014', 'addi', 'a0'),   # li a0, 42
+            ('0x80000018', 'j'),            # j done (pseudo for jal zero, offset)
+            ('0x8000001c', 'addi', 'ra'),   # li ra, 93
+            ('0x80000020', 'ecall'),        # ecall
         ]
 
         for addr_str, expected_mnemonic, *expected_regs in expected:
@@ -57,28 +60,28 @@ class TestDisassemblyAPI(unittest.TestCase):
 
     def test_disasm_instruction_types(self):
         """Test different RISC-V instruction types"""
-        # R-type (add x7, x5, x6)
+        # R-type (add t2, t0, t1)
         disasm = self.sim.disasm(0x80000008)
         self.assertIn('add', disasm.lower())
-        self.assertIn('x7', disasm)
-        self.assertIn('x5', disasm)
-        self.assertIn('x6', disasm)
+        self.assertIn('t2', disasm)  # ABI name for x7
+        self.assertIn('t0', disasm)  # ABI name for x5
+        self.assertIn('t1', disasm)  # ABI name for x6
 
-        # I-type (addi x5, x0, 10)
+        # I-type (addi t0, zero, 10)
         disasm = self.sim.disasm(0x80000000)
         self.assertIn('addi', disasm.lower())
-        self.assertIn('x5', disasm)
+        self.assertIn('t0', disasm)  # ABI name for x5
         self.assertIn('0xa', disasm.lower())  # immediate value
 
-        # I-type shift (slli x9, x5, 2)
+        # I-type shift (slli s1, t0, 2)
         disasm = self.sim.disasm(0x80000010)
         self.assertIn('slli', disasm.lower())
-        self.assertIn('x9', disasm)
-        self.assertIn('0x2', disasm.lower())
+        self.assertIn('s1', disasm)  # ABI name for x9
+        self.assertIn('2', disasm)  # shift amount (may be decimal or hex)
 
-        # J-type (jal x0, offset)
+        # J-type - Capstone shows 'j' pseudo-instruction instead of 'jal zero'
         disasm = self.sim.disasm(0x80000018)
-        self.assertIn('jal', disasm.lower())
+        self.assertIn('j', disasm.lower())
 
         # System (ecall)
         disasm = self.sim.disasm(0x80000020)
@@ -99,17 +102,17 @@ class TestDisassemblyAPI(unittest.TestCase):
         self.assertIn('0x2a', disasm.lower())  # 42 in hex
 
     def test_disasm_register_names(self):
-        """Test that register names are correct"""
-        # Check various register names appear
+        """Test that register names are correct (using ABI names)"""
+        # Check various ABI register names appear
         disasm = self.sim.disasm(0x80000000)
-        self.assertIn('x5', disasm)  # t0
-        self.assertIn('x0', disasm)  # zero
+        self.assertIn('t0', disasm)    # ABI name for x5
+        self.assertIn('zero', disasm)  # ABI name for x0
 
         disasm = self.sim.disasm(0x80000014)
-        self.assertIn('x10', disasm)  # a0
+        self.assertIn('a0', disasm)    # ABI name for x10
 
         disasm = self.sim.disasm(0x8000001c)
-        self.assertIn('x1', disasm)  # ra
+        self.assertIn('ra', disasm)    # ABI name for x1
 
     def test_disasm_invalid_address(self):
         """Test disassembly of invalid address"""
@@ -220,7 +223,7 @@ class TestDisassemblyIntegration(unittest.TestCase):
         # Disassemble at new PC
         disasm = self.sim.disasm(pc)
         self.assertIn('addi', disasm.lower())
-        self.assertIn('x6', disasm)
+        self.assertIn('t1', disasm)  # ABI name for x6
 
     def test_disasm_multiple_steps(self):
         """Test disassembling after multiple steps"""

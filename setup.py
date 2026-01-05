@@ -39,5 +39,7 @@ setup(
     },
     install_requires=[
         "pyelftools>=0.29",  # ELF file parsing for section inspection
+        "unicorn>=2.0.0",     # CPU emulator framework
+        "capstone>=5.0.0",    # Disassembler
     ],
 )

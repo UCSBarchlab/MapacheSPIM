@@ -1,17 +1,17 @@
 # MapacheSPIM <img src="docs/Mapache.png" alt="MapacheSPIM Logo" width="100">
 
-MapacheSPIM is a SPIM-like simulator for assembly programming built on the Sail formal specification. It provides 
-an interactive, console-based environment for learning assembly language, debugging programs 
-instruction-by-instruction, and exploring computer architecture concepts.  This is code is experimental and not supported just yet.
+MapacheSPIM is a SPIM-like simulator for assembly programming built on the Unicorn Engine CPU emulator. It provides
+an interactive, console-based environment for learning assembly language, debugging programs
+instruction-by-instruction, and exploring computer architecture concepts across multiple ISAs.
 
 ### Why MapacheSPIM?
 
-When teaching computer architecture or learning a new ISA, you need a simple, interactive way to see exactly 
-what's happening at the machine level. Traditional simulators are often complex, opaque, or tied to a single 
-architecture. MapacheSPIM provides a 
-[SPIM](https://en.wikipedia.org/wiki/SPIM)-like experience - familiar 
-commands, clear output, and the ability to step through code one instruction at a time - but built on formally 
-verified ISA specifications using the [Sail language](https://github.com/rems-project/sail).
+When teaching computer architecture or learning a new ISA, you need a simple, interactive way to see exactly
+what's happening at the machine level. Traditional simulators are often complex, opaque, or tied to a single
+architecture. MapacheSPIM provides a
+[SPIM](https://en.wikipedia.org/wiki/SPIM)-like experience - familiar
+commands, clear output, and the ability to step through code one instruction at a time - powered by the
+battle-tested [Unicorn Engine](https://www.unicorn-engine.org/) CPU emulator.
 
 MapacheSPIM is designed for:
 - **Students** learning assembly programming and computer architecture
@@ -34,9 +34,12 @@ pip install -e .
 
 **Prerequisites:**
 - Python 3.8+
-- CMake 3.10+ (for building the C backend)
-- C++ compiler (GCC or Clang)
-- RISC-V toolchain (optional, for compiling your own assembly)
+- RISC-V or ARM toolchain (optional, for compiling your own assembly)
+
+**Dependencies** (automatically installed):
+- `unicorn>=2.0.0` - CPU emulator framework
+- `capstone>=5.0.0` - Disassembler
+- `pyelftools>=0.29` - ELF file parsing
 
 ### Running MapacheSPIM
 
@@ -191,30 +194,30 @@ See [Console Guide](docs/user/console-guide.md) for complete command reference.
 
 ## What Makes This Special?
 
-### Built on Formal Specifications
+### Built on Unicorn Engine
 
-MapacheSPIM uses the [Sail RISC-V](https://github.com/riscv/sail-riscv) formal specification - the official model adopted by RISC-V International. This means:
+MapacheSPIM is powered by the [Unicorn Engine](https://www.unicorn-engine.org/), a battle-tested CPU emulator framework based on QEMU. This means:
 
-- **Formally Verified** - ISA semantics are mathematically proven correct
-- **Complete** - All RISC-V extensions supported (RV32/64 I/M/A/F/D/C)
-- **Up-to-Date** - Maintained by ISA experts, always current
-- **Educational** - Learn formal methods alongside assembly
+- **Reliable** - Built on the same codebase that powers countless virtual machines
+- **Multi-ISA** - Support for RISC-V 64-bit and ARM64 (AArch64) out of the box
+- **Fast** - Efficient emulation using proven QEMU technology
+- **Easy to Install** - Pure `pip install`, no C/C++ compilation required
 
-The simulator executes the *exact* same Sail code that's used to verify RISC-V processors. You're learning from the official specification, not someone's interpretation.
+### Multi-ISA Support
 
-### ISA-Agnostic Architecture
-
-The core simulator is completely ISA-independent:
+MapacheSPIM supports multiple instruction set architectures:
 
 ```
 MapacheSPIM/
-├── lib/                 # ISA-agnostic core (C/Python)
-├── backends/riscv/      # RISC-V Sail backend
-├── backends/arm/        # ARM backend (future)
-└── backends/cheri/      # CHERI backend (future)
+├── mapachespim/
+│   ├── unicorn_backend.py   # Unicorn-based simulator
+│   ├── elf_loader.py        # ELF parsing with pyelftools
+│   └── console.py           # Interactive console
+├── examples/riscv/          # RISC-V example programs
+└── examples/arm/            # ARM64 example programs
 ```
 
-Adding a new architecture just requires adding a Sail specification - the console, debugging tools, and Python API work unchanged. This makes MapacheSPIM ideal for ISA research and exploring new architectures.
+The same console commands and Python API work across all supported ISAs. Just load an ELF file and MapacheSPIM detects the architecture automatically.
 
 ### Student-Friendly Design
 
@@ -236,13 +239,15 @@ Inspired by SPIM, designed for education:
 ## Testing
 
 ```bash
-# Run all test suites (137 tests total)
-python3 tests/test_simulator.py              # API tests (31 tests)
-python3 tests/test_console_working.py        # Console tests (38 tests)
-python3 tests/test_disasm_comprehensive.py   # Disassembly tests (30 tests)
-python3 tests/test_symbols.py                # Symbol tests (24 tests)
-python3 tests/test_program_correctness.py    # Correctness tests (10 tests)
-python3 tests/test_io_syscalls.py            # I/O syscall tests (4 tests)
+# Run all tests (183 tests)
+python -m pytest tests/ -v
+
+# Or run individual test suites
+python -m pytest tests/test_simulator.py           # Core API tests
+python -m pytest tests/test_console_commands.py    # Console tests
+python -m pytest tests/test_disasm_comprehensive.py  # Disassembly tests
+python -m pytest tests/test_symbols.py             # Symbol tests
+python -m pytest tests/test_multi_isa.py           # Multi-ISA tests
 ```
 
 All tests verify:
@@ -251,10 +256,12 @@ All tests verify:
 - Symbol table handling
 - Disassembly accuracy
 - Syscall behavior
+- Multi-ISA support (RISC-V and ARM)
 
 ## License
 
-- Sail RISC-V - BSD 2-Clause License
+- Unicorn Engine - GPLv2 License
+- Capstone - BSD License
 - MapacheSPIM - [Your License Here]
 - Examples - Educational use
 

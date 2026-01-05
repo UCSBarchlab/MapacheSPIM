@@ -1,1 +1,1 @@
-"""MapacheSail test suite"""
+"""MapacheSPIM test suite"""

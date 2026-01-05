@@ -6,63 +6,57 @@ Test ELF loading with ISA auto-detection
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mapachespim import create_simulator, detect_elf_isa, ISA
 
-def test_riscv_elf():
-    """Test loading a RISC-V ELF file"""
-    print("=== Testing RISC-V ELF Loading ===\n")
 
-    # Find a RISC-V test binary
-    riscv_test = Path("backends/riscv/sail-riscv/build/test/2025-07-16/riscv-tests/rv64ui-v-or")
+def test_riscv_elf_detection():
+    """Test ISA detection for RISC-V ELF file"""
+    riscv_elf = Path("examples/riscv/fibonacci/fibonacci")
+    assert riscv_elf.exists(), f"Test file not found: {riscv_elf}"
 
-    if not riscv_test.exists():
-        print(f"✗ Test binary not found: {riscv_test}")
-        return False
+    isa = detect_elf_isa(str(riscv_elf))
+    assert isa == ISA.RISCV, f"Expected RISC-V, got {isa.name}"
 
-    try:
-        # Detect ISA
-        print(f"Testing file: {riscv_test.name}")
-        isa = detect_elf_isa(str(riscv_test))
-        print(f"Detected ISA: {isa.name}")
-        assert isa == ISA.RISCV, f"Expected RISC-V, got {isa.name}"
 
-        # Create simulator with auto-detection
-        print("Creating simulator with auto-detection...")
-        sim = create_simulator(str(riscv_test))
+def test_arm_elf_detection():
+    """Test ISA detection for ARM ELF file"""
+    arm_elf = Path("examples/arm/test_simple/simple")
+    assert arm_elf.exists(), f"Test file not found: {arm_elf}"
 
-        print(f"✓ Simulator created and ELF loaded")
-        print(f"  Entry PC: 0x{sim.get_pc():x}")
+    isa = detect_elf_isa(str(arm_elf))
+    assert isa == ISA.ARM, f"Expected ARM, got {isa.name}"
 
-        # Try to execute a few instructions
-        print("Executing first 10 instructions...")
-        for i in range(10):
-            pc = sim.get_pc()
-            result = sim.step()
-            print(f"  [{i}] PC=0x{pc:08x} -> result={result.name}")
 
-        print("✓ RISC-V ELF test passed\n")
-        return True
+def test_create_simulator_riscv():
+    """Test create_simulator with RISC-V ELF"""
+    riscv_elf = "examples/riscv/fibonacci/fibonacci"
+    sim = create_simulator(riscv_elf)
 
-    except Exception as e:
-        print(f"✗ RISC-V ELF test failed: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
+    # Verify simulator was created and ELF loaded
+    pc = sim.get_pc()
+    assert pc != 0, "Entry PC should not be zero"
 
-def main():
-    print("MapacheSPIM ELF Loading Test\n")
-    print("=" * 50)
-    print()
+    # Execute a few instructions to verify it works
+    for _ in range(5):
+        sim.step()
 
-    riscv_ok = test_riscv_elf()
 
-    print("=" * 50)
-    print("\nTest Summary:")
-    print(f"  RISC-V ELF Loading: {'✓ PASS' if riscv_ok else '✗ FAIL'}")
+def test_create_simulator_arm():
+    """Test create_simulator with ARM ELF"""
+    arm_elf = "examples/arm/test_simple/simple"
+    sim = create_simulator(arm_elf)
 
-    return 0 if riscv_ok else 1
+    # Verify simulator was created and ELF loaded
+    pc = sim.get_pc()
+    assert pc != 0, "Entry PC should not be zero"
+
+    # Execute a few instructions to verify it works
+    for _ in range(5):
+        sim.step()
+
 
 if __name__ == "__main__":
-    sys.exit(main())
+    import pytest
+    sys.exit(pytest.main([__file__, "-v"]))
