@@ -15,7 +15,7 @@ from io import StringIO
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from mapachespim.console import MapacheSPIMConsole
-from mapachespim.sail_backend import StepResult
+from mapachespim import StepResult
 
 
 class TestConsoleCommands(unittest.TestCase):

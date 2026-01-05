@@ -9,7 +9,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim.sail_backend import SailSimulator, StepResult
+from mapachespim import SailSimulator, StepResult
 
 
 def test_run_to_completion():

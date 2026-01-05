@@ -246,6 +246,10 @@ class UnicornSimulator:
         # Create disassembler
         self._disasm = Disassembler(isa)
 
+        # Map a default memory region for tests that don't load ELF files
+        # This ensures basic operations like write_mem work even without load_elf
+        self._map_default_memory()
+
         # Install syscall detection hook
         self._install_syscall_hook()
 
@@ -269,6 +273,27 @@ class UnicornSimulator:
             return False  # Don't handle it, let it error
 
         self._uc.hook_add(UC_HOOK_MEM_UNMAPPED, unmapped_handler)
+
+    def _map_default_memory(self):
+        """Map default memory regions for tests without ELF files"""
+        if self._config.arch == UC_ARCH_ARM64:
+            # Map 1MB at address 0 for ARM tests
+            try:
+                self._uc.mem_map(0x0, 0x100000, UC_PROT_ALL)
+            except UcError:
+                pass
+        else:  # RISC-V
+            # Map main region (4MB from 0x80000000)
+            try:
+                self._uc.mem_map(0x80000000, 0x400000, UC_PROT_ALL)
+            except UcError:
+                pass
+
+            # Also map stack region for tests (include STACK_TOP itself)
+            try:
+                self._uc.mem_map(STACK_ADDR, STACK_SIZE + 0x100000, UC_PROT_ALL)
+            except UcError:
+                pass
 
     def _map_memory_for_segments(self, segments):
         """Map memory regions for ELF segments with page alignment"""
@@ -474,7 +499,9 @@ class UnicornSimulator:
             raise RuntimeError("Simulator not initialized")
 
         try:
-            return self._uc.mem_read(addr, length)
+            data = self._uc.mem_read(addr, length)
+            # Unicorn returns bytearray, but API expects bytes
+            return bytes(data)
         except UcError as e:
             raise RuntimeError(f"Failed to read memory at 0x{addr:x}: {e}")
 
