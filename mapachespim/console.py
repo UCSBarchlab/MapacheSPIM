@@ -1456,15 +1456,23 @@ class MapacheSPIMConsole(cmd.Cmd):
         """Tab completion for load command - completes file paths"""
         import glob
 
-        # Get the partial path being typed
-        if text:
-            # Expand ~ to home directory
-            expanded = Path(text).expanduser()
-            if text.endswith('/'):
-                # User typed a directory, list its contents
-                pattern = str(expanded) + '*'
-            else:
-                pattern = str(expanded) + '*'
+        # Handle ~ expansion
+        if text.startswith('~'):
+            expanded = str(Path(text).expanduser())
+            # Keep track that we need to show ~ in results
+            home_prefix = str(Path.home())
+            use_tilde = True
+        else:
+            expanded = text
+            use_tilde = False
+
+        # Build glob pattern
+        if expanded.endswith('/'):
+            # User typed a directory path ending in /, list its contents
+            pattern = expanded + '*'
+        elif expanded:
+            # User typed partial path, complete it
+            pattern = expanded + '*'
         else:
             # No text yet, list current directory
             pattern = '*'
@@ -1472,21 +1480,21 @@ class MapacheSPIMConsole(cmd.Cmd):
         # Get matching paths
         matches = glob.glob(pattern)
 
-        # Format completions
+        # Format completions - return full paths that replace `text`
         completions = []
         for match in matches:
             path = Path(match)
             if path.is_dir():
                 # Add trailing slash for directories
-                completions.append(match + '/')
-            elif path.is_file():
-                # Include files (could filter for ELF files)
-                completions.append(match)
+                result = match + '/'
+            else:
+                result = match
 
-        # If user typed partial text, only return the part after what they typed
-        if text:
-            prefix_len = len(text) - len(Path(text).name)
-            completions = [c[prefix_len:] if c.startswith(text[:prefix_len]) else c for c in completions]
+            # Convert back to ~ notation if user started with ~
+            if use_tilde and result.startswith(home_prefix):
+                result = '~' + result[len(home_prefix):]
+
+            completions.append(result)
 
         return completions
 

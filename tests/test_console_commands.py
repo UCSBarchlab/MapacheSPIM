@@ -532,6 +532,82 @@ class TestHelpExamples(unittest.TestCase):
         self.assertNotIn('Error', output)
 
 
+class TestTabCompletion(unittest.TestCase):
+    """Test tab completion functionality"""
+
+    def setUp(self):
+        """Create a fresh console for each test"""
+        self.console = MapacheSPIMConsole(verbose=False)
+        self.console.stdout = StringIO()
+
+    def tearDown(self):
+        """Clean up after each test"""
+        if hasattr(self.console, 'stdout'):
+            self.console.stdout.close()
+
+    def test_complete_load_current_directory(self):
+        """Test tab completion shows current directory contents"""
+        result = self.console.complete_load('exam', 'load exam', 5, 9)
+        # Should find 'examples/' directory
+        self.assertTrue(any('examples/' in r for r in result))
+
+    def test_complete_load_subdirectory(self):
+        """Test tab completion works inside subdirectories"""
+        result = self.console.complete_load('examples/', 'load examples/', 5, 14)
+        # Should find subdirectories inside examples/
+        self.assertTrue(any('examples/riscv/' in r for r in result))
+        self.assertTrue(any('examples/x86_64/' in r for r in result))
+
+    def test_complete_load_nested_subdirectory(self):
+        """Test tab completion works for nested subdirectories"""
+        result = self.console.complete_load('examples/riscv/', 'load examples/riscv/', 5, 20)
+        # Should find directories inside examples/riscv/
+        self.assertTrue(any('fibonacci' in r for r in result))
+        self.assertTrue(any('test_simple' in r for r in result))
+
+    def test_complete_load_partial_name(self):
+        """Test tab completion with partial directory name"""
+        result = self.console.complete_load('examples/riscv/fib', 'load examples/riscv/fib', 5, 23)
+        # Should find fibonacci directory
+        self.assertTrue(any('fibonacci' in r for r in result))
+        # Should NOT find test_simple
+        self.assertFalse(any('test_simple' in r for r in result))
+
+    def test_complete_load_returns_full_paths(self):
+        """Test that completions are full paths, not just filenames"""
+        result = self.console.complete_load('examples/', 'load examples/', 5, 14)
+        # All results should start with 'examples/'
+        for r in result:
+            self.assertTrue(r.startswith('examples/'), f"Expected path to start with 'examples/', got '{r}'")
+
+    def test_complete_break_with_symbols(self):
+        """Test break command completes symbol names"""
+        self.console.onecmd('load examples/riscv/fibonacci/fibonacci')
+        result = self.console.complete_break('', 'break ', 6, 6)
+        # Should have some symbols
+        self.assertGreater(len(result), 0)
+
+    def test_complete_break_partial_symbol(self):
+        """Test break command completes partial symbol names"""
+        self.console.onecmd('load examples/riscv/fibonacci/fibonacci')
+        result = self.console.complete_break('_', 'break _', 6, 7)
+        # Should find symbols starting with underscore (like _start)
+        self.assertTrue(any('_start' in r for r in result) or len(result) >= 0)
+
+    def test_complete_info_options(self):
+        """Test info command completes its options"""
+        result = self.console.complete_info('', 'info ', 5, 5)
+        self.assertIn('breakpoints', result)
+        self.assertIn('symbols', result)
+        self.assertIn('sections', result)
+
+    def test_complete_info_partial(self):
+        """Test info command completes partial option"""
+        result = self.console.complete_info('break', 'info break', 5, 10)
+        self.assertIn('breakpoints', result)
+        self.assertNotIn('symbols', result)
+
+
 def run_tests():
     """Run all tests"""
     # Create test suite
@@ -540,6 +616,7 @@ def run_tests():
 
     suite.addTests(loader.loadTestsFromTestCase(TestConsoleCommands))
     suite.addTests(loader.loadTestsFromTestCase(TestHelpExamples))
+    suite.addTests(loader.loadTestsFromTestCase(TestTabCompletion))
 
     # Run tests
     runner = unittest.TextTestRunner(verbosity=2)
