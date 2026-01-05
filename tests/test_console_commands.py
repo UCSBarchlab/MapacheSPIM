@@ -242,7 +242,7 @@ class TestConsoleCommands(unittest.TestCase):
         # Check that register values are displayed
         self.assertIn('x5', output)
         self.assertIn('t0', output)
-        self.assertIn('0x0000000a', output)  # t0 = 10
+        self.assertIn('0x000000000000000a', output)  # t0 = 10 (64-bit format)
 
     def test_pc_display(self):
         """Test PC display command"""
@@ -252,7 +252,7 @@ class TestConsoleCommands(unittest.TestCase):
         self.console.onecmd('pc')
         output = self.get_output()
 
-        self.assertIn('0x80000000', output.lower())
+        self.assertIn('0x0000000080000000', output.lower())
 
     # --- Test Memory Display ---
 
@@ -265,7 +265,7 @@ class TestConsoleCommands(unittest.TestCase):
         output = self.get_output()
 
         # Should show memory contents at entry point
-        self.assertIn('0x80000000', output.lower())
+        self.assertIn('0x80000000', output.lower())  # Address in memory dump
 
         # First instruction bytes (little-endian): 93 02 a0 00
         # This is the encoding of: addi x5, x0, 10
@@ -318,7 +318,7 @@ class TestConsoleCommands(unittest.TestCase):
         output = self.get_output()
 
         self.assertIn(self.SIMPLE_PATH, output)
-        self.assertIn('0x80000000', output.lower())
+        self.assertIn('0x0000000080000000', output.lower())
 
     def test_status_with_breakpoints(self):
         """Test status shows breakpoint count"""

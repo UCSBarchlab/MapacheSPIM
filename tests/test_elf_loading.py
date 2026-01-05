@@ -12,44 +12,25 @@ from mapachespim import create_simulator, detect_elf_isa, ISA
 
 def test_riscv_elf():
     """Test loading a RISC-V ELF file"""
-    print("=== Testing RISC-V ELF Loading ===\n")
+    import pytest
 
     # Find a RISC-V test binary
     riscv_test = Path("backends/riscv/sail-riscv/build/test/2025-07-16/riscv-tests/rv64ui-v-or")
 
     if not riscv_test.exists():
-        print(f"✗ Test binary not found: {riscv_test}")
-        return False
+        pytest.skip(f"Test binary not found: {riscv_test}")
 
-    try:
-        # Detect ISA
-        print(f"Testing file: {riscv_test.name}")
-        isa = detect_elf_isa(str(riscv_test))
-        print(f"Detected ISA: {isa.name}")
-        assert isa == ISA.RISCV, f"Expected RISC-V, got {isa.name}"
+    # Detect ISA
+    isa = detect_elf_isa(str(riscv_test))
+    assert isa == ISA.RISCV, f"Expected RISC-V, got {isa.name}"
 
-        # Create simulator with auto-detection
-        print("Creating simulator with auto-detection...")
-        sim = create_simulator(str(riscv_test))
+    # Create simulator with auto-detection
+    sim = create_simulator(str(riscv_test))
+    assert sim.get_pc() != 0, "Entry PC should not be zero"
 
-        print(f"✓ Simulator created and ELF loaded")
-        print(f"  Entry PC: 0x{sim.get_pc():x}")
-
-        # Try to execute a few instructions
-        print("Executing first 10 instructions...")
-        for i in range(10):
-            pc = sim.get_pc()
-            result = sim.step()
-            print(f"  [{i}] PC=0x{pc:08x} -> result={result.name}")
-
-        print("✓ RISC-V ELF test passed\n")
-        return True
-
-    except Exception as e:
-        print(f"✗ RISC-V ELF test failed: {e}\n")
-        import traceback
-        traceback.print_exc()
-        return False
+    # Try to execute a few instructions
+    for i in range(10):
+        sim.step()
 
 def main():
     print("MapacheSPIM ELF Loading Test\n")

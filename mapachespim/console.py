@@ -194,24 +194,24 @@ class MapacheSPIMConsole(cmd.Cmd):
             self.sim = SailSimulator()
             self.print_verbose('Sail RISC-V simulator initialized.')
         except Exception as e:
-            print(f'Error initializing simulator: {e}')
+            print(f'Error initializing simulator: {e}', file=self.stdout)
             sys.exit(1)
 
     def _handler_sigint(self, signum, frame):
         """Handle Ctrl-C interrupts"""
         self._interrupted = True
-        print()
+        print(file=self.stdout)
         if not self._running:
-            print('Use "quit" or "exit" to exit.')
+            print('Use "quit" or "exit" to exit.', file=self.stdout)
 
     def print_verbose(self, *args, **kwargs):
         """Print only if verbose mode is enabled"""
         if self._verbose:
-            print(*args, **kwargs)
+            print(*args, **kwargs, file=self.stdout)
 
     def print_error(self, msg):
         """Print an error message"""
-        print(f'\n{msg}\n')
+        print(f'\n{msg}\n', file=self.stdout)
 
     # --- File Loading ---
 
@@ -245,8 +245,8 @@ class MapacheSPIMConsole(cmd.Cmd):
             self.sim.load_elf(str(filepath))
             self.loaded_file = str(filepath)
             pc = self.sim.get_pc()
-            print(f'Loaded {filepath}')
-            print(f'Entry point: {pc:#018x}')
+            print(f'Loaded {filepath}', file=self.stdout)
+            print(f'Entry point: {pc:#018x}', file=self.stdout)
             self.breakpoints.clear()
 
             # Parse DWARF debug information
@@ -255,9 +255,9 @@ class MapacheSPIMConsole(cmd.Cmd):
                 num_files = len(self.source_info.source_cache)
                 if num_files > 0:
                     file_list = ', '.join(self.source_info.source_cache.keys())
-                    print(f'Source info: {file_list} ({len(self.source_info.addr_to_line)} address mappings)')
+                    print(f'Source info: {file_list} ({len(self.source_info.addr_to_line)} address mappings)', file=self.stdout)
                 else:
-                    print('Debug info present but source files not found')
+                    print('Debug info present but source files not found', file=self.stdout)
         except Exception as e:
             self.print_error(f'Error loading ELF file: {e}')
 
@@ -310,7 +310,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
             # Check for breakpoint (but skip if this is the first step and we're already at a breakpoint)
             if i > 0 and pc in self.breakpoints:
-                print(f'Breakpoint hit at {pc:#018x}')
+                print(f'Breakpoint hit at {pc:#018x}', file=self.stdout)
                 break
 
             # Get instruction before executing (for display)
@@ -328,14 +328,14 @@ class MapacheSPIMConsole(cmd.Cmd):
             result = self.sim.step()
 
             if result == StepResult.HALT:
-                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}')
-                print(f'Program halted')
+                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}', file=self.stdout)
+                print(f'Program halted', file=self.stdout)
                 # Update prev_regs even on halt
                 self.prev_regs = prev_regs
                 break
             elif result == StepResult.ERROR:
-                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}')
-                print(f'Execution error')
+                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}', file=self.stdout)
+                print(f'Execution error', file=self.stdout)
                 # Update prev_regs even on error
                 self.prev_regs = prev_regs
                 break
@@ -344,11 +344,11 @@ class MapacheSPIMConsole(cmd.Cmd):
             # Try to show symbol name
             sym, offset = self.sim.addr_to_symbol(pc)
             if sym and offset == 0:
-                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}>')
+                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}>', file=self.stdout)
             elif sym:
-                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}+{offset}>')
+                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}+{offset}>', file=self.stdout)
             else:
-                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}')
+                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}', file=self.stdout)
 
             # Store prev_regs for the regs command to show changes
             self.prev_regs = prev_regs
@@ -436,13 +436,13 @@ class MapacheSPIMConsole(cmd.Cmd):
                 # Check for interrupt
                 if self._interrupted:
                     self._interrupted = False
-                    print(f'Interrupted after {steps_executed} instructions')
+                    print(f'Interrupted after {steps_executed} instructions', file=self.stdout)
                     break
 
-                # Check for breakpoint
+                # Check for breakpoint (but skip on first iteration to allow continuing from a breakpoint)
                 pc = self.sim.get_pc()
-                if pc in self.breakpoints:
-                    print(f'Breakpoint hit at {pc:#018x} after {steps_executed} instructions')
+                if steps_executed > 0 and pc in self.breakpoints:
+                    print(f'Breakpoint hit at {pc:#018x} after {steps_executed} instructions', file=self.stdout)
                     break
 
                 result = self.sim.step()
@@ -453,13 +453,13 @@ class MapacheSPIMConsole(cmd.Cmd):
                 if should_terminate:
                     # Print appropriate termination message
                     if reason == 'syscall_exit':
-                        print(f'Program exited via syscall after {steps_executed} instructions')
+                        print(f'Program exited via syscall after {steps_executed} instructions', file=self.stdout)
                     elif reason == 'halt':
-                        print(f'Program halted after {steps_executed} instructions')
+                        print(f'Program halted after {steps_executed} instructions', file=self.stdout)
                     elif reason == 'error':
-                        print(f'Execution error at {pc:#018x} after {steps_executed} instructions')
+                        print(f'Execution error at {pc:#018x} after {steps_executed} instructions', file=self.stdout)
                     elif reason == 'tohost':
-                        print(f'Program completed (tohost) after {steps_executed} instructions')
+                        print(f'Program completed (tohost) after {steps_executed} instructions', file=self.stdout)
                     break
         finally:
             self._running = False
@@ -467,8 +467,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         if not self._interrupted and steps_executed > 0:
             final_pc = self.sim.get_pc()
             if max_steps > 0 and steps_executed >= max_steps:
-                print(f'Executed {steps_executed} instructions (max limit reached)')
-            print(f'PC = {final_pc:#018x}')
+                print(f'Executed {steps_executed} instructions (max limit reached)', file=self.stdout)
+            print(f'PC = {final_pc:#018x}', file=self.stdout)
 
     def do_continue(self, arg):
         """Continue execution after hitting a breakpoint
@@ -521,9 +521,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use to recover from error states
         """
         self.sim.reset()
-        print('Simulator reset.')
+        print('Simulator reset.', file=self.stdout)
         if self.loaded_file:
-            print('Program still loaded. Use "load" to reload if needed.')
+            print('Program still loaded. Use "load" to reload if needed.', file=self.stdout)
 
     # --- State Inspection ---
 
@@ -629,7 +629,7 @@ class MapacheSPIMConsole(cmd.Cmd):
                     self.print_error(f'Error: Unknown option "{part}". Use: hex, decimal, binary, default, show, cut, or dot')
                     return
 
-        print()
+        print(file=self.stdout)
         regs = self.sim.get_all_regs()
         pc = self.sim.get_pc()
 
@@ -665,12 +665,12 @@ class MapacheSPIMConsole(cmd.Cmd):
             reg_lines.append(' '.join(line_parts))
 
         for line in reg_lines:
-            print(line)
+            print(line, file=self.stdout)
 
         # Format PC
         formatted_pc = self._format_reg_value(pc, show_mode, leading_zeros_mode)
-        print(f'\npc = {formatted_pc}')
-        print()
+        print(f'\npc = {formatted_pc}', file=self.stdout)
+        print(file=self.stdout)
 
     def do_pc(self, arg):
         """Display program counter
@@ -692,7 +692,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use 'mem <pc_value>' to see instructions at PC
         """
         pc = self.sim.get_pc()
-        print(f'pc = {pc:#018x}')
+        print(f'pc = {pc:#018x}', file=self.stdout)
 
     def do_mem(self, arg):
         """Display memory contents in hex dump format
@@ -796,7 +796,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
     def _print_memory(self, start_addr, data, width=16):
         """Pretty-print memory contents in hex dump format with ASCII sidebar"""
-        print()
+        print(file=self.stdout)
         for offset in range(0, len(data), width):
             addr = start_addr + offset
             row = data[offset:offset+width]
@@ -817,8 +817,8 @@ class MapacheSPIMConsole(cmd.Cmd):
                 if missing_bytes >= 4:  # Account for group separator
                     hex_row += '  ' * (missing_bytes // 4)
 
-            print(f'{addr:#010x}:  {hex_row}  |{ascii_str}|')
-        print()
+            print(f'{addr:#010x}:  {hex_row}  |{ascii_str}|', file=self.stdout)
+        print(file=self.stdout)
 
     def do_disasm(self, arg):
         """Disassemble instructions at address
@@ -875,16 +875,16 @@ class MapacheSPIMConsole(cmd.Cmd):
                 return
 
         # Disassemble instructions
-        print()
+        print(file=self.stdout)
         for i in range(count):
             try:
                 instr_addr = addr + (i * 4)
                 disasm = self.sim.disasm(instr_addr)
-                print(f'[{instr_addr:#010x}]  {disasm}')
+                print(f'[{instr_addr:#010x}]  {disasm}', file=self.stdout)
             except Exception as e:
-                print(f'[{instr_addr:#010x}]  <error: {e}>')
+                print(f'[{instr_addr:#010x}]  <error: {e}>', file=self.stdout)
                 break
-        print()
+        print(file=self.stdout)
 
     def do_list(self, arg):
         """Display source code from assembly file
@@ -922,12 +922,12 @@ class MapacheSPIMConsole(cmd.Cmd):
             return
 
         if not self.source_info.has_debug_info:
-            print()
-            print('No source information available.')
-            print('Compile your program with debug symbols (use -g flag):')
-            print('  as -g -o program.o program.s')
-            print('  ld -o program program.o')
-            print()
+            print(file=self.stdout)
+            print('No source information available.', file=self.stdout)
+            print('Compile your program with debug symbols (use -g flag):', file=self.stdout)
+            print('  as -g -o program.o program.s', file=self.stdout)
+            print('  ld -o program program.o', file=self.stdout)
+            print(file=self.stdout)
             return
 
         # Determine what to show
@@ -943,7 +943,7 @@ class MapacheSPIMConsole(cmd.Cmd):
                     filename = list(self.source_info.source_cache.keys())[0]
                     self._show_source_lines(filename, line_num, pc, center=True)
                 else:
-                    print('No source files available.')
+                    print('No source files available.', file=self.stdout)
                 return
             except ValueError:
                 # Not a number, try as function name
@@ -955,9 +955,9 @@ class MapacheSPIMConsole(cmd.Cmd):
                         filename, line_num = location
                         self._show_source_lines(filename, line_num, pc, center=True)
                     else:
-                        print(f'No source location found for function "{arg}".')
+                        print(f'No source location found for function "{arg}".', file=self.stdout)
                 else:
-                    print(f'Function "{arg}" not found.')
+                    print(f'Function "{arg}" not found.', file=self.stdout)
                 return
         else:
             # Show around current PC
@@ -966,8 +966,8 @@ class MapacheSPIMConsole(cmd.Cmd):
                 filename, line_num = location
                 self._show_source_lines(filename, line_num, pc, center=True)
             else:
-                print(f'No source location for current PC ({pc:#010x}).')
-                print('Try stepping to an instruction with debug info.')
+                print(f'No source location for current PC ({pc:#010x}).', file=self.stdout)
+                print('Try stepping to an instruction with debug info.', file=self.stdout)
 
     def _show_source_lines(self, filename, center_line, current_pc, center=True, count=10):
         """Helper to display source lines with PC marker"""
@@ -980,11 +980,11 @@ class MapacheSPIMConsole(cmd.Cmd):
         lines = self.source_info.get_source_lines(filename, start_line, count)
 
         if not lines:
-            print(f'Source file "{filename}" not available.')
+            print(f'Source file "{filename}" not available.', file=self.stdout)
             return
 
-        print()
-        print(f'{filename}:')
+        print(file=self.stdout)
+        print(f'{filename}:', file=self.stdout)
 
         # Find which line corresponds to current PC (if any)
         pc_line = None
@@ -995,11 +995,11 @@ class MapacheSPIMConsole(cmd.Cmd):
         for line_num, text in lines:
             # Mark current PC line
             if line_num == pc_line:
-                print(f'{line_num:5d}: {text}  # <-- PC: {current_pc:#010x}')
+                print(f'{line_num:5d}: {text}  # <-- PC: {current_pc:#010x}', file=self.stdout)
             else:
-                print(f'{line_num:5d}: {text}')
+                print(f'{line_num:5d}: {text}', file=self.stdout)
 
-        print()
+        print(file=self.stdout)
 
     do_l = do_list  # Alias
 
@@ -1046,14 +1046,14 @@ class MapacheSPIMConsole(cmd.Cmd):
             addr = self.sim.lookup_symbol(arg)
             if addr is not None:
                 self.breakpoints.add(addr)
-                print(f'Breakpoint set at {arg} ({addr:#010x})')
+                print(f'Breakpoint set at {arg} ({addr:#010x})', file=self.stdout)
                 return
 
         # If not a symbol, try to parse as address
         try:
             addr = int(arg, 0)
             self.breakpoints.add(addr)
-            print(f'Breakpoint set at {addr:#010x}')
+            print(f'Breakpoint set at {addr:#010x}', file=self.stdout)
         except ValueError:
             self.print_error(f'Error: "{arg}" is not a valid address or known symbol.')
 
@@ -1090,40 +1090,40 @@ class MapacheSPIMConsole(cmd.Cmd):
         """
         if arg == 'breakpoints' or arg == 'break':
             if not self.breakpoints:
-                print('No breakpoints set.')
+                print('No breakpoints set.', file=self.stdout)
             else:
-                print('\nBreakpoints:')
+                print('\nBreakpoints:', file=self.stdout)
                 for i, addr in enumerate(sorted(self.breakpoints), 1):
                     # Try to show symbol name if available
                     sym, offset = self.sim.addr_to_symbol(addr)
                     if sym and offset == 0:
-                        print(f'  {i}. {addr:#010x}  <{sym}>')
+                        print(f'  {i}. {addr:#010x}  <{sym}>', file=self.stdout)
                     elif sym:
-                        print(f'  {i}. {addr:#010x}  <{sym}+{offset}>')
+                        print(f'  {i}. {addr:#010x}  <{sym}+{offset}>', file=self.stdout)
                     else:
-                        print(f'  {i}. {addr:#010x}')
-                print()
+                        print(f'  {i}. {addr:#010x}', file=self.stdout)
+                print(file=self.stdout)
         elif arg == 'symbols' or arg == 'sym':
             if not self.loaded_file:
-                print('No program loaded.')
+                print('No program loaded.', file=self.stdout)
                 return
 
             symbols = self.sim.get_symbols()
             if not symbols:
-                print('No symbols available.')
+                print('No symbols available.', file=self.stdout)
                 return
 
-            print(f'\nSymbols ({len(symbols)} total):')
+            print(f'\nSymbols ({len(symbols)} total):', file=self.stdout)
 
             # Sort by address
             sorted_symbols = sorted(symbols.items(), key=lambda x: x[1])
 
             for name, addr in sorted_symbols:
-                print(f'  {addr:#010x}  {name}')
-            print()
+                print(f'  {addr:#010x}  {name}', file=self.stdout)
+            print(file=self.stdout)
         elif arg == 'sections' or arg == 'sec':
             if not self.loaded_file:
-                print('No program loaded.')
+                print('No program loaded.', file=self.stdout)
                 return
 
             if not ELFTOOLS_AVAILABLE:
@@ -1134,10 +1134,10 @@ class MapacheSPIMConsole(cmd.Cmd):
                 with open(self.loaded_file, 'rb') as f:
                     elf = ELFFile(f)
 
-                    print()
-                    print(f"ELF Sections:")
-                    print(f"{'Name':<20} {'Address':>18} {'Size':>12}  {'Flags'}")
-                    print("-" * 70)
+                    print(file=self.stdout)
+                    print(f"ELF Sections:", file=self.stdout)
+                    print(f"{'Name':<20} {'Address':>18} {'Size':>12}  {'Flags'}", file=self.stdout)
+                    print("-" * 70, file=self.stdout)
 
                     for section in elf.iter_sections():
                         name = section.name
@@ -1156,12 +1156,12 @@ class MapacheSPIMConsole(cmd.Cmd):
 
                         # Only show allocated sections (those loaded in memory)
                         if addr > 0:
-                            print(f"{name:<20} {addr:#18x} {size:>12}  {flag_str}")
+                            print(f"{name:<20} {addr:#18x} {size:>12}  {flag_str}", file=self.stdout)
 
-                    print()
-                    print("Flags: W=Write, A=Alloc, X=Execute")
-                    print("Use 'mem <section>' to view section contents (e.g., mem .data)")
-                    print()
+                    print(file=self.stdout)
+                    print("Flags: W=Write, A=Alloc, X=Execute", file=self.stdout)
+                    print("Use 'mem <section>' to view section contents (e.g., mem .data)", file=self.stdout)
+                    print(file=self.stdout)
 
             except Exception as e:
                 self.print_error(f'Error reading ELF sections: {e}')
@@ -1199,9 +1199,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             addr = int(arg, 0)
             if addr in self.breakpoints:
                 self.breakpoints.remove(addr)
-                print(f'Breakpoint removed at {addr:#018x}')
+                print(f'Breakpoint removed at {addr:#018x}', file=self.stdout)
             else:
-                print(f'No breakpoint at {addr:#018x}')
+                print(f'No breakpoint at {addr:#018x}', file=self.stdout)
         except ValueError:
             self.print_error(f'Error: Invalid address "{arg}".')
 
@@ -1227,7 +1227,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             - No confirmation is required (immediate effect)
         """
         self.breakpoints.clear()
-        print('All breakpoints cleared.')
+        print('All breakpoints cleared.', file=self.stdout)
 
     # --- Utility Commands ---
 
@@ -1253,12 +1253,12 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use 'info breakpoints' for detailed breakpoint list
             - Use 'regs' for full register state
         """
-        print(f'\nLoaded file: {self.loaded_file or "None"}')
+        print(f'\nLoaded file: {self.loaded_file or "None"}', file=self.stdout)
         if self.loaded_file:
             pc = self.sim.get_pc()
-            print(f'PC: {pc:#018x}')
-        print(f'Breakpoints: {len(self.breakpoints)}')
-        print()
+            print(f'PC: {pc:#018x}', file=self.stdout)
+        print(f'Breakpoints: {len(self.breakpoints)}', file=self.stdout)
+        print(file=self.stdout)
 
     def do_set(self, arg):
         """Configure console options
@@ -1285,12 +1285,12 @@ class MapacheSPIMConsole(cmd.Cmd):
         """
         if not arg:
             # Show all settings
-            print()
-            print('Current settings:')
-            print(f'  show-changes       : {"on" if self.show_reg_changes else "off"}')
-            print(f'  regs-base          : {self.regs_base}')
-            print(f'  regs-leading-zeros : {self.regs_leading_zeros}')
-            print()
+            print(file=self.stdout)
+            print('Current settings:', file=self.stdout)
+            print(f'  show-changes       : {"on" if self.show_reg_changes else "off"}', file=self.stdout)
+            print(f'  regs-base          : {self.regs_base}', file=self.stdout)
+            print(f'  regs-leading-zeros : {self.regs_leading_zeros}', file=self.stdout)
+            print(file=self.stdout)
             return
 
         parts = arg.split()
@@ -1303,22 +1303,22 @@ class MapacheSPIMConsole(cmd.Cmd):
         if option == 'show-changes':
             if value in ('on', 'true', '1', 'yes'):
                 self.show_reg_changes = True
-                print('Register change display enabled')
+                print('Register change display enabled', file=self.stdout)
             elif value in ('off', 'false', '0', 'no'):
                 self.show_reg_changes = False
-                print('Register change display disabled')
+                print('Register change display disabled', file=self.stdout)
             else:
                 self.print_error('Error: Value must be on or off')
         elif option == 'regs-base':
             if value in ('hex', 'decimal', 'binary'):
                 self.regs_base = value
-                print(f'Register display format set to {value}')
+                print(f'Register display format set to {value}', file=self.stdout)
             else:
                 self.print_error('Error: Value must be hex, decimal, or binary')
         elif option == 'regs-leading-zeros':
             if value in ('default', 'show', 'cut', 'dot'):
                 self.regs_leading_zeros = value
-                print(f'Register leading zeros display set to {value}')
+                print(f'Register leading zeros display set to {value}', file=self.stdout)
             else:
                 self.print_error('Error: Value must be default, show, cut, or dot')
         else:
@@ -1347,7 +1347,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Simulator state is not saved
             - No confirmation required
         """
-        print('Goodbye!')
+        print('Goodbye!', file=self.stdout)
         return True
 
     def do_exit(self, arg):
@@ -1356,7 +1356,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
     def do_EOF(self, arg):
         """Exit on EOF (Ctrl-D)"""
-        print()
+        print(file=self.stdout)
         return self.do_quit(arg)
 
     # --- Aliases ---
@@ -1400,7 +1400,7 @@ def main():
     try:
         console.cmdloop()
     except KeyboardInterrupt:
-        print('\nGoodbye!')
+        print('\nGoodbye!', file=self.stdout)
 
 
 if __name__ == '__main__':

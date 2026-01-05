@@ -574,6 +574,9 @@ class UnicornSimulator:
         Returns:
             tuple: (symbol_name, offset) if found, or (None, None) if not found
         """
+        # Maximum distance to consider a symbol match (1MB)
+        MAX_SYMBOL_DISTANCE = 0x100000
+
         # Exact match
         if addr in self._addr_to_symbol:
             return (self._addr_to_symbol[addr], 0)
@@ -589,7 +592,10 @@ class UnicornSimulator:
                     best_match = sym_name
 
         if best_match:
-            return (best_match, addr - best_addr)
+            offset = addr - best_addr
+            # Only return if within reasonable distance
+            if offset <= MAX_SYMBOL_DISTANCE:
+                return (best_match, offset)
 
         return (None, None)
 

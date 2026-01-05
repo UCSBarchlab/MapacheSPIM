@@ -30,61 +30,31 @@ def test_isa_detection():
 
 def test_riscv_simulator():
     """Test RISC-V simulator creation"""
-    print("=== Testing RISC-V Simulator ===\n")
+    # Create RISC-V simulator explicitly
+    sim = SailSimulator(isa=ISA.RISCV)
 
-    try:
-        # Create RISC-V simulator explicitly
-        print("Creating RISC-V simulator...")
-        sim = SailSimulator(isa=ISA.RISCV)
-        print(f"✓ RISC-V simulator created")
+    # Test basic operations
+    pc = sim.get_pc()
+    assert isinstance(pc, int), "PC should be an integer"
 
-        # Test basic operations
-        print("Testing PC access...")
-        pc = sim.get_pc()
-        print(f"  Initial PC: 0x{pc:x}")
-
-        print("Testing register access...")
-        sim.set_reg(1, 0x42)
-        val = sim.get_reg(1)
-        assert val == 0x42, f"Register write/read failed: expected 0x42, got 0x{val:x}"
-        print(f"  Register x1: 0x{val:x}")
-
-        print("✓ RISC-V simulator works\n")
-
-    except Exception as e:
-        print(f"✗ RISC-V test failed: {e}\n")
-        return False
-
-    return True
+    # Test register access
+    sim.set_reg(1, 0x42)
+    val = sim.get_reg(1)
+    assert val == 0x42, f"Register write/read failed: expected 0x42, got 0x{val:x}"
 
 def test_arm_simulator():
     """Test ARM simulator creation"""
-    print("=== Testing ARM Simulator ===\n")
+    # Create ARM simulator explicitly
+    sim = SailSimulator(isa=ISA.ARM)
 
-    try:
-        # Create ARM simulator explicitly
-        print("Creating ARM simulator...")
-        sim = SailSimulator(isa=ISA.ARM)
-        print(f"✓ ARM simulator created")
+    # Test basic operations
+    pc = sim.get_pc()
+    assert isinstance(pc, int), "PC should be an integer"
 
-        # Test basic operations
-        print("Testing PC access...")
-        pc = sim.get_pc()
-        print(f"  Initial PC: 0x{pc:x}")
-
-        print("Testing register access...")
-        sim.set_reg(1, 0x1234567890ABCDEF)
-        val = sim.get_reg(1)
-        assert val == 0x1234567890ABCDEF, f"Register write/read failed"
-        print(f"  Register x1: 0x{val:x}")
-
-        print("✓ ARM simulator works\n")
-
-    except Exception as e:
-        print(f"✗ ARM test failed: {e}\n")
-        return False
-
-    return True
+    # Test register access
+    sim.set_reg(1, 0x1234567890ABCDEF)
+    val = sim.get_reg(1)
+    assert val == 0x1234567890ABCDEF, f"Register write/read failed"
 
 def main():
     print("MapacheSPIM Multi-ISA Python Bindings Test\n")

@@ -217,24 +217,19 @@ class TestSymbolsInConsole(unittest.TestCase):
         # Step from entry point
         # Output should include symbol name if available
         import io
-        import sys
 
-        # Capture output
+        # Capture output by redirecting console's stdout
         captured = io.StringIO()
-        old_stdout = sys.stdout
-        sys.stdout = captured
+        self.console.stdout = captured
 
-        try:
-            self.console.onecmd('step')
-            output = captured.getvalue()
+        self.console.onecmd('step')
+        output = captured.getvalue()
 
-            # Output should contain an address
-            self.assertIn('[0x', output)
+        # Output should contain an address
+        self.assertIn('[0x', output)
 
-            # If there's a symbol at PC, it should be shown
-            # (This is an integration test for enhanced step display)
-        finally:
-            sys.stdout = old_stdout
+        # If there's a symbol at PC, it should be shown
+        # (This is an integration test for enhanced step display)
 
 
 class TestSymbolEdgeCases(unittest.TestCase):

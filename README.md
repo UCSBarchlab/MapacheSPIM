@@ -194,30 +194,30 @@ See [Console Guide](docs/user/console-guide.md) for complete command reference.
 
 ## What Makes This Special?
 
-### Built on Formal Specifications
+### Built on Unicorn Engine
 
-MapacheSPIM uses the [Sail RISC-V](https://github.com/riscv/sail-riscv) formal specification - the official model adopted by RISC-V International. This means:
+MapacheSPIM is powered by the [Unicorn Engine](https://www.unicorn-engine.org/), a battle-tested CPU emulator framework based on QEMU. This means:
 
-- **Formally Verified** - ISA semantics are mathematically proven correct
-- **Complete** - All RISC-V extensions supported (RV32/64 I/M/A/F/D/C)
-- **Up-to-Date** - Maintained by ISA experts, always current
-- **Educational** - Learn formal methods alongside assembly
+- **Reliable** - Built on the same codebase that powers countless virtual machines
+- **Multi-ISA** - Support for RISC-V 64-bit and ARM64 (AArch64) out of the box
+- **Fast** - Efficient emulation using proven QEMU technology
+- **Easy to Install** - Pure `pip install`, no C/C++ compilation required
 
-The simulator executes the *exact* same Sail code that's used to verify RISC-V processors. You're learning from the official specification, not someone's interpretation.
+### Multi-ISA Support
 
-### ISA-Agnostic Architecture
-
-The core simulator is completely ISA-independent:
+MapacheSPIM supports multiple instruction set architectures:
 
 ```
 MapacheSPIM/
-├── lib/                 # ISA-agnostic core (C/Python)
-├── backends/riscv/      # RISC-V Sail backend
-├── backends/arm/        # ARM backend (future)
-└── backends/cheri/      # CHERI backend (future)
+├── mapachespim/
+│   ├── unicorn_backend.py   # Unicorn-based simulator
+│   ├── elf_loader.py        # ELF parsing with pyelftools
+│   └── console.py           # Interactive console
+├── examples/riscv/          # RISC-V example programs
+└── examples/arm/            # ARM64 example programs
 ```
 
-Adding a new architecture just requires adding a Sail specification - the console, debugging tools, and Python API work unchanged. This makes MapacheSPIM ideal for ISA research and exploring new architectures.
+The same console commands and Python API work across all supported ISAs. Just load an ELF file and MapacheSPIM detects the architecture automatically.
 
 ### Student-Friendly Design
 
@@ -239,13 +239,15 @@ Inspired by SPIM, designed for education:
 ## Testing
 
 ```bash
-# Run all test suites (137 tests total)
-python3 tests/test_simulator.py              # API tests (31 tests)
-python3 tests/test_console_working.py        # Console tests (38 tests)
-python3 tests/test_disasm_comprehensive.py   # Disassembly tests (30 tests)
-python3 tests/test_symbols.py                # Symbol tests (24 tests)
-python3 tests/test_program_correctness.py    # Correctness tests (10 tests)
-python3 tests/test_io_syscalls.py            # I/O syscall tests (4 tests)
+# Run all tests (183 tests)
+python -m pytest tests/ -v
+
+# Or run individual test suites
+python -m pytest tests/test_simulator.py           # Core API tests
+python -m pytest tests/test_console_commands.py    # Console tests
+python -m pytest tests/test_disasm_comprehensive.py  # Disassembly tests
+python -m pytest tests/test_symbols.py             # Symbol tests
+python -m pytest tests/test_multi_isa.py           # Multi-ISA tests
 ```
 
 All tests verify:
@@ -254,10 +256,12 @@ All tests verify:
 - Symbol table handling
 - Disassembly accuracy
 - Syscall behavior
+- Multi-ISA support (RISC-V and ARM)
 
 ## License
 
-- Sail RISC-V - BSD 2-Clause License
+- Unicorn Engine - GPLv2 License
+- Capstone - BSD License
 - MapacheSPIM - [Your License Here]
 - Examples - Educational use
 
