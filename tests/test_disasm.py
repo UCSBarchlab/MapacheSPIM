@@ -9,14 +9,14 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import SailSimulator
+from mapachespim import Simulator
 
 
 def test_disasm():
     """Test disassembling instructions from test_simple program"""
     print("Testing disassembly...")
 
-    sim = SailSimulator()
+    sim = Simulator()
     sim.load_elf('examples/riscv/test_simple/simple')
 
     print("\nDisassembling first 9 instructions:")

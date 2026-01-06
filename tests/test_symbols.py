@@ -12,7 +12,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import SailSimulator
+from mapachespim import Simulator
 from mapachespim.console import MapacheSPIMConsole
 
 
@@ -21,7 +21,7 @@ class TestSymbolTableAPI(unittest.TestCase):
 
     def setUp(self):
         """Create a fresh simulator for each test"""
-        self.sim = SailSimulator()
+        self.sim = Simulator()
         self.sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
     def test_get_symbols_returns_dict(self):
@@ -134,7 +134,7 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
 
     def test_fibonacci_symbols(self):
         """Test fibonacci program has expected symbols"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         symbols = sim.get_symbols()
@@ -146,7 +146,7 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
 
     def test_test_simple_symbols(self):
         """Test test_simple program symbols"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/test_simple/simple')
 
         symbols = sim.get_symbols()
@@ -155,7 +155,7 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
 
     def test_matrix_multiply_symbols(self):
         """Test matrix_multiply program symbols"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/matrix_multiply/matrix_mult')
 
         symbols = sim.get_symbols()
@@ -163,7 +163,7 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
 
     def test_symbols_cleared_on_new_load(self):
         """Test that symbols are replaced when loading new ELF"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/fibonacci/fibonacci')
         symbols1 = sim.get_symbols()
 
@@ -236,7 +236,7 @@ class TestSymbolEdgeCases(unittest.TestCase):
 
     def test_symbols_before_load(self):
         """Test querying symbols before loading ELF"""
-        sim = SailSimulator()
+        sim = Simulator()
 
         # Should return empty dict, not crash
         symbols = sim.get_symbols()
@@ -244,14 +244,14 @@ class TestSymbolEdgeCases(unittest.TestCase):
 
     def test_lookup_before_load(self):
         """Test lookup before loading ELF"""
-        sim = SailSimulator()
+        sim = Simulator()
 
         addr = sim.lookup_symbol('main')
         self.assertIsNone(addr)
 
     def test_addr_to_symbol_before_load(self):
         """Test addr_to_symbol before loading ELF"""
-        sim = SailSimulator()
+        sim = Simulator()
 
         name, offset = sim.addr_to_symbol(0x80000000)
         self.assertIsNone(name)
@@ -259,7 +259,7 @@ class TestSymbolEdgeCases(unittest.TestCase):
 
     def test_symbol_with_special_characters(self):
         """Test symbols with special characters in names"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         symbols = sim.get_symbols()
@@ -277,7 +277,7 @@ class TestSymbolSorting(unittest.TestCase):
 
     def test_symbols_by_address(self):
         """Test getting symbols sorted by address"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         symbols = sim.get_symbols()
@@ -294,7 +294,7 @@ class TestSymbolSorting(unittest.TestCase):
 
     def test_symbols_by_name(self):
         """Test getting symbols sorted by name"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         symbols = sim.get_symbols()

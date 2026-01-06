@@ -4,7 +4,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import SailSimulator, ISA
+from mapachespim import Simulator, ISA
 
 def execute_steps(sim):
     """Separate function with multiple step calls"""
@@ -21,7 +21,7 @@ def run_arm_program(elf_path):
     print(f"Loading ARM program: {elf_path}")
 
     # Create ARM simulator
-    sim = SailSimulator(isa=ISA.ARM)
+    sim = Simulator(isa=ISA.ARM)
     sim.load_elf(str(elf_path))
     print("Simulator created and ELF loaded successfully")
 

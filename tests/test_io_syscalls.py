@@ -13,7 +13,7 @@ from io import StringIO
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import SailSimulator
+from mapachespim import Simulator
 
 
 class TestPrintStringSyscall(unittest.TestCase):
@@ -28,7 +28,7 @@ class TestPrintStringSyscall(unittest.TestCase):
         sys.stdout = captured_output = StringIO()
 
         try:
-            sim = SailSimulator()
+            sim = Simulator()
             sim.load_elf(self.HELLO_PATH)
             steps = sim.run(max_steps=100)
 
@@ -47,7 +47,7 @@ class TestPrintStringSyscall(unittest.TestCase):
 
     def test_program_exits_cleanly(self):
         """Verify program exits via syscall 10 (exit)"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf(self.HELLO_PATH)
 
         # Suppress output
@@ -70,7 +70,7 @@ class TestSyscallDetection(unittest.TestCase):
         """Verify ecall instructions return SYSCALL step result"""
         from mapachespim import StepResult
 
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/hello_world/hello')
 
         # Suppress output
@@ -97,7 +97,7 @@ class TestFibonacciStillWorks(unittest.TestCase):
 
     def test_fibonacci_still_produces_correct_result(self):
         """Ensure fibonacci program still works correctly"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/fibonacci/fibonacci')
 
         steps = sim.run(max_steps=10000)

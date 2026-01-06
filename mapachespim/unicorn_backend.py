@@ -724,7 +724,7 @@ class UnicornSimulator:
         Returns:
             str: ISA name (e.g., "RISCV", "ARM", "X86_64") or "Unknown" if not set
         """
-        return self._isa.name if self._isa else "Unknown"
+        return self._isa.name if self._isa is not None else "Unknown"
 
     def get_register_count(self):
         """

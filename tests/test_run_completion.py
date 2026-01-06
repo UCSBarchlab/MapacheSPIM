@@ -9,13 +9,13 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import SailSimulator, StepResult
+from mapachespim import Simulator, StepResult
 
 
 def test_run_to_completion():
     """Test running program to completion"""
     print("Initializing simulator...")
-    sim = SailSimulator()
+    sim = Simulator()
 
     print("Loading simple program...")
     sim.load_elf('examples/riscv/test_simple/simple')

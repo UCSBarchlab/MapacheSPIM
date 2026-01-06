@@ -11,7 +11,7 @@ import signal
 import sys
 from pathlib import Path
 
-from . import SailSimulator, StepResult
+from . import Simulator, StepResult
 
 try:
     from elftools.elf.elffile import ELFFile
@@ -195,7 +195,7 @@ class MapacheSPIMConsole(cmd.Cmd):
     def _initialize_simulator(self):
         """Initialize or reset the simulator"""
         try:
-            self.sim = SailSimulator()
+            self.sim = Simulator()
             self.print_verbose('Unicorn Engine simulator initialized.')
         except Exception as e:
             print(f'Error initializing simulator: {e}', file=self.stdout)

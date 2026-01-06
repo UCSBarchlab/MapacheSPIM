@@ -13,7 +13,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import SailSimulator, StepResult
+from mapachespim import Simulator, StepResult
 
 
 class TestFibonacciCorrectness(unittest.TestCase):
@@ -23,7 +23,7 @@ class TestFibonacciCorrectness(unittest.TestCase):
 
     def setUp(self):
         """Create simulator for each test"""
-        self.sim = SailSimulator()
+        self.sim = Simulator()
 
     def test_fibonacci_returns_correct_result(self):
         """Test that Fibonacci(7) returns 13 - CRITICAL correctness test"""
@@ -112,7 +112,7 @@ class TestToHostMechanism(unittest.TestCase):
     FIBONACCI_PATH = 'examples/riscv/fibonacci/fibonacci'
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
 
     def test_tohost_written_on_exit(self):
         """Verify program writes to tohost to signal completion"""
@@ -162,7 +162,7 @@ class TestMatrixMultiplyCorrectness(unittest.TestCase):
     MATRIX_PATH = 'examples/riscv/matrix_multiply/matrix_mult'
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
 
     def test_matrix_multiply_completes(self):
         """Verify matrix multiply program completes"""
@@ -235,7 +235,7 @@ class TestProgramCompletion(unittest.TestCase):
 
     def test_simple_executes(self):
         """test_simple executes correctly"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/test_simple/simple')
 
         # test_simple doesn't have tohost, so we just verify it loads and runs
@@ -248,7 +248,7 @@ class TestProgramCompletion(unittest.TestCase):
 
     def test_can_detect_completion(self):
         """Verify we can distinguish completion from timeout"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf('examples/riscv/test_simple/simple')
 
         # Run with very low limit

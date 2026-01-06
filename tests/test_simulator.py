@@ -12,7 +12,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import SailSimulator, StepResult
+from mapachespim import Simulator, StepResult
 
 
 class TestSimulatorBasic(unittest.TestCase):
@@ -20,19 +20,19 @@ class TestSimulatorBasic(unittest.TestCase):
 
     def test_init_no_config(self):
         """Test initialization with default config"""
-        sim = SailSimulator()
+        sim = Simulator()
         self.assertIsNotNone(sim)
 
     def test_init_with_context_manager(self):
         """Test context manager support"""
-        with SailSimulator() as sim:
+        with Simulator() as sim:
             self.assertIsNotNone(sim)
             pc = sim.get_pc()
             self.assertIsInstance(pc, int)
 
     def test_get_pc_after_init(self):
         """Test getting PC after initialization"""
-        sim = SailSimulator()
+        sim = Simulator()
         pc = sim.get_pc()
         self.assertIsInstance(pc, int)
 
@@ -41,7 +41,7 @@ class TestFibonacci(unittest.TestCase):
     """Tests using the fibonacci example"""
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
         self.elf_path = "examples/riscv/fibonacci/fibonacci"
 
     def test_load_fibonacci(self):
@@ -92,7 +92,7 @@ class TestMatrixMultiply(unittest.TestCase):
     """Tests using the matrix_multiply example"""
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
         self.elf_path = "examples/riscv/matrix_multiply/matrix_mult"
 
     def test_load_matrix(self):
@@ -128,7 +128,7 @@ class TestRegisterAccess(unittest.TestCase):
     """Tests for register read/write operations"""
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
         self.sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
     def test_get_all_registers(self):
@@ -183,7 +183,7 @@ class TestMemoryAccess(unittest.TestCase):
     """Tests for memory read/write operations"""
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
         self.sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
     def test_read_memory_at_pc(self):
@@ -225,7 +225,7 @@ class TestPCAccess(unittest.TestCase):
     """Tests for program counter operations"""
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
         self.sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
     def test_get_pc(self):
@@ -253,7 +253,7 @@ class TestReset(unittest.TestCase):
     """Tests for simulator reset"""
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
         self.sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
     def test_reset_clears_state(self):
@@ -275,20 +275,20 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_load_nonexistent_file(self):
         """Test loading a file that doesn't exist"""
-        sim = SailSimulator()
+        sim = Simulator()
         with self.assertRaises((FileNotFoundError, RuntimeError)):
             sim.load_elf("nonexistent.elf")
 
     def test_step_before_load(self):
         """Test stepping before loading a program"""
-        sim = SailSimulator()
+        sim = Simulator()
         # Should work but probably won't execute meaningful code
         result = sim.step()
         self.assertIsInstance(result, StepResult)
 
     def test_run_zero_steps(self):
         """Test running with max_steps=0 (unlimited)"""
-        sim = SailSimulator()
+        sim = Simulator()
         sim.load_elf("examples/riscv/fibonacci/fibonacci")
         # This would run forever, so we don't actually test it
         # Just verify the function signature accepts 0

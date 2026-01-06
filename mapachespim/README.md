@@ -1,6 +1,6 @@
 # MapacheSPIM Python API
 
-Python simulator for RISC-V and ARM programs, powered by the Unicorn Engine.
+Python simulator for RISC-V, ARM64, and x86-64 programs, powered by the Unicorn Engine.
 
 ## Installation
 
@@ -16,13 +16,13 @@ Dependencies (installed automatically):
 ## Quick Start
 
 ```python
-from mapachespim import SailSimulator, ISA
+from mapachespim import Simulator, ISA
 
-# Initialize simulator (defaults to RISC-V)
-sim = SailSimulator()
+# Initialize simulator (ISA auto-detected from ELF)
+sim = Simulator()
 
 # Or specify ISA explicitly
-sim = SailSimulator(isa=ISA.ARM)
+sim = Simulator(isa=ISA.ARM)
 
 # Load an ELF file
 sim.load_elf("examples/riscv/fibonacci/fibonacci")
@@ -45,11 +45,11 @@ print(f"Executed {steps} instructions")
 
 ## API Reference
 
-### SailSimulator Class
+### Simulator Class
 
 #### Initialization
-- `SailSimulator(isa=None)` - Create simulator instance
-  - `isa`: `ISA.RISCV` or `ISA.ARM` (default: RISCV)
+- `Simulator(isa=None)` - Create simulator instance
+  - `isa`: `ISA.RISCV`, `ISA.ARM`, or `ISA.X86_64` (default: auto-detect from ELF)
 
 #### Program Loading
 - `load_elf(elf_path)` - Load ELF executable
@@ -70,9 +70,13 @@ print(f"Executed {steps} instructions")
 #### State Inspection
 - `get_pc()` - Get program counter (64-bit)
 - `set_pc(pc)` - Set program counter
-- `get_reg(reg_num)` - Get register value (0-31)
-- `set_reg(reg_num, value)` - Set register value (1-31)
-- `get_all_regs()` - Get all 32 registers as list
+- `get_reg(reg_num)` - Get register value
+- `set_reg(reg_num, value)` - Set register value
+- `get_all_regs()` - Get all GPRs as list
+- `get_isa()` - Get current ISA enum
+- `get_isa_name()` - Get ISA name as string
+- `get_register_count()` - Get number of GPRs (32 for RISC-V/ARM, 16 for x86-64)
+- `get_reg_name(n)` - Get ABI name for register n
 
 #### Memory Access
 - `read_mem(addr, length)` - Read memory, returns `bytes`
@@ -89,6 +93,7 @@ print(f"Executed {steps} instructions")
 ### ISA Enum
 - `ISA.RISCV` - RISC-V 64-bit
 - `ISA.ARM` - ARM64 (AArch64)
+- `ISA.X86_64` - x86-64
 
 ### Helper Functions
 - `create_simulator(elf_path)` - Create simulator and load ELF in one call
@@ -97,9 +102,9 @@ print(f"Executed {steps} instructions")
 ## Example: Tracing Execution
 
 ```python
-from mapachespim import SailSimulator, StepResult
+from mapachespim import Simulator, StepResult
 
-sim = SailSimulator()
+sim = Simulator()
 sim.load_elf("examples/riscv/fibonacci/fibonacci")
 
 # Trace first 10 instructions
@@ -121,7 +126,7 @@ print(f"\nReturn value (a0): {regs[10]}")
 ## Architecture
 
 ```
-Python API (SailSimulator)
+Python API (Simulator)
     ↓
 Unicorn Engine (CPU emulation)
     ↓
@@ -129,4 +134,4 @@ Capstone (disassembly)
 ```
 
 The simulator uses Unicorn Engine for accurate CPU emulation and Capstone for
-disassembly. Both RISC-V 64-bit and ARM64 are supported with the same API.
+disassembly. RISC-V 64-bit, ARM64, and x86-64 are supported with the same API.

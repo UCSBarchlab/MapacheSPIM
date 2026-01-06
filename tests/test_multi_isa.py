@@ -10,12 +10,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import ISA, SailSimulator
+from mapachespim import ISA, Simulator
 
 
 def test_riscv_simulator():
     """Test RISC-V simulator creation and basic operations"""
-    sim = SailSimulator(isa=ISA.RISCV)
+    sim = Simulator(isa=ISA.RISCV)
 
     # Test PC access
     pc = sim.get_pc()
@@ -29,7 +29,7 @@ def test_riscv_simulator():
 
 def test_arm_simulator():
     """Test ARM simulator creation and basic operations"""
-    sim = SailSimulator(isa=ISA.ARM)
+    sim = Simulator(isa=ISA.ARM)
 
     # Test PC access
     pc = sim.get_pc()
@@ -49,7 +49,7 @@ def test_isa_enum():
 
 def test_default_isa_is_riscv():
     """Test that default ISA is RISC-V"""
-    sim = SailSimulator()
+    sim = Simulator()
     # Default should be RISC-V - verify by checking PC is in RISC-V range
     pc = sim.get_pc()
     assert isinstance(pc, int)

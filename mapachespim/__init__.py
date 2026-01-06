@@ -2,13 +2,16 @@
 MapacheSPIM - Educational Multi-ISA Simulator using Unicorn Engine
 
 A Python-based interactive simulator inspired by SPIM, supporting multiple ISAs
-(RISC-V, ARM, x86, etc.) using the Unicorn CPU emulator framework.
+(RISC-V, ARM, x86-64) using the Unicorn CPU emulator framework.
 """
 
 from .unicorn_backend import UnicornSimulator, StepResult, ISA, create_simulator, detect_elf_isa
 
-# Alias for backward compatibility
-SailSimulator = UnicornSimulator
+# Primary public API - use this name in new code
+Simulator = UnicornSimulator
+
+# Deprecated aliases for backward compatibility
+SailSimulator = UnicornSimulator  # Deprecated: use Simulator instead
 
 __version__ = "0.2.0-unicorn"
-__all__ = ["UnicornSimulator", "SailSimulator", "StepResult", "ISA", "create_simulator", "detect_elf_isa"]
+__all__ = ["Simulator", "UnicornSimulator", "SailSimulator", "StepResult", "ISA", "create_simulator", "detect_elf_isa"]

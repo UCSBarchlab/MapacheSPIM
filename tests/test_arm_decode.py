@@ -8,14 +8,14 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import ISA, SailSimulator
+from mapachespim import ISA, Simulator
 
 def test_arm_decode():
     """Test ARM model with simple instruction"""
     print("=== ARM Decode Test ===\n")
 
     # Create ARM simulator
-    sim = SailSimulator(isa=ISA.ARM)
+    sim = Simulator(isa=ISA.ARM)
     print(f"Initial PC: 0x{sim.get_pc():08x}")
 
     # Write a NOP instruction (0xd503201f) to memory at PC

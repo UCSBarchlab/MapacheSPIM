@@ -108,7 +108,7 @@ Tests using the `matrix_multiply` example program:
 
 | Function | Tested | Test Count |
 |----------|--------|------------|
-| `SailSimulator()` | ✅ | 3 |
+| `Simulator()` | ✅ | 3 |
 | `load_elf()` | ✅ | 4 |
 | `step()` | ✅ | 5 |
 | `run()` | ✅ | 4 |
@@ -131,7 +131,7 @@ class TestMyProgram(unittest.TestCase):
     """Tests using my_program example"""
 
     def setUp(self):
-        self.sim = SailSimulator()
+        self.sim = Simulator()
         self.elf_path = "examples/my_program/my_program"
 
     def test_load_program(self):

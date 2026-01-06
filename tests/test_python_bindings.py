@@ -2,10 +2,10 @@
 """
 Test script for MapacheSPIM Python bindings
 
-Demonstrates basic usage of the SailSimulator class.
+Demonstrates basic usage of the Simulator class.
 """
 
-from mapachespim import SailSimulator
+from mapachespim import Simulator
 
 
 def main():
@@ -15,8 +15,8 @@ def main():
     print()
 
     # Initialize simulator
-    print("1. Initializing Sail RISC-V simulator...")
-    sim = SailSimulator()
+    print("1. Initializing simulator...")
+    sim = Simulator()
     print("   ✓ Simulator initialized successfully!")
     print()
 
