@@ -8,11 +8,15 @@ build/
 *.so
 *.dylib
 
-# Example binaries
-examples/*/fibonacci
-examples/*/matrix_mult
+# Example binaries (executables inside subdirectories)
+examples/*/fibonacci/fibonacci
+examples/*/matrix_multiply/matrix_mult
+examples/*/test_simple/simple
+examples/*/hello_world/hello_world
 examples/*/*.o
 examples/*/*.dis
+examples/*/*/*.o
+examples/*/*/*.dis
 
 # lib build artifacts
 lib/build/

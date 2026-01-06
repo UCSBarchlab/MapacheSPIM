@@ -2,7 +2,8 @@
 """
 MapacheSPIM Interactive Console
 
-A SPIM-like interactive console for RISC-V and ARM programs using the Unicorn Engine.
+A SPIM-like interactive console for assembly programs using the Unicorn Engine.
+Supports RISC-V, ARM64, and x86-64 architectures.
 """
 
 import cmd
@@ -144,22 +145,15 @@ def _chunk_list(lst, n):
 
 class MapacheSPIMConsole(cmd.Cmd):
     """
-    Interactive console for stepping through RISC-V programs.
+    Interactive console for stepping through assembly programs.
 
     Provides SPIM-like interface with commands for loading ELF files,
     stepping through execution, examining registers and memory.
+    Supports multiple ISAs: RISC-V, ARM64, and x86-64.
     """
 
     intro = 'Welcome to MapacheSPIM. Type help or ? to list commands.\n'
     prompt = '(mapachespim) '
-
-    # RISC-V ABI register names
-    RISCV_ABI_NAMES = [
-        'zero', 'ra', 'sp', 'gp', 'tp', 't0', 't1', 't2',
-        's0', 's1', 'a0', 'a1', 'a2', 'a3', 'a4', 'a5',
-        'a6', 'a7', 's2', 's3', 's4', 's5', 's6', 's7',
-        's8', 's9', 's10', 's11', 't3', 't4', 't5', 't6'
-    ]
 
     def __init__(self, verbose=False):
         super().__init__()
@@ -226,21 +220,22 @@ class MapacheSPIMConsole(cmd.Cmd):
     # --- File Loading ---
 
     def do_load(self, arg):
-        """Load a RISC-V ELF file
+        """Load an ELF file
 
         Usage:
             load <filename>
 
-        Loads a compiled RISC-V ELF executable into the simulator.
+        Loads a compiled ELF executable into the simulator. The ISA is
+        auto-detected from the ELF file (RISC-V, ARM64, or x86-64).
         The program counter is set to the entry point and all
         breakpoints are cleared.
 
         Examples:
-            load examples/fibonacci/fibonacci
-            load examples/test_simple/simple
-            load /path/to/my_program
+            load examples/riscv/fibonacci/fibonacci
+            load examples/arm/test_simple/simple
+            load examples/x86_64/test_simple/simple
 
-        After loading, use 'pc' to see the entry point address.
+        After loading, use 'status' to see the ISA and entry point.
         """
         if not arg:
             self.print_error('Error: Please specify an ELF file to load.')
@@ -255,7 +250,8 @@ class MapacheSPIMConsole(cmd.Cmd):
             self.sim.load_elf(str(filepath))
             self.loaded_file = str(filepath)
             pc = self.sim.get_pc()
-            print(f'Loaded {filepath}', file=self.stdout)
+            isa_name = self.sim.get_isa_name()
+            print(f'Loaded {filepath} ({isa_name})', file=self.stdout)
             print(f'Entry point: {pc:#018x}', file=self.stdout)
             self.breakpoints.clear()
 
@@ -576,13 +572,17 @@ class MapacheSPIMConsole(cmd.Cmd):
         return prefix + formatted
 
     def do_regs(self, arg):
-        """Display all RISC-V registers
+        """Display all registers
 
         Usage:
             regs [options]
 
-        Shows all 32 general-purpose registers (x0-x31) with both
-        numeric names and ABI names, plus the program counter (PC).
+        Shows all general-purpose registers with their ABI names plus the
+        program counter (PC). Register count and names vary by ISA:
+          - RISC-V: 32 registers (x0-x31)
+          - ARM64:  32 registers (x0-x30, sp)
+          - x86-64: 16 registers (rax, rcx, rdx, etc.)
+
         Display format can be controlled with arguments or 'set' command.
 
         Options (override current settings for this call only):
@@ -593,18 +593,6 @@ class MapacheSPIMConsole(cmd.Cmd):
             show     - Show all leading zeros
             cut      - Remove leading zeros
             dot      - Replace leading zeros with dots
-
-        Register ABI Names:
-            x0  = zero (hard-wired 0)    x16-17 = a6-a7 (args)
-            x1  = ra (return addr)       x18-27 = s2-s11 (saved)
-            x2  = sp (stack pointer)     x28-31 = t3-t6 (temps)
-            x3  = gp (global pointer)
-            x4  = tp (thread pointer)
-            x5-7   = t0-t2 (temps)
-            x8     = s0/fp (saved/frame)
-            x9     = s1 (saved)
-            x10-11 = a0-a1 (args/return)
-            x12-15 = a2-a5 (args)
 
         Examples:
             regs                # Show all registers (default format)
@@ -618,10 +606,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use 'set regs-base' to change default format globally
             - Use 'set regs-leading-zeros' to change leading zero display
             - Stars (★) mark registers that changed with last instruction
-            - a0-a7 (x10-x17) hold function arguments/return values
-            - sp (x2) is the stack pointer
-            - ra (x1) holds the return address
-            - x0 is always 0 (hard-wired)
+            - Use 'status' to see current ISA
         """
         # Parse arguments for temporary overrides
         show_mode = self.regs_base
@@ -655,23 +640,36 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         # Format registers in 2 columns (or 1 if binary is too wide)
         cols = 1 if show_mode == 'binary' else 2
+        num_regs = self.sim.get_register_count()
+        isa = self.sim.get_isa()
+
+        # Determine register display format based on ISA
+        from . import ISA
+        use_x_prefix = isa in (ISA.RISCV, ISA.ARM)
 
         reg_lines = []
-        for i in range(0, 32, cols):
+        for i in range(0, num_regs, cols):
             line_parts = []
             for j in range(cols):
-                if i + j < 32:
+                if i + j < num_regs:
                     reg_num = i + j
-                    abi_name = self.RISCV_ABI_NAMES[reg_num]
+                    abi_name = self.sim.get_reg_name(reg_num)
                     value = regs[reg_num]
 
                     # Format the value
                     formatted_value = self._format_reg_value(value, show_mode, leading_zeros_mode)
 
                     # Check if this register changed with the last instruction
-                    star = ' ★ ' if (self.prev_regs is not None and self.prev_regs[reg_num] != value) else '   '
+                    star = ' ★ ' if (self.prev_regs is not None and
+                                     reg_num < len(self.prev_regs) and
+                                     self.prev_regs[reg_num] != value) else '   '
 
-                    line_parts.append(f'x{reg_num:<2} ({abi_name:>4}) = {formatted_value:<{value_width}}{star}')
+                    # Format register name based on ISA
+                    if use_x_prefix:
+                        line_parts.append(f'x{reg_num:<2} ({abi_name:>4}) = {formatted_value:<{value_width}}{star}')
+                    else:
+                        # x86-64: just show the register name (no x prefix)
+                        line_parts.append(f'{abi_name:>3} = {formatted_value:<{value_width}}{star}')
             reg_lines.append(' '.join(line_parts))
 
         for line in reg_lines:
@@ -855,8 +853,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         Tips:
             - Use 'pc' to find current program counter
-            - Each RISC-V instruction is 4 bytes (some compressed are 2)
-            - Addresses should be 4-byte aligned
+            - Instruction sizes: RISC-V/ARM64 = 4 bytes, x86-64 = variable
             - Use 'mem <addr>' to see raw instruction bytes
         """
         if not arg:
@@ -1263,7 +1260,9 @@ class MapacheSPIMConsole(cmd.Cmd):
         """
         print(f'\nLoaded file: {self.loaded_file or "None"}', file=self.stdout)
         if self.loaded_file:
+            isa_name = self.sim.get_isa_name()
             pc = self.sim.get_pc()
+            print(f'ISA: {isa_name}', file=self.stdout)
             print(f'PC: {pc:#018x}', file=self.stdout)
         print(f'Breakpoints: {len(self.breakpoints)}', file=self.stdout)
         print(file=self.stdout)
@@ -1574,8 +1573,10 @@ class MapacheSPIMConsole(cmd.Cmd):
         print('MapacheSPIM Quick Start Guide', file=self.stdout)
         print('=' * 60, file=self.stdout)
         print(file=self.stdout)
-        print('1. LOAD A PROGRAM', file=self.stdout)
-        print('   load examples/riscv/fibonacci/fibonacci', file=self.stdout)
+        print('1. LOAD A PROGRAM (ISA is auto-detected)', file=self.stdout)
+        print('   load examples/riscv/fibonacci/fibonacci  # RISC-V', file=self.stdout)
+        print('   load examples/arm/fibonacci/fibonacci    # ARM64', file=self.stdout)
+        print('   load examples/x86_64/test_simple/simple  # x86-64', file=self.stdout)
         print('   (Use Tab to autocomplete file paths!)', file=self.stdout)
         print(file=self.stdout)
         print('2. SEE WHERE YOU ARE', file=self.stdout)
@@ -1615,7 +1616,7 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='MapacheSPIM - Interactive RISC-V/ARM Simulator'
+        description='MapacheSPIM - Interactive Multi-ISA Simulator (RISC-V, ARM64, x86-64)'
     )
     parser.add_argument(
         'file',

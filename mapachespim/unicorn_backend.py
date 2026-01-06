@@ -708,6 +708,49 @@ class UnicornSimulator:
         num_regs = 16 if self._isa == ISA.X86_64 else 32
         return [self.get_reg(i) for i in range(num_regs)]
 
+    def get_isa(self):
+        """
+        Get the current ISA
+
+        Returns:
+            ISA: The current ISA enum value (ISA.RISCV, ISA.ARM, ISA.X86_64), or None if not set
+        """
+        return self._isa
+
+    def get_isa_name(self):
+        """
+        Get human-readable name of the current ISA
+
+        Returns:
+            str: ISA name (e.g., "RISCV", "ARM", "X86_64") or "Unknown" if not set
+        """
+        return self._isa.name if self._isa else "Unknown"
+
+    def get_register_count(self):
+        """
+        Get the number of general-purpose registers for the current ISA
+
+        Returns:
+            int: Number of GPRs (32 for RISC-V/ARM, 16 for x86-64)
+        """
+        if self._isa == ISA.X86_64:
+            return 16
+        return 32
+
+    def get_reg_name(self, n):
+        """
+        Get the ABI/conventional name for register n
+
+        Args:
+            n: Register number
+
+        Returns:
+            str: Register name (e.g., "ra", "sp", "x0", "rax")
+        """
+        if self._config is None:
+            return f"r{n}"
+        return self._config.get_reg_name(n)
+
     def _get_syscall_regs(self):
         """
         Get syscall register mappings for current ISA

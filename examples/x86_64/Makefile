@@ -6,38 +6,27 @@
 # CPU emulator via MapacheSPIM.
 #
 # Prerequisites:
-#   - x86-64 GNU toolchain (gcc, as, ld)
+#   macOS: brew install x86_64-elf-binutils x86_64-elf-gcc
+#   Linux: x86-64 GNU toolchain (gcc, as, ld) - usually pre-installed
 #
 # Usage:
 #   make                 # Build all examples
-#   make simple          # Build simple test program
 #   make clean           # Remove all build artifacts
 #
 # ============================================================================
 
-# Platform detection
-UNAME_S := $(shell uname -s)
-
-ifeq ($(UNAME_S),Darwin)
-    # macOS uses clang
-    AS = clang
-    ASFLAGS = -c -arch x86_64
-    LD = ld
-    LDFLAGS = -T linker.ld -static -arch x86_64 -e _start
-else
-    # Linux uses GNU as/ld
-    AS = as
-    ASFLAGS = --64
-    LD = ld
-    LDFLAGS = -T linker.ld -nostdlib -static
-endif
+# Use x86_64-elf cross-compiler for ELF output
+AS = x86_64-elf-as
+ASFLAGS = --64
+LD = x86_64-elf-ld
+LDFLAGS = -T linker.ld -nostdlib -static
 
 # ============================================================================
 # Targets
 # ============================================================================
 
 # Default target: build all examples
-all: test_simple/simple matrix_multiply/matrix_mult
+all: test_simple/simple matrix_multiply/matrix_mult fibonacci/fibonacci
 
 # Simple test example
 test_simple/simple: test_simple/simple.o linker.ld
@@ -63,6 +52,18 @@ matrix_multiply/matrix_mult.o: matrix_multiply/matrix_mult.S
 	@echo "Assembling matrix multiply program..."
 	$(AS) $(ASFLAGS) -o $@ $<
 
+# Fibonacci example
+fibonacci/fibonacci: fibonacci/fibonacci.o linker.ld
+	@echo "Linking fibonacci program..."
+	$(LD) $(LDFLAGS) -o $@ $<
+	@echo "Generating disassembly..."
+	objdump -d $@ > fibonacci/fibonacci.dis
+	@echo "Fibonacci build complete!"
+
+fibonacci/fibonacci.o: fibonacci/fibonacci.S
+	@echo "Assembling fibonacci program..."
+	$(AS) $(ASFLAGS) -o $@ $<
+
 # ============================================================================
 # Utility targets
 # ============================================================================
@@ -72,6 +73,7 @@ clean:
 	@echo "Cleaning build artifacts..."
 	rm -f test_simple/*.o test_simple/simple test_simple/*.dis
 	rm -f matrix_multiply/*.o matrix_multiply/matrix_mult matrix_multiply/*.dis
+	rm -f fibonacci/*.o fibonacci/fibonacci fibonacci/*.dis
 	@echo "Clean complete!"
 
 # Show disassembly
@@ -85,4 +87,9 @@ dis-matrix: matrix_multiply/matrix_mult
 	@echo "==============================="
 	objdump -d $<
 
-.PHONY: all clean dis-simple dis-matrix
+dis-fibonacci: fibonacci/fibonacci
+	@echo "Disassembly of fibonacci:"
+	@echo "========================="
+	objdump -d $<
+
+.PHONY: all clean dis-simple dis-matrix dis-fibonacci

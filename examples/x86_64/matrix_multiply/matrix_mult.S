@@ -16,6 +16,7 @@
 
 .section .data
     # Matrix A (3x3) - stored in row-major order
+    .globl matrix_a
     # [ 1  2  3 ]
     # [ 4  5  6 ]
     # [ 7  8  9 ]
@@ -25,6 +26,7 @@
         .long 7, 8, 9
 
     # Matrix B (3x3) - stored in row-major order
+    .globl matrix_b
     # [ 9  8  7 ]
     # [ 6  5  4 ]
     # [ 3  2  1 ]
@@ -34,6 +36,7 @@
         .long 3, 2, 1
 
     # Result matrix C (3x3) - initialized to zeros
+    .globl matrix_c
     matrix_c:
         .long 0, 0, 0
         .long 0, 0, 0
