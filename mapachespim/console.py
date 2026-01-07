@@ -6,16 +6,20 @@ A SPIM-like interactive console for assembly programs using the Unicorn Engine.
 Supports RISC-V, ARM64, and x86-64 architectures.
 """
 
+from __future__ import annotations
+
 import cmd
 import signal
 import sys
 from pathlib import Path
+from types import FrameType
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 
 from . import Simulator, StepResult
 
 try:
     from elftools.elf.elffile import ELFFile
-    from elftools.dwarf.descriptions import describe_form_class
+
     ELFTOOLS_AVAILABLE = True
 except ImportError:
     ELFTOOLS_AVAILABLE = False
@@ -24,22 +28,28 @@ except ImportError:
 class SourceInfo:
     """Cached source code information from DWARF debug info"""
 
-    def __init__(self):
+    addr_to_line: Dict[int, Tuple[str, int]]
+    source_cache: Dict[str, List[str]]
+    has_debug_info: bool
+
+    def __init__(self) -> None:
         self.addr_to_line = {}  # address -> (filename, line_number)
         self.source_cache = {}  # filename -> list of source lines
         self.has_debug_info = False
 
-    def get_location(self, addr):
+    def get_location(self, addr: int) -> Optional[Tuple[str, int]]:
         """Get source location for an address. Returns (filename, line_num) or None"""
         return self.addr_to_line.get(addr)
 
-    def get_source_lines(self, filename, start_line, count=10):
+    def get_source_lines(
+        self, filename: str, start_line: int, count: int = 10
+    ) -> Optional[List[Tuple[int, str]]]:
         """Get source lines from cached file. Returns list of (line_num, text)"""
         if filename not in self.source_cache:
             return None
 
         lines = self.source_cache[filename]
-        result = []
+        result: List[Tuple[int, str]] = []
 
         # Adjust to 0-indexed
         start_idx = max(0, start_line - 1)
@@ -51,7 +61,7 @@ class SourceInfo:
         return result
 
 
-def _parse_dwarf_line_info(elf_path):
+def _parse_dwarf_line_info(elf_path: str) -> SourceInfo:
     """Parse DWARF debug info and return SourceInfo object"""
     source_info = SourceInfo()
 
@@ -59,7 +69,7 @@ def _parse_dwarf_line_info(elf_path):
         return source_info
 
     try:
-        with open(elf_path, 'rb') as f:
+        with open(elf_path, "rb") as f:
             elf = ELFFile(f)
 
             if not elf.has_dwarf_info():
@@ -75,10 +85,10 @@ def _parse_dwarf_line_info(elf_path):
                     continue
 
                 # Get file entry table
-                file_entries = line_program['file_entry']
+                file_entries = line_program["file_entry"]
 
                 # Version-specific delta for file indexing
-                if line_program['version'] < 5:
+                if line_program["version"] < 5:
                     delta = 1
                 else:
                     delta = 0
@@ -94,7 +104,11 @@ def _parse_dwarf_line_info(elf_path):
                         # Map this address to source location
                         if state.file > 0 and state.file <= len(file_entries) + delta:
                             file_entry = file_entries[state.file - delta]
-                            filename = file_entry.name.decode('utf-8') if isinstance(file_entry.name, bytes) else file_entry.name
+                            filename = (
+                                file_entry.name.decode("utf-8")
+                                if isinstance(file_entry.name, bytes)
+                                else file_entry.name
+                            )
 
                             # Store mapping
                             source_info.addr_to_line[state.address] = (filename, state.line)
@@ -107,12 +121,12 @@ def _parse_dwarf_line_info(elf_path):
 
             return source_info
 
-    except Exception as e:
+    except Exception:
         # If DWARF parsing fails, just return empty source info
         return source_info
 
 
-def _load_source_file(source_info, filename, elf_path):
+def _load_source_file(source_info: SourceInfo, filename: str, elf_path: str) -> None:
     """Try to load source file contents into cache"""
     # Try to find source file relative to ELF location
     elf_dir = Path(elf_path).parent
@@ -127,7 +141,7 @@ def _load_source_file(source_info, filename, elf_path):
     for path in search_paths:
         try:
             if path.exists() and path.is_file():
-                with open(path, 'r') as f:
+                with open(path) as f:
                     source_info.source_cache[filename] = f.read().splitlines()
                 return
         except Exception:
@@ -137,10 +151,10 @@ def _load_source_file(source_info, filename, elf_path):
     source_info.source_cache[filename] = []
 
 
-def _chunk_list(lst, n):
+def _chunk_list(lst: List[Any], n: int) -> Generator[List[Any], None, None]:
     """Chunk a list into sublists of length n."""
     for i in range(0, len(lst), n):
-        yield lst[i:i+n]
+        yield lst[i : i + n]
 
 
 class MapacheSPIMConsole(cmd.Cmd):
@@ -152,10 +166,24 @@ class MapacheSPIMConsole(cmd.Cmd):
     Supports multiple ISAs: RISC-V, ARM64, and x86-64.
     """
 
-    intro = 'Welcome to MapacheSPIM. Type help or ? to list commands.\n'
-    prompt = '(mapachespim) '
+    intro: str = "Welcome to MapacheSPIM. Type help or ? to list commands.\n"
+    prompt: str = "(mapachespim) "
 
-    def __init__(self, verbose=False):
+    _verbose: bool
+    sim: Optional[Simulator]
+    loaded_file: Optional[str]
+    breakpoints: Set[int]
+    _interrupted: bool
+    _running: bool
+    show_reg_changes: bool
+    prev_regs: Optional[List[int]]
+    regs_base: str
+    regs_leading_zeros: str
+    source_info: SourceInfo
+
+    _ALIASES: Dict[str, str]
+
+    def __init__(self, verbose: bool = False) -> None:
         super().__init__()
         self._verbose = verbose
 
@@ -163,9 +191,10 @@ class MapacheSPIMConsole(cmd.Cmd):
         # This allows tab completion to work properly with file paths
         try:
             import readline
+
             # Remove / from delimiters so paths complete correctly
             delims = readline.get_completer_delims()
-            readline.set_completer_delims(delims.replace('/', ''))
+            readline.set_completer_delims(delims.replace("/", ""))
         except ImportError:
             pass  # readline not available on all platforms
 
@@ -180,8 +209,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         self.prev_regs = None
 
         # Register display options
-        self.regs_base = 'hex'  # hex, decimal, or binary
-        self.regs_leading_zeros = 'default'  # default, show, cut, or dot
+        self.regs_base = "hex"  # hex, decimal, or binary
+        self.regs_leading_zeros = "default"  # default, show, cut, or dot
 
         # Source code information (DWARF debug info)
         self.source_info = SourceInfo()
@@ -192,34 +221,34 @@ class MapacheSPIMConsole(cmd.Cmd):
         # Initialize simulator
         self._initialize_simulator()
 
-    def _initialize_simulator(self):
+    def _initialize_simulator(self) -> None:
         """Initialize or reset the simulator"""
         try:
             self.sim = Simulator()
-            self.print_verbose('Unicorn Engine simulator initialized.')
+            self.print_verbose("Unicorn Engine simulator initialized.")
         except Exception as e:
-            print(f'Error initializing simulator: {e}', file=self.stdout)
+            print(f"Error initializing simulator: {e}", file=self.stdout)
             sys.exit(1)
 
-    def _handler_sigint(self, signum, frame):
+    def _handler_sigint(self, signum: int, frame: Optional[FrameType]) -> None:
         """Handle Ctrl-C interrupts"""
         self._interrupted = True
         print(file=self.stdout)
         if not self._running:
             print('Use "quit" or "exit" to exit.', file=self.stdout)
 
-    def print_verbose(self, *args, **kwargs):
+    def print_verbose(self, *args: Any, **kwargs: Any) -> None:
         """Print only if verbose mode is enabled"""
         if self._verbose:
             print(*args, **kwargs, file=self.stdout)
 
-    def print_error(self, msg):
+    def print_error(self, msg: str) -> None:
         """Print an error message"""
-        print(f'\n{msg}\n', file=self.stdout)
+        print(f"\n{msg}\n", file=self.stdout)
 
     # --- File Loading ---
 
-    def do_load(self, arg):
+    def do_load(self, arg: str) -> None:
         """Load an ELF file
 
         Usage:
@@ -238,7 +267,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         After loading, use 'status' to see the ISA and entry point.
         """
         if not arg:
-            self.print_error('Error: Please specify an ELF file to load.')
+            self.print_error("Error: Please specify an ELF file to load.")
             return
 
         filepath = Path(arg)
@@ -251,8 +280,8 @@ class MapacheSPIMConsole(cmd.Cmd):
             self.loaded_file = str(filepath)
             pc = self.sim.get_pc()
             isa_name = self.sim.get_isa_name()
-            print(f'Loaded {filepath} ({isa_name})', file=self.stdout)
-            print(f'Entry point: {pc:#018x}', file=self.stdout)
+            print(f"Loaded {filepath} ({isa_name})", file=self.stdout)
+            print(f"Entry point: {pc:#018x}", file=self.stdout)
             self.breakpoints.clear()
 
             # Parse DWARF debug information
@@ -260,16 +289,19 @@ class MapacheSPIMConsole(cmd.Cmd):
             if self.source_info.has_debug_info:
                 num_files = len(self.source_info.source_cache)
                 if num_files > 0:
-                    file_list = ', '.join(self.source_info.source_cache.keys())
-                    print(f'Source info: {file_list} ({len(self.source_info.addr_to_line)} address mappings)', file=self.stdout)
+                    file_list = ", ".join(self.source_info.source_cache.keys())
+                    print(
+                        f"Source info: {file_list} ({len(self.source_info.addr_to_line)} address mappings)",
+                        file=self.stdout,
+                    )
                 else:
-                    print('Debug info present but source files not found', file=self.stdout)
+                    print("Debug info present but source files not found", file=self.stdout)
         except Exception as e:
-            self.print_error(f'Error loading ELF file: {e}')
+            self.print_error(f"Error loading ELF file: {e}")
 
     # --- Execution Control ---
 
-    def do_step(self, arg):
+    def do_step(self, arg: str) -> None:
         """Execute one or more instructions
 
         Usage:
@@ -304,7 +336,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             try:
                 n_steps = int(arg)
                 if n_steps <= 0:
-                    self.print_error('Error: Number of steps must be positive.')
+                    self.print_error("Error: Number of steps must be positive.")
                     return
             except ValueError:
                 self.print_error(f'Error: Invalid number "{arg}".')
@@ -316,14 +348,14 @@ class MapacheSPIMConsole(cmd.Cmd):
 
             # Check for breakpoint (but skip if this is the first step and we're already at a breakpoint)
             if i > 0 and pc in self.breakpoints:
-                print(f'Breakpoint hit at {pc:#018x}', file=self.stdout)
+                print(f"Breakpoint hit at {pc:#018x}", file=self.stdout)
                 break
 
             # Get instruction before executing (for display)
             try:
                 instr_disasm = self.sim.disasm(pc)
                 instr_bytes = self.sim.read_mem(pc, 4)
-                instr_hex = ''.join(f'{b:02x}' for b in instr_bytes)
+                instr_hex = "".join(f"{b:02x}" for b in instr_bytes)
             except Exception:
                 instr_disasm = "<error>"
                 instr_hex = "????????"
@@ -334,14 +366,14 @@ class MapacheSPIMConsole(cmd.Cmd):
             result = self.sim.step()
 
             if result == StepResult.HALT:
-                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}', file=self.stdout)
-                print(f'Program halted', file=self.stdout)
+                print(f"[{pc:#010x}]  0x{instr_hex}  {instr_disasm}", file=self.stdout)
+                print("Program halted", file=self.stdout)
                 # Update prev_regs even on halt
                 self.prev_regs = prev_regs
                 break
             elif result == StepResult.ERROR:
-                print(f'[{pc:#010x}]  0x{instr_hex}  {instr_disasm}', file=self.stdout)
-                print(f'Execution error', file=self.stdout)
+                print(f"[{pc:#010x}]  0x{instr_hex}  {instr_disasm}", file=self.stdout)
+                print("Execution error", file=self.stdout)
                 # Update prev_regs even on error
                 self.prev_regs = prev_regs
                 break
@@ -350,16 +382,19 @@ class MapacheSPIMConsole(cmd.Cmd):
             # Try to show symbol name
             sym, offset = self.sim.addr_to_symbol(pc)
             if sym and offset == 0:
-                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}>', file=self.stdout)
+                print(f"[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}>", file=self.stdout)
             elif sym:
-                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}+{offset}>', file=self.stdout)
+                print(
+                    f"[{pc:#010x}] 0x{instr_hex}  {instr_disasm}  <{sym}+{offset}>",
+                    file=self.stdout,
+                )
             else:
-                print(f'[{pc:#010x}] 0x{instr_hex}  {instr_disasm}', file=self.stdout)
+                print(f"[{pc:#010x}] 0x{instr_hex}  {instr_disasm}", file=self.stdout)
 
             # Store prev_regs for the regs command to show changes
             self.prev_regs = prev_regs
 
-    def do_stepreg(self, arg):
+    def do_stepreg(self, arg: str) -> None:
         """Execute instructions and show registers
 
         Usage:
@@ -387,9 +422,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Combine with breakpoints for efficient debugging workflow
         """
         self.do_step(arg)
-        self.do_regs('')
+        self.do_regs("")
 
-    def do_run(self, arg):
+    def do_run(self, arg: str) -> None:
         """Run program until halt or maximum instructions
 
         Usage:
@@ -426,7 +461,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             try:
                 max_steps = int(arg)
                 if max_steps <= 0:
-                    self.print_error('Error: Max steps must be positive.')
+                    self.print_error("Error: Max steps must be positive.")
                     return
             except ValueError:
                 self.print_error(f'Error: Invalid number "{arg}".')
@@ -442,13 +477,16 @@ class MapacheSPIMConsole(cmd.Cmd):
                 # Check for interrupt
                 if self._interrupted:
                     self._interrupted = False
-                    print(f'Interrupted after {steps_executed} instructions', file=self.stdout)
+                    print(f"Interrupted after {steps_executed} instructions", file=self.stdout)
                     break
 
                 # Check for breakpoint (but skip on first iteration to allow continuing from a breakpoint)
                 pc = self.sim.get_pc()
                 if steps_executed > 0 and pc in self.breakpoints:
-                    print(f'Breakpoint hit at {pc:#018x} after {steps_executed} instructions', file=self.stdout)
+                    print(
+                        f"Breakpoint hit at {pc:#018x} after {steps_executed} instructions",
+                        file=self.stdout,
+                    )
                     break
 
                 result = self.sim.step()
@@ -458,14 +496,25 @@ class MapacheSPIMConsole(cmd.Cmd):
                 should_terminate, reason = self.sim.check_termination(result)
                 if should_terminate:
                     # Print appropriate termination message
-                    if reason == 'syscall_exit':
-                        print(f'Program exited via syscall after {steps_executed} instructions', file=self.stdout)
-                    elif reason == 'halt':
-                        print(f'Program halted after {steps_executed} instructions', file=self.stdout)
-                    elif reason == 'error':
-                        print(f'Execution error at {pc:#018x} after {steps_executed} instructions', file=self.stdout)
-                    elif reason == 'tohost':
-                        print(f'Program completed (tohost) after {steps_executed} instructions', file=self.stdout)
+                    if reason == "syscall_exit":
+                        print(
+                            f"Program exited via syscall after {steps_executed} instructions",
+                            file=self.stdout,
+                        )
+                    elif reason == "halt":
+                        print(
+                            f"Program halted after {steps_executed} instructions", file=self.stdout
+                        )
+                    elif reason == "error":
+                        print(
+                            f"Execution error at {pc:#018x} after {steps_executed} instructions",
+                            file=self.stdout,
+                        )
+                    elif reason == "tohost":
+                        print(
+                            f"Program completed (tohost) after {steps_executed} instructions",
+                            file=self.stdout,
+                        )
                     break
         finally:
             self._running = False
@@ -473,10 +522,12 @@ class MapacheSPIMConsole(cmd.Cmd):
         if not self._interrupted and steps_executed > 0:
             final_pc = self.sim.get_pc()
             if max_steps > 0 and steps_executed >= max_steps:
-                print(f'Executed {steps_executed} instructions (max limit reached)', file=self.stdout)
-            print(f'PC = {final_pc:#018x}', file=self.stdout)
+                print(
+                    f"Executed {steps_executed} instructions (max limit reached)", file=self.stdout
+                )
+            print(f"PC = {final_pc:#018x}", file=self.stdout)
 
-    def do_continue(self, arg):
+    def do_continue(self, arg: str) -> None:
         """Continue execution after hitting a breakpoint
 
         Usage:
@@ -502,9 +553,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Press Ctrl-C to interrupt execution
             - Use 'step' for finer control after breakpoint
         """
-        self.do_run('')
+        self.do_run("")
 
-    def do_reset(self, arg):
+    def do_reset(self, arg: str) -> None:
         """Reset the simulator to initial state
 
         Usage:
@@ -527,51 +578,51 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use to recover from error states
         """
         self.sim.reset()
-        print('Simulator reset.', file=self.stdout)
+        print("Simulator reset.", file=self.stdout)
         if self.loaded_file:
             print('Program still loaded. Use "load" to reload if needed.', file=self.stdout)
 
     # --- State Inspection ---
 
-    def _format_reg_value(self, value, show_mode, leading_zeros_mode):
+    def _format_reg_value(self, value: int, show_mode: str, leading_zeros_mode: str) -> str:
         """Format a register value according to display settings"""
-        if show_mode == 'hex':
+        if show_mode == "hex":
             # Format as hex with 0x prefix
-            formatted = f'{value:016x}'
-            prefix = '0x'
-        elif show_mode == 'decimal':
+            formatted = f"{value:016x}"
+            prefix = "0x"
+        elif show_mode == "decimal":
             # Format as decimal (max 20 digits for 64-bit)
-            formatted = f'{value:020d}'
-            prefix = ''
-        elif show_mode == 'binary':
+            formatted = f"{value:020d}"
+            prefix = ""
+        elif show_mode == "binary":
             # Format as binary with 0b prefix
-            formatted = f'{value:064b}'
-            prefix = '0b'
+            formatted = f"{value:064b}"
+            prefix = "0b"
         else:
-            formatted = f'{value:016x}'
-            prefix = '0x'
+            formatted = f"{value:016x}"
+            prefix = "0x"
 
         # Handle 'default' mode: show for hex/binary, dot for decimal
         resolved_mode = leading_zeros_mode
-        if leading_zeros_mode == 'default':
-            if show_mode == 'decimal':
-                resolved_mode = 'dot'
+        if leading_zeros_mode == "default":
+            if show_mode == "decimal":
+                resolved_mode = "dot"
             else:
-                resolved_mode = 'show'
+                resolved_mode = "show"
 
         # Apply leading zeros mode
-        if resolved_mode == 'cut':
+        if resolved_mode == "cut":
             # Strip leading zeros but keep at least one digit
-            formatted = formatted.lstrip('0') or '0'
-        elif resolved_mode == 'dot':
+            formatted = formatted.lstrip("0") or "0"
+        elif resolved_mode == "dot":
             # Replace leading zeros with dots
-            stripped = formatted.lstrip('0') or '0'
+            stripped = formatted.lstrip("0") or "0"
             num_leading = len(formatted) - len(stripped)
-            formatted = '.' * num_leading + stripped
+            formatted = "." * num_leading + stripped
 
         return prefix + formatted
 
-    def do_regs(self, arg):
+    def do_regs(self, arg: str) -> None:
         """Display all registers
 
         Usage:
@@ -616,12 +667,14 @@ class MapacheSPIMConsole(cmd.Cmd):
             parts = arg.split()
             for part in parts:
                 part_lower = part.lower()
-                if part_lower in ('hex', 'decimal', 'binary'):
+                if part_lower in ("hex", "decimal", "binary"):
                     show_mode = part_lower
-                elif part_lower in ('default', 'show', 'cut', 'dot'):
+                elif part_lower in ("default", "show", "cut", "dot"):
                     leading_zeros_mode = part_lower
                 else:
-                    self.print_error(f'Error: Unknown option "{part}". Use: hex, decimal, binary, default, show, cut, or dot')
+                    self.print_error(
+                        f'Error: Unknown option "{part}". Use: hex, decimal, binary, default, show, cut, or dot'
+                    )
                     return
 
         print(file=self.stdout)
@@ -629,22 +682,23 @@ class MapacheSPIMConsole(cmd.Cmd):
         pc = self.sim.get_pc()
 
         # Determine the width needed for values based on format
-        if show_mode == 'hex':
+        if show_mode == "hex":
             value_width = 18  # 0x + 16 hex digits
-        elif show_mode == 'decimal':
+        elif show_mode == "decimal":
             value_width = 20  # max 20 decimal digits for 64-bit
-        elif show_mode == 'binary':
+        elif show_mode == "binary":
             value_width = 66  # 0b + 64 binary digits
         else:
             value_width = 18
 
         # Format registers in 2 columns (or 1 if binary is too wide)
-        cols = 1 if show_mode == 'binary' else 2
+        cols = 1 if show_mode == "binary" else 2
         num_regs = self.sim.get_register_count()
         isa = self.sim.get_isa()
 
         # Determine register display format based on ISA
         from . import ISA
+
         use_x_prefix = isa in (ISA.RISCV, ISA.ARM)
 
         reg_lines = []
@@ -660,27 +714,35 @@ class MapacheSPIMConsole(cmd.Cmd):
                     formatted_value = self._format_reg_value(value, show_mode, leading_zeros_mode)
 
                     # Check if this register changed with the last instruction
-                    star = ' ★ ' if (self.prev_regs is not None and
-                                     reg_num < len(self.prev_regs) and
-                                     self.prev_regs[reg_num] != value) else '   '
+                    star = (
+                        " ★ "
+                        if (
+                            self.prev_regs is not None
+                            and reg_num < len(self.prev_regs)
+                            and self.prev_regs[reg_num] != value
+                        )
+                        else "   "
+                    )
 
                     # Format register name based on ISA
                     if use_x_prefix:
-                        line_parts.append(f'x{reg_num:<2} ({abi_name:>4}) = {formatted_value:<{value_width}}{star}')
+                        line_parts.append(
+                            f"x{reg_num:<2} ({abi_name:>4}) = {formatted_value:<{value_width}}{star}"
+                        )
                     else:
                         # x86-64: just show the register name (no x prefix)
-                        line_parts.append(f'{abi_name:>3} = {formatted_value:<{value_width}}{star}')
-            reg_lines.append(' '.join(line_parts))
+                        line_parts.append(f"{abi_name:>3} = {formatted_value:<{value_width}}{star}")
+            reg_lines.append(" ".join(line_parts))
 
         for line in reg_lines:
             print(line, file=self.stdout)
 
         # Format PC
         formatted_pc = self._format_reg_value(pc, show_mode, leading_zeros_mode)
-        print(f'\npc = {formatted_pc}', file=self.stdout)
+        print(f"\npc = {formatted_pc}", file=self.stdout)
         print(file=self.stdout)
 
-    def do_pc(self, arg):
+    def do_pc(self, arg: str) -> None:
         """Display program counter
 
         Usage:
@@ -700,9 +762,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use 'mem <pc_value>' to see instructions at PC
         """
         pc = self.sim.get_pc()
-        print(f'pc = {pc:#018x}', file=self.stdout)
+        print(f"pc = {pc:#018x}", file=self.stdout)
 
-    def do_mem(self, arg):
+    def do_mem(self, arg: str) -> None:
         """Display memory contents in hex dump format
 
         Usage:
@@ -736,7 +798,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Section names are shortcuts to their addresses
         """
         if not arg:
-            self.print_error('Error: Please specify an address or section (e.g., "mem 0x80000000" or "mem .data").')
+            self.print_error(
+                'Error: Please specify an address or section (e.g., "mem 0x80000000" or "mem .data").'
+            )
             return
 
         parts = arg.split()
@@ -748,36 +812,42 @@ class MapacheSPIMConsole(cmd.Cmd):
             try:
                 length = int(parts[1], 0)
                 if length <= 0:
-                    self.print_error('Error: Length must be positive.')
+                    self.print_error("Error: Length must be positive.")
                     return
             except ValueError:
                 self.print_error(f'Error: Invalid length "{parts[1]}".')
                 return
 
         # Check if it's a section name (starts with .)
-        if addr_or_section.startswith('.'):
+        if addr_or_section.startswith("."):
             if not ELFTOOLS_AVAILABLE:
-                self.print_error('Error: pyelftools not available. Install with: pip install pyelftools')
+                self.print_error(
+                    "Error: pyelftools not available. Install with: pip install pyelftools"
+                )
                 return
 
             if not self.loaded_file:
-                self.print_error('Error: No program loaded.')
+                self.print_error("Error: No program loaded.")
                 return
 
             # Look up section
             try:
-                with open(self.loaded_file, 'rb') as f:
+                with open(self.loaded_file, "rb") as f:
                     elf = ELFFile(f)
                     section = elf.get_section_by_name(addr_or_section)
                     if not section:
-                        self.print_error(f'Error: Section "{addr_or_section}" not found. Use "info sections" to see available sections.')
+                        self.print_error(
+                            f'Error: Section "{addr_or_section}" not found. Use "info sections" to see available sections.'
+                        )
                         return
 
-                    addr = section['sh_addr']
-                    section_size = section['sh_size']
+                    addr = section["sh_addr"]
+                    section_size = section["sh_size"]
 
                     if addr == 0:
-                        self.print_error(f'Error: Section "{addr_or_section}" is not loaded in memory (address is 0).')
+                        self.print_error(
+                            f'Error: Section "{addr_or_section}" is not loaded in memory (address is 0).'
+                        )
                         return
 
                     # Limit length to section size if not specified
@@ -785,7 +855,7 @@ class MapacheSPIMConsole(cmd.Cmd):
                         length = min(length, section_size)
 
             except Exception as e:
-                self.print_error(f'Error reading section: {e}')
+                self.print_error(f"Error reading section: {e}")
                 return
         else:
             # Parse as address
@@ -800,35 +870,35 @@ class MapacheSPIMConsole(cmd.Cmd):
             data = self.sim.read_mem(addr, length)
             self._print_memory(addr, data)
         except Exception as e:
-            self.print_error(f'Error reading memory: {e}')
+            self.print_error(f"Error reading memory: {e}")
 
-    def _print_memory(self, start_addr, data, width=16):
+    def _print_memory(self, start_addr: int, data: bytes, width: int = 16) -> None:
         """Pretty-print memory contents in hex dump format with ASCII sidebar"""
         print(file=self.stdout)
         for offset in range(0, len(data), width):
             addr = start_addr + offset
-            row = data[offset:offset+width]
+            row = data[offset : offset + width]
 
             # Format bytes in groups of 4
-            hex_bytes = [f'{b:02x}' for b in row]
-            hex_groups = [' '.join(chunk) for chunk in _chunk_list(hex_bytes, 4)]
-            hex_row = '  '.join(hex_groups)
+            hex_bytes = [f"{b:02x}" for b in row]
+            hex_groups = [" ".join(chunk) for chunk in _chunk_list(hex_bytes, 4)]
+            hex_row = "  ".join(hex_groups)
 
             # ASCII sidebar - show printable chars, '.' for non-printable
-            ascii_str = ''.join(chr(b) if 32 <= b < 127 else '.' for b in row)
+            ascii_str = "".join(chr(b) if 32 <= b < 127 else "." for b in row)
 
             # Pad hex if row is incomplete
             if len(row) < width:
                 # Calculate padding needed
                 missing_bytes = width - len(row)
-                hex_row += '   ' * missing_bytes  # 3 chars per missing byte
+                hex_row += "   " * missing_bytes  # 3 chars per missing byte
                 if missing_bytes >= 4:  # Account for group separator
-                    hex_row += '  ' * (missing_bytes // 4)
+                    hex_row += "  " * (missing_bytes // 4)
 
-            print(f'{addr:#010x}:  {hex_row}  |{ascii_str}|', file=self.stdout)
+            print(f"{addr:#010x}:  {hex_row}  |{ascii_str}|", file=self.stdout)
         print(file=self.stdout)
 
-    def do_disasm(self, arg):
+    def do_disasm(self, arg: str) -> None:
         """Disassemble instructions at address
 
         Usage:
@@ -875,7 +945,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             try:
                 count = int(parts[1], 0)
                 if count <= 0:
-                    self.print_error('Error: Count must be positive.')
+                    self.print_error("Error: Count must be positive.")
                     return
             except ValueError:
                 self.print_error(f'Error: Invalid count "{parts[1]}".')
@@ -887,13 +957,13 @@ class MapacheSPIMConsole(cmd.Cmd):
             try:
                 instr_addr = addr + (i * 4)
                 disasm = self.sim.disasm(instr_addr)
-                print(f'[{instr_addr:#010x}]  {disasm}', file=self.stdout)
+                print(f"[{instr_addr:#010x}]  {disasm}", file=self.stdout)
             except Exception as e:
-                print(f'[{instr_addr:#010x}]  <error: {e}>', file=self.stdout)
+                print(f"[{instr_addr:#010x}]  <error: {e}>", file=self.stdout)
                 break
         print(file=self.stdout)
 
-    def do_list(self, arg):
+    def do_list(self, arg: str) -> None:
         """Display source code from assembly file
 
         Usage:
@@ -925,15 +995,15 @@ class MapacheSPIMConsole(cmd.Cmd):
             return
 
         if not ELFTOOLS_AVAILABLE:
-            self.print_error('Error: pyelftools not available.')
+            self.print_error("Error: pyelftools not available.")
             return
 
         if not self.source_info.has_debug_info:
             print(file=self.stdout)
-            print('No source information available.', file=self.stdout)
-            print('Compile your program with debug symbols (use -g flag):', file=self.stdout)
-            print('  as -g -o program.o program.s', file=self.stdout)
-            print('  ld -o program program.o', file=self.stdout)
+            print("No source information available.", file=self.stdout)
+            print("Compile your program with debug symbols (use -g flag):", file=self.stdout)
+            print("  as -g -o program.o program.s", file=self.stdout)
+            print("  ld -o program program.o", file=self.stdout)
             print(file=self.stdout)
             return
 
@@ -950,7 +1020,7 @@ class MapacheSPIMConsole(cmd.Cmd):
                     filename = list(self.source_info.source_cache.keys())[0]
                     self._show_source_lines(filename, line_num, pc, center=True)
                 else:
-                    print('No source files available.', file=self.stdout)
+                    print("No source files available.", file=self.stdout)
                 return
             except ValueError:
                 # Not a number, try as function name
@@ -973,10 +1043,12 @@ class MapacheSPIMConsole(cmd.Cmd):
                 filename, line_num = location
                 self._show_source_lines(filename, line_num, pc, center=True)
             else:
-                print(f'No source location for current PC ({pc:#010x}).', file=self.stdout)
-                print('Try stepping to an instruction with debug info.', file=self.stdout)
+                print(f"No source location for current PC ({pc:#010x}).", file=self.stdout)
+                print("Try stepping to an instruction with debug info.", file=self.stdout)
 
-    def _show_source_lines(self, filename, center_line, current_pc, center=True, count=10):
+    def _show_source_lines(
+        self, filename: str, center_line: int, current_pc: int, center: bool = True, count: int = 10
+    ) -> None:
         """Helper to display source lines with PC marker"""
         if center:
             # Show lines centered around center_line
@@ -991,7 +1063,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             return
 
         print(file=self.stdout)
-        print(f'{filename}:', file=self.stdout)
+        print(f"{filename}:", file=self.stdout)
 
         # Find which line corresponds to current PC (if any)
         pc_line = None
@@ -1002,15 +1074,15 @@ class MapacheSPIMConsole(cmd.Cmd):
         for line_num, text in lines:
             # Mark current PC line
             if line_num == pc_line:
-                print(f'{line_num:5d}: {text}  # <-- PC: {current_pc:#010x}', file=self.stdout)
+                print(f"{line_num:5d}: {text}  # <-- PC: {current_pc:#010x}", file=self.stdout)
             else:
-                print(f'{line_num:5d}: {text}', file=self.stdout)
+                print(f"{line_num:5d}: {text}", file=self.stdout)
 
         print(file=self.stdout)
 
     # --- Breakpoints ---
 
-    def do_break(self, arg):
+    def do_break(self, arg: str) -> None:
         """Set a breakpoint at an address or symbol
 
         Usage:
@@ -1043,7 +1115,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Set breakpoints before running to stop at key locations
         """
         if not arg:
-            self.print_error('Error: Please specify an address or symbol name.')
+            self.print_error("Error: Please specify an address or symbol name.")
             return
 
         # First try to look up as symbol name
@@ -1051,18 +1123,18 @@ class MapacheSPIMConsole(cmd.Cmd):
             addr = self.sim.lookup_symbol(arg)
             if addr is not None:
                 self.breakpoints.add(addr)
-                print(f'Breakpoint set at {arg} ({addr:#010x})', file=self.stdout)
+                print(f"Breakpoint set at {arg} ({addr:#010x})", file=self.stdout)
                 return
 
         # If not a symbol, try to parse as address
         try:
             addr = int(arg, 0)
             self.breakpoints.add(addr)
-            print(f'Breakpoint set at {addr:#010x}', file=self.stdout)
+            print(f"Breakpoint set at {addr:#010x}", file=self.stdout)
         except ValueError:
             self.print_error(f'Error: "{arg}" is not a valid address or known symbol.')
 
-    def do_info(self, arg):
+    def do_info(self, arg: str) -> None:
         """Show information about simulator state
 
         Usage:
@@ -1093,62 +1165,64 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use section names with 'mem' (e.g., mem .data)
             - Each breakpoint is numbered for reference
         """
-        if arg == 'breakpoints' or arg == 'break':
+        if arg == "breakpoints" or arg == "break":
             if not self.breakpoints:
-                print('No breakpoints set.', file=self.stdout)
+                print("No breakpoints set.", file=self.stdout)
             else:
-                print('\nBreakpoints:', file=self.stdout)
+                print("\nBreakpoints:", file=self.stdout)
                 for i, addr in enumerate(sorted(self.breakpoints), 1):
                     # Try to show symbol name if available
                     sym, offset = self.sim.addr_to_symbol(addr)
                     if sym and offset == 0:
-                        print(f'  {i}. {addr:#010x}  <{sym}>', file=self.stdout)
+                        print(f"  {i}. {addr:#010x}  <{sym}>", file=self.stdout)
                     elif sym:
-                        print(f'  {i}. {addr:#010x}  <{sym}+{offset}>', file=self.stdout)
+                        print(f"  {i}. {addr:#010x}  <{sym}+{offset}>", file=self.stdout)
                     else:
-                        print(f'  {i}. {addr:#010x}', file=self.stdout)
+                        print(f"  {i}. {addr:#010x}", file=self.stdout)
                 print(file=self.stdout)
-        elif arg == 'symbols' or arg == 'sym':
+        elif arg == "symbols" or arg == "sym":
             if not self.loaded_file:
-                print('No program loaded.', file=self.stdout)
+                print("No program loaded.", file=self.stdout)
                 return
 
             symbols = self.sim.get_symbols()
             if not symbols:
-                print('No symbols available.', file=self.stdout)
+                print("No symbols available.", file=self.stdout)
                 return
 
-            print(f'\nSymbols ({len(symbols)} total):', file=self.stdout)
+            print(f"\nSymbols ({len(symbols)} total):", file=self.stdout)
 
             # Sort by address
             sorted_symbols = sorted(symbols.items(), key=lambda x: x[1])
 
             for name, addr in sorted_symbols:
-                print(f'  {addr:#010x}  {name}', file=self.stdout)
+                print(f"  {addr:#010x}  {name}", file=self.stdout)
             print(file=self.stdout)
-        elif arg == 'sections' or arg == 'sec':
+        elif arg == "sections" or arg == "sec":
             if not self.loaded_file:
-                print('No program loaded.', file=self.stdout)
+                print("No program loaded.", file=self.stdout)
                 return
 
             if not ELFTOOLS_AVAILABLE:
-                self.print_error('Error: pyelftools not available. Install with: pip install pyelftools')
+                self.print_error(
+                    "Error: pyelftools not available. Install with: pip install pyelftools"
+                )
                 return
 
             try:
-                with open(self.loaded_file, 'rb') as f:
+                with open(self.loaded_file, "rb") as f:
                     elf = ELFFile(f)
 
                     print(file=self.stdout)
-                    print(f"ELF Sections:", file=self.stdout)
+                    print("ELF Sections:", file=self.stdout)
                     print(f"{'Name':<20} {'Address':>18} {'Size':>12}  {'Flags'}", file=self.stdout)
                     print("-" * 70, file=self.stdout)
 
                     for section in elf.iter_sections():
                         name = section.name
-                        addr = section['sh_addr']
-                        size = section['sh_size']
-                        flags = section['sh_flags']
+                        addr = section["sh_addr"]
+                        size = section["sh_size"]
+                        flags = section["sh_flags"]
 
                         # Decode flags
                         flag_str = ""
@@ -1161,19 +1235,24 @@ class MapacheSPIMConsole(cmd.Cmd):
 
                         # Only show allocated sections (those loaded in memory)
                         if addr > 0:
-                            print(f"{name:<20} {addr:#18x} {size:>12}  {flag_str}", file=self.stdout)
+                            print(
+                                f"{name:<20} {addr:#18x} {size:>12}  {flag_str}", file=self.stdout
+                            )
 
                     print(file=self.stdout)
                     print("Flags: W=Write, A=Alloc, X=Execute", file=self.stdout)
-                    print("Use 'mem <section>' to view section contents (e.g., mem .data)", file=self.stdout)
+                    print(
+                        "Use 'mem <section>' to view section contents (e.g., mem .data)",
+                        file=self.stdout,
+                    )
                     print(file=self.stdout)
 
             except Exception as e:
-                self.print_error(f'Error reading ELF sections: {e}')
+                self.print_error(f"Error reading ELF sections: {e}")
         else:
-            self.print_error('Usage: info [breakpoints|symbols|sections]')
+            self.print_error("Usage: info [breakpoints|symbols|sections]")
 
-    def do_delete(self, arg):
+    def do_delete(self, arg: str) -> None:
         """Delete a specific breakpoint
 
         Usage:
@@ -1197,20 +1276,20 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Address must match exactly (including 0x prefix if used)
         """
         if not arg:
-            self.print_error('Error: Please specify an address.')
+            self.print_error("Error: Please specify an address.")
             return
 
         try:
             addr = int(arg, 0)
             if addr in self.breakpoints:
                 self.breakpoints.remove(addr)
-                print(f'Breakpoint removed at {addr:#018x}', file=self.stdout)
+                print(f"Breakpoint removed at {addr:#018x}", file=self.stdout)
             else:
-                print(f'No breakpoint at {addr:#018x}', file=self.stdout)
+                print(f"No breakpoint at {addr:#018x}", file=self.stdout)
         except ValueError:
             self.print_error(f'Error: Invalid address "{arg}".')
 
-    def do_clear(self, arg):
+    def do_clear(self, arg: str) -> None:
         """Clear all breakpoints
 
         Usage:
@@ -1232,11 +1311,11 @@ class MapacheSPIMConsole(cmd.Cmd):
             - No confirmation is required (immediate effect)
         """
         self.breakpoints.clear()
-        print('All breakpoints cleared.', file=self.stdout)
+        print("All breakpoints cleared.", file=self.stdout)
 
     # --- Utility Commands ---
 
-    def do_status(self, arg):
+    def do_status(self, arg: str) -> None:
         """Show current simulator status
 
         Usage:
@@ -1258,16 +1337,16 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use 'info breakpoints' for detailed breakpoint list
             - Use 'regs' for full register state
         """
-        print(f'\nLoaded file: {self.loaded_file or "None"}', file=self.stdout)
+        print(f"\nLoaded file: {self.loaded_file or 'None'}", file=self.stdout)
         if self.loaded_file:
             isa_name = self.sim.get_isa_name()
             pc = self.sim.get_pc()
-            print(f'ISA: {isa_name}', file=self.stdout)
-            print(f'PC: {pc:#018x}', file=self.stdout)
-        print(f'Breakpoints: {len(self.breakpoints)}', file=self.stdout)
+            print(f"ISA: {isa_name}", file=self.stdout)
+            print(f"PC: {pc:#018x}", file=self.stdout)
+        print(f"Breakpoints: {len(self.breakpoints)}", file=self.stdout)
         print(file=self.stdout)
 
-    def do_set(self, arg):
+    def do_set(self, arg: str) -> None:
         """Configure console options
 
         Usage:
@@ -1293,45 +1372,48 @@ class MapacheSPIMConsole(cmd.Cmd):
         if not arg:
             # Show all settings
             print(file=self.stdout)
-            print('Current settings:', file=self.stdout)
-            print(f'  show-changes       : {"on" if self.show_reg_changes else "off"}', file=self.stdout)
-            print(f'  regs-base          : {self.regs_base}', file=self.stdout)
-            print(f'  regs-leading-zeros : {self.regs_leading_zeros}', file=self.stdout)
+            print("Current settings:", file=self.stdout)
+            print(
+                f"  show-changes       : {'on' if self.show_reg_changes else 'off'}",
+                file=self.stdout,
+            )
+            print(f"  regs-base          : {self.regs_base}", file=self.stdout)
+            print(f"  regs-leading-zeros : {self.regs_leading_zeros}", file=self.stdout)
             print(file=self.stdout)
             return
 
         parts = arg.split()
         if len(parts) != 2:
-            self.print_error('Error: Usage: set <option> <value>')
+            self.print_error("Error: Usage: set <option> <value>")
             return
 
         option, value = parts[0].lower(), parts[1].lower()
 
-        if option == 'show-changes':
-            if value in ('on', 'true', '1', 'yes'):
+        if option == "show-changes":
+            if value in ("on", "true", "1", "yes"):
                 self.show_reg_changes = True
-                print('Register change display enabled', file=self.stdout)
-            elif value in ('off', 'false', '0', 'no'):
+                print("Register change display enabled", file=self.stdout)
+            elif value in ("off", "false", "0", "no"):
                 self.show_reg_changes = False
-                print('Register change display disabled', file=self.stdout)
+                print("Register change display disabled", file=self.stdout)
             else:
-                self.print_error('Error: Value must be on or off')
-        elif option == 'regs-base':
-            if value in ('hex', 'decimal', 'binary'):
+                self.print_error("Error: Value must be on or off")
+        elif option == "regs-base":
+            if value in ("hex", "decimal", "binary"):
                 self.regs_base = value
-                print(f'Register display format set to {value}', file=self.stdout)
+                print(f"Register display format set to {value}", file=self.stdout)
             else:
-                self.print_error('Error: Value must be hex, decimal, or binary')
-        elif option == 'regs-leading-zeros':
-            if value in ('default', 'show', 'cut', 'dot'):
+                self.print_error("Error: Value must be hex, decimal, or binary")
+        elif option == "regs-leading-zeros":
+            if value in ("default", "show", "cut", "dot"):
                 self.regs_leading_zeros = value
-                print(f'Register leading zeros display set to {value}', file=self.stdout)
+                print(f"Register leading zeros display set to {value}", file=self.stdout)
             else:
-                self.print_error('Error: Value must be default, show, cut, or dot')
+                self.print_error("Error: Value must be default, show, cut, or dot")
         else:
             self.print_error(f'Error: Unknown option "{option}"')
 
-    def do_quit(self, arg):
+    def do_quit(self, arg: str) -> bool:
         """Exit the console
 
         Usage:
@@ -1354,14 +1436,14 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Simulator state is not saved
             - No confirmation required
         """
-        print('Goodbye!', file=self.stdout)
+        print("Goodbye!", file=self.stdout)
         return True
 
-    def do_exit(self, arg):
+    def do_exit(self, arg: str) -> bool:
         """Exit the console (same as quit)"""
         return self.do_quit(arg)
 
-    def do_EOF(self, arg):
+    def do_EOF(self, arg: str) -> bool:
         """Exit on EOF (Ctrl-D)"""
         print(file=self.stdout)
         return self.do_quit(arg)
@@ -1369,27 +1451,27 @@ class MapacheSPIMConsole(cmd.Cmd):
     # --- Aliases (hidden from help) ---
     # These are implemented via _ALIASES dict and do_help override
     _ALIASES = {
-        'q': 'quit',
-        'r': 'run',
-        's': 'step',
-        'sr': 'stepreg',
-        'c': 'continue',
-        'b': 'break',
-        'd': 'disasm',
-        'l': 'list',
+        "q": "quit",
+        "r": "run",
+        "s": "step",
+        "sr": "stepreg",
+        "c": "continue",
+        "b": "break",
+        "d": "disasm",
+        "l": "list",
     }
 
-    def default(self, line):
+    def default(self, line: str) -> Optional[bool]:
         """Handle aliases and unknown commands"""
-        cmd = line.split()[0] if line.split() else ''
+        cmd = line.split()[0] if line.split() else ""
         if cmd in self._ALIASES:
             # Replace alias with full command and re-execute
             full_cmd = self._ALIASES[cmd]
-            rest = line[len(cmd):].strip()
-            return self.onecmd(f'{full_cmd} {rest}'.strip())
+            rest = line[len(cmd) :].strip()
+            return self.onecmd(f"{full_cmd} {rest}".strip())
         return super().default(line)
 
-    def do_help(self, arg):
+    def do_help(self, arg: str) -> None:
         """Show help for commands
 
         Usage:
@@ -1412,48 +1494,48 @@ class MapacheSPIMConsole(cmd.Cmd):
         else:
             # Custom help listing that groups aliases
             print(file=self.stdout)
-            print('MapacheSPIM Commands:', file=self.stdout)
-            print('=' * 60, file=self.stdout)
+            print("MapacheSPIM Commands:", file=self.stdout)
+            print("=" * 60, file=self.stdout)
             print(file=self.stdout)
 
             # Group commands by category
             categories = {
-                'Loading & Running': [
-                    ('load', 'Load an ELF file'),
-                    ('run (r)', 'Run program until halt or breakpoint'),
-                    ('step (s)', 'Execute one or more instructions'),
-                    ('stepreg (sr)', 'Step and show registers'),
-                    ('continue (c)', 'Continue after breakpoint'),
-                    ('reset', 'Reset simulator state'),
+                "Loading & Running": [
+                    ("load", "Load an ELF file"),
+                    ("run (r)", "Run program until halt or breakpoint"),
+                    ("step (s)", "Execute one or more instructions"),
+                    ("stepreg (sr)", "Step and show registers"),
+                    ("continue (c)", "Continue after breakpoint"),
+                    ("reset", "Reset simulator state"),
                 ],
-                'Inspection': [
-                    ('regs', 'Display all registers'),
-                    ('pc', 'Display program counter'),
-                    ('mem', 'Display memory contents'),
-                    ('disasm (d)', 'Disassemble instructions'),
-                    ('list (l)', 'Show source code (if debug info)'),
-                    ('status', 'Show simulator status'),
-                    ('info', 'Show breakpoints/symbols/sections'),
+                "Inspection": [
+                    ("regs", "Display all registers"),
+                    ("pc", "Display program counter"),
+                    ("mem", "Display memory contents"),
+                    ("disasm (d)", "Disassemble instructions"),
+                    ("list (l)", "Show source code (if debug info)"),
+                    ("status", "Show simulator status"),
+                    ("info", "Show breakpoints/symbols/sections"),
                 ],
-                'Breakpoints': [
-                    ('break (b)', 'Set a breakpoint'),
-                    ('delete', 'Delete a breakpoint'),
-                    ('clear', 'Clear all breakpoints'),
+                "Breakpoints": [
+                    ("break (b)", "Set a breakpoint"),
+                    ("delete", "Delete a breakpoint"),
+                    ("clear", "Clear all breakpoints"),
                 ],
-                'Configuration': [
-                    ('set', 'Configure display options'),
+                "Configuration": [
+                    ("set", "Configure display options"),
                 ],
-                'Other': [
-                    ('help', 'Show this help'),
-                    ('quickstart', 'Tutorial for new users'),
-                    ('quit (q)', 'Exit the console'),
+                "Other": [
+                    ("help", "Show this help"),
+                    ("quickstart", "Tutorial for new users"),
+                    ("quit (q)", "Exit the console"),
                 ],
             }
 
             for category, commands in categories.items():
-                print(f'{category}:', file=self.stdout)
+                print(f"{category}:", file=self.stdout)
                 for cmd, desc in commands:
-                    print(f'  {cmd:<16} {desc}', file=self.stdout)
+                    print(f"  {cmd:<16} {desc}", file=self.stdout)
                 print(file=self.stdout)
 
             print('Type "help <command>" for detailed help on any command.', file=self.stdout)
@@ -1462,12 +1544,12 @@ class MapacheSPIMConsole(cmd.Cmd):
 
     # --- Tab Completion ---
 
-    def complete_load(self, text, line, begidx, endidx):
+    def complete_load(self, text: str, line: str, begidx: int, endidx: int) -> List[str]:
         """Tab completion for load command - completes file paths"""
         import glob
 
         # Handle ~ expansion
-        if text.startswith('~'):
+        if text.startswith("~"):
             expanded = str(Path(text).expanduser())
             # Keep track that we need to show ~ in results
             home_prefix = str(Path.home())
@@ -1477,15 +1559,15 @@ class MapacheSPIMConsole(cmd.Cmd):
             use_tilde = False
 
         # Build glob pattern
-        if expanded.endswith('/'):
+        if expanded.endswith("/"):
             # User typed a directory path ending in /, list its contents
-            pattern = expanded + '*'
+            pattern = expanded + "*"
         elif expanded:
             # User typed partial path, complete it
-            pattern = expanded + '*'
+            pattern = expanded + "*"
         else:
             # No text yet, list current directory
-            pattern = '*'
+            pattern = "*"
 
         # Get matching paths
         matches = glob.glob(pattern)
@@ -1496,19 +1578,19 @@ class MapacheSPIMConsole(cmd.Cmd):
             path = Path(match)
             if path.is_dir():
                 # Add trailing slash for directories
-                result = match + '/'
+                result = match + "/"
             else:
                 result = match
 
             # Convert back to ~ notation if user started with ~
             if use_tilde and result.startswith(home_prefix):
-                result = '~' + result[len(home_prefix):]
+                result = "~" + result[len(home_prefix) :]
 
             completions.append(result)
 
         return completions
 
-    def complete_break(self, text, line, begidx, endidx):
+    def complete_break(self, text: str, line: str, begidx: int, endidx: int) -> List[str]:
         """Tab completion for break command - completes symbol names"""
         if not self.loaded_file:
             return []
@@ -1518,31 +1600,31 @@ class MapacheSPIMConsole(cmd.Cmd):
             return [s for s in symbols.keys() if s.startswith(text)]
         return list(symbols.keys())
 
-    def complete_info(self, text, line, begidx, endidx):
+    def complete_info(self, text: str, line: str, begidx: int, endidx: int) -> List[str]:
         """Tab completion for info command"""
-        options = ['breakpoints', 'break', 'symbols', 'sym', 'sections', 'sec']
+        options = ["breakpoints", "break", "symbols", "sym", "sections", "sec"]
         if text:
             return [o for o in options if o.startswith(text)]
         return options
 
-    def complete_set(self, text, line, begidx, endidx):
+    def complete_set(self, text: str, line: str, begidx: int, endidx: int) -> List[str]:
         """Tab completion for set command"""
         parts = line.split()
         if len(parts) <= 2:
             # Completing option name
-            options = ['show-changes', 'regs-base', 'regs-leading-zeros']
+            options = ["show-changes", "regs-base", "regs-leading-zeros"]
             if text:
                 return [o for o in options if o.startswith(text)]
             return options
         elif len(parts) == 3 or (len(parts) == 2 and text):
             # Completing value for option
-            option = parts[1] if len(parts) >= 2 else ''
-            if option == 'show-changes':
-                values = ['on', 'off']
-            elif option == 'regs-base':
-                values = ['hex', 'decimal', 'binary']
-            elif option == 'regs-leading-zeros':
-                values = ['default', 'show', 'cut', 'dot']
+            option = parts[1] if len(parts) >= 2 else ""
+            if option == "show-changes":
+                values = ["on", "off"]
+            elif option == "regs-base":
+                values = ["hex", "decimal", "binary"]
+            elif option == "regs-leading-zeros":
+                values = ["default", "show", "cut", "dot"]
             else:
                 return []
             if text:
@@ -1550,16 +1632,16 @@ class MapacheSPIMConsole(cmd.Cmd):
             return values
         return []
 
-    def complete_mem(self, text, line, begidx, endidx):
+    def complete_mem(self, text: str, line: str, begidx: int, endidx: int) -> List[str]:
         """Tab completion for mem command - completes section names"""
-        sections = ['.text', '.data', '.rodata', '.bss']
+        sections = [".text", ".data", ".rodata", ".bss"]
         if text:
             return [s for s in sections if s.startswith(text)]
         return sections
 
     # --- Quick Start Guide ---
 
-    def do_quickstart(self, arg):
+    def do_quickstart(self, arg: str) -> None:
         """Show a quick start tutorial for new users
 
         Usage:
@@ -1569,64 +1651,58 @@ class MapacheSPIMConsole(cmd.Cmd):
         perfect for students learning assembly for the first time.
         """
         print(file=self.stdout)
-        print('=' * 60, file=self.stdout)
-        print('MapacheSPIM Quick Start Guide', file=self.stdout)
-        print('=' * 60, file=self.stdout)
+        print("=" * 60, file=self.stdout)
+        print("MapacheSPIM Quick Start Guide", file=self.stdout)
+        print("=" * 60, file=self.stdout)
         print(file=self.stdout)
-        print('1. LOAD A PROGRAM (ISA is auto-detected)', file=self.stdout)
-        print('   load examples/riscv/fibonacci/fibonacci  # RISC-V', file=self.stdout)
-        print('   load examples/arm/fibonacci/fibonacci    # ARM64', file=self.stdout)
-        print('   load examples/x86_64/test_simple/simple  # x86-64', file=self.stdout)
-        print('   (Use Tab to autocomplete file paths!)', file=self.stdout)
+        print("1. LOAD A PROGRAM (ISA is auto-detected)", file=self.stdout)
+        print("   load examples/riscv/fibonacci/fibonacci  # RISC-V", file=self.stdout)
+        print("   load examples/arm/fibonacci/fibonacci    # ARM64", file=self.stdout)
+        print("   load examples/x86_64/test_simple/simple  # x86-64", file=self.stdout)
+        print("   (Use Tab to autocomplete file paths!)", file=self.stdout)
         print(file=self.stdout)
-        print('2. SEE WHERE YOU ARE', file=self.stdout)
-        print('   pc              - Show program counter', file=self.stdout)
-        print('   disasm <addr>   - Disassemble instructions', file=self.stdout)
-        print('   regs            - Show all registers', file=self.stdout)
+        print("2. SEE WHERE YOU ARE", file=self.stdout)
+        print("   pc              - Show program counter", file=self.stdout)
+        print("   disasm <addr>   - Disassemble instructions", file=self.stdout)
+        print("   regs            - Show all registers", file=self.stdout)
         print(file=self.stdout)
-        print('3. EXECUTE CODE', file=self.stdout)
-        print('   step (s)        - Execute one instruction', file=self.stdout)
-        print('   step 5          - Execute 5 instructions', file=self.stdout)
-        print('   run             - Run until program ends', file=self.stdout)
-        print('   run 100         - Run at most 100 instructions', file=self.stdout)
+        print("3. EXECUTE CODE", file=self.stdout)
+        print("   step (s)        - Execute one instruction", file=self.stdout)
+        print("   step 5          - Execute 5 instructions", file=self.stdout)
+        print("   run             - Run until program ends", file=self.stdout)
+        print("   run 100         - Run at most 100 instructions", file=self.stdout)
         print(file=self.stdout)
-        print('4. SET BREAKPOINTS', file=self.stdout)
-        print('   break <addr>    - Set breakpoint at address', file=self.stdout)
-        print('   break main      - Set breakpoint at symbol', file=self.stdout)
-        print('   info break      - List all breakpoints', file=self.stdout)
-        print('   continue (c)    - Resume after breakpoint', file=self.stdout)
+        print("4. SET BREAKPOINTS", file=self.stdout)
+        print("   break <addr>    - Set breakpoint at address", file=self.stdout)
+        print("   break main      - Set breakpoint at symbol", file=self.stdout)
+        print("   info break      - List all breakpoints", file=self.stdout)
+        print("   continue (c)    - Resume after breakpoint", file=self.stdout)
         print(file=self.stdout)
-        print('5. EXAMINE MEMORY', file=self.stdout)
-        print('   mem 0x80000000  - Show memory at address', file=self.stdout)
-        print('   mem .data       - Show data section', file=self.stdout)
+        print("5. EXAMINE MEMORY", file=self.stdout)
+        print("   mem 0x80000000  - Show memory at address", file=self.stdout)
+        print("   mem .data       - Show data section", file=self.stdout)
         print(file=self.stdout)
-        print('6. TIPS FOR DEBUGGING', file=self.stdout)
-        print('   - Stars (★) in regs show changed registers', file=self.stdout)
-        print('   - Use stepreg (sr) to step and see registers', file=self.stdout)
-        print('   - Use Ctrl-C to interrupt a running program', file=self.stdout)
-        print('   - Most commands have short aliases (s, r, c, b)', file=self.stdout)
+        print("6. TIPS FOR DEBUGGING", file=self.stdout)
+        print("   - Stars (★) in regs show changed registers", file=self.stdout)
+        print("   - Use stepreg (sr) to step and see registers", file=self.stdout)
+        print("   - Use Ctrl-C to interrupt a running program", file=self.stdout)
+        print("   - Most commands have short aliases (s, r, c, b)", file=self.stdout)
         print(file=self.stdout)
         print('Type "help <command>" for detailed help.', file=self.stdout)
-        print('=' * 60, file=self.stdout)
+        print("=" * 60, file=self.stdout)
         print(file=self.stdout)
 
 
-def main():
+def main() -> None:
     """Entry point for the console"""
     import argparse
 
     parser = argparse.ArgumentParser(
-        description='MapacheSPIM - Interactive Multi-ISA Simulator (RISC-V, ARM64, x86-64)'
+        description="MapacheSPIM - Interactive Multi-ISA Simulator (RISC-V, ARM64, x86-64)"
     )
+    parser.add_argument("file", nargs="?", help="ELF file to load on startup")
     parser.add_argument(
-        'file',
-        nargs='?',
-        help='ELF file to load on startup'
-    )
-    parser.add_argument(
-        '-v', '--verbose',
-        action='store_true',
-        help='Verbose mode (show extra messages)'
+        "-v", "--verbose", action="store_true", help="Verbose mode (show extra messages)"
     )
 
     args = parser.parse_args()
@@ -1636,14 +1712,14 @@ def main():
 
     # Auto-load file if provided
     if args.file:
-        console.onecmd(f'load {args.file}')
+        console.onecmd(f"load {args.file}")
 
     # Start interactive loop
     try:
         console.cmdloop()
     except KeyboardInterrupt:
-        print('\nGoodbye!')
+        print("\nGoodbye!")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

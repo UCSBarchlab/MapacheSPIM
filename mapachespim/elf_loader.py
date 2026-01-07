@@ -5,23 +5,28 @@ Replaces the C++ ELFIO-based loader with a clean Python implementation.
 Supports RISC-V, ARM64, and x86-64 ELF binaries.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
-from typing import Dict, List
+from typing import TYPE_CHECKING, Dict, List
+
+if TYPE_CHECKING:
+    from elftools.elf.elffile import ELFFile as ELFFileType
 
 try:
     from elftools.elf.elffile import ELFFile
     from elftools.elf.sections import SymbolTableSection
 except ImportError as e:
     raise ImportError(
-        "pyelftools not installed. Install with: pip install pyelftools\n"
-        f"Original error: {e}"
+        f"pyelftools not installed. Install with: pip install pyelftools\nOriginal error: {e}"
     )
 
 
 class ISA(IntEnum):
     """ISA types - matches the C++ enum"""
+
     RISCV = 0
     ARM = 1
     X86_64 = 2
@@ -30,6 +35,7 @@ class ISA(IntEnum):
 
 class Architecture(IntEnum):
     """Architecture variants"""
+
     RV32 = 0
     RV64 = 1
     ARM32 = 2
@@ -41,6 +47,7 @@ class Architecture(IntEnum):
 @dataclass
 class ELFSegment:
     """Loadable ELF segment"""
+
     vaddr: int  # Virtual address
     paddr: int  # Physical address
     filesz: int  # Size in file
@@ -51,6 +58,7 @@ class ELFSegment:
 @dataclass
 class ELFInfo:
     """Parsed ELF file information"""
+
     isa: ISA
     architecture: Architecture
     entry: int
@@ -58,7 +66,7 @@ class ELFInfo:
     symbols: Dict[str, int]
 
 
-def detect_isa_from_elf(elf):
+def detect_isa_from_elf(elf: ELFFileType) -> ISA:
     """
     Detect ISA from ELF file header
 
@@ -68,21 +76,21 @@ def detect_isa_from_elf(elf):
     Returns:
         ISA: Detected ISA type
     """
-    machine = elf.header['e_machine']
+    machine = elf.header["e_machine"]
 
-    if machine == 'EM_RISCV':
+    if machine == "EM_RISCV":
         return ISA.RISCV
-    elif machine == 'EM_AARCH64':
+    elif machine == "EM_AARCH64":
         return ISA.ARM
-    elif machine == 'EM_ARM':
+    elif machine == "EM_ARM":
         return ISA.ARM  # 32-bit ARM (we'll treat as ARM for now)
-    elif machine == 'EM_X86_64':
+    elif machine == "EM_X86_64":
         return ISA.X86_64
     else:
         return ISA.UNKNOWN
 
 
-def detect_architecture(elf, isa):
+def detect_architecture(elf: ELFFileType, isa: ISA) -> Architecture:
     """
     Detect specific architecture variant
 
@@ -93,17 +101,17 @@ def detect_architecture(elf, isa):
     Returns:
         Architecture: Specific architecture
     """
-    elf_class = elf.header['e_ident']['EI_CLASS']
+    elf_class = elf.header["e_ident"]["EI_CLASS"]
 
     if isa == ISA.RISCV:
-        if elf_class == 'ELFCLASS64':
+        if elf_class == "ELFCLASS64":
             return Architecture.RV64
-        elif elf_class == 'ELFCLASS32':
+        elif elf_class == "ELFCLASS32":
             return Architecture.RV32
     elif isa == ISA.ARM:
-        if elf_class == 'ELFCLASS64':
+        if elf_class == "ELFCLASS64":
             return Architecture.ARM64
-        elif elf_class == 'ELFCLASS32':
+        elif elf_class == "ELFCLASS32":
             return Architecture.ARM32
     elif isa == ISA.X86_64:
         # x86-64 is always 64-bit
@@ -112,7 +120,7 @@ def detect_architecture(elf, isa):
     return Architecture.UNKNOWN
 
 
-def extract_loadable_segments(elf):
+def extract_loadable_segments(elf: ELFFileType) -> List[ELFSegment]:
     """
     Extract PT_LOAD segments from ELF file
 
@@ -125,20 +133,20 @@ def extract_loadable_segments(elf):
     segments = []
 
     for segment in elf.iter_segments():
-        if segment['p_type'] == 'PT_LOAD':
+        if segment["p_type"] == "PT_LOAD":
             seg = ELFSegment(
-                vaddr=segment['p_vaddr'],
-                paddr=segment['p_paddr'],
-                filesz=segment['p_filesz'],
-                memsz=segment['p_memsz'],
-                data=segment.data()
+                vaddr=segment["p_vaddr"],
+                paddr=segment["p_paddr"],
+                filesz=segment["p_filesz"],
+                memsz=segment["p_memsz"],
+                data=segment.data(),
             )
             segments.append(seg)
 
     return segments
 
 
-def parse_symbol_table(elf):
+def parse_symbol_table(elf: ELFFileType) -> Dict[str, int]:
     """
     Parse symbol table from ELF file
 
@@ -160,12 +168,12 @@ def parse_symbol_table(elf):
 
         for symbol in section.iter_symbols():
             # Skip undefined symbols
-            if symbol['st_shndx'] == 'SHN_UNDEF':
+            if symbol["st_shndx"] == "SHN_UNDEF":
                 continue
 
             # Only include specific symbol types
-            symbol_type = symbol['st_info']['type']
-            if symbol_type not in ('STT_FUNC', 'STT_OBJECT', 'STT_COMMON', 'STT_NOTYPE'):
+            symbol_type = symbol["st_info"]["type"]
+            if symbol_type not in ("STT_FUNC", "STT_OBJECT", "STT_COMMON", "STT_NOTYPE"):
                 continue
 
             # Skip symbols with empty names
@@ -174,7 +182,7 @@ def parse_symbol_table(elf):
                 continue
 
             # Add to symbol table
-            symbols[name] = symbol['st_value']
+            symbols[name] = symbol["st_value"]
 
     return symbols
 
@@ -199,20 +207,18 @@ def load_elf_file(path: str) -> ELFInfo:
         raise FileNotFoundError(f"ELF file not found: {path}")
 
     try:
-        with open(elf_path, 'rb') as f:
+        with open(elf_path, "rb") as f:
             elf = ELFFile(f)
 
             # Detect ISA and architecture
             isa = detect_isa_from_elf(elf)
             if isa == ISA.UNKNOWN:
-                raise RuntimeError(
-                    f"Unsupported ELF machine type: {elf.header['e_machine']}"
-                )
+                raise RuntimeError(f"Unsupported ELF machine type: {elf.header['e_machine']}")
 
             architecture = detect_architecture(elf, isa)
 
             # Get entry point
-            entry = elf.header['e_entry']
+            entry = elf.header["e_entry"]
 
             # Extract loadable segments
             segments = extract_loadable_segments(elf)
@@ -221,11 +227,7 @@ def load_elf_file(path: str) -> ELFInfo:
             symbols = parse_symbol_table(elf)
 
             return ELFInfo(
-                isa=isa,
-                architecture=architecture,
-                entry=entry,
-                segments=segments,
-                symbols=symbols
+                isa=isa, architecture=architecture, entry=entry, segments=segments, symbols=symbols
             )
 
     except Exception as e:

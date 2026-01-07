@@ -27,7 +27,7 @@ and why.
 
 The easiest way to get started with MapacheSPIM is to clone from GitHub:
 
-```git clone https://github.com/your-org/MapacheSPIM.git
+```git clone https://github.com/mapachespim/MapacheSPIM.git
 cd MapacheSPIM
 pip install -e .
 ```
@@ -262,12 +262,12 @@ All tests verify:
 
 - Unicorn Engine - GPLv2 License
 - Capstone - BSD License
-- MapacheSPIM - [Your License Here]
+- MapacheSPIM - MIT License
 - Examples - Educational use
 
 ## Contact
 
-- Issues: [GitHub Issues](https://github.com/your-org/MapacheSPIM/issues)
-- Discussions: [GitHub Discussions](https://github.com/your-org/MapacheSPIM/discussions)
+- Issues: [GitHub Issues](https://github.com/mapachespim/MapacheSPIM/issues)
+- Discussions: [GitHub Discussions](https://github.com/mapachespim/MapacheSPIM/discussions)
 
 <img src="docs/Mapache.png" alt="MapacheSPIM Logo">

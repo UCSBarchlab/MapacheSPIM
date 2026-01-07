@@ -1,0 +1,115 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mapachespim"
+version = "0.2.0"
+description = "Educational Multi-ISA Simulator using Unicorn Engine"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "MapacheSPIM Contributors"},
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Education",
+    "Topic :: Software Development :: Debuggers",
+    "Topic :: System :: Emulators",
+]
+dependencies = [
+    "pyelftools>=0.29",
+    "unicorn>=2.0.0",
+    "capstone>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "ruff>=0.1.0",
+    "mypy>=1.0",
+]
+
+[project.scripts]
+mapachespim = "mapachespim.console:main"
+
+[project.urls]
+Homepage = "https://github.com/mapachespim/MapacheSPIM"
+Documentation = "https://github.com/mapachespim/MapacheSPIM#readme"
+Repository = "https://github.com/mapachespim/MapacheSPIM.git"
+Issues = "https://github.com/mapachespim/MapacheSPIM/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["mapachespim"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py38"
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "UP",     # pyupgrade
+    "B",      # flake8-bugbear
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "F841",   # unused variable (some are intentional for future use)
+    "SIM102", # nested if statements (sometimes clearer for complex conditions)
+    "SIM105", # contextlib.suppress (try-except-pass is clearer in some contexts)
+    "SIM108", # use ternary operator (sometimes less readable)
+    "SIM116", # dictionary instead of if statements (sometimes less readable)
+    "SIM118", # dict instead of dict.keys() (explicit is better)
+    "UP006",  # use dict/list instead of Dict/List (need typing module for Python 3.8)
+    "UP007",  # use X | Y instead of Union[X, Y] (need typing module for Python 3.8)
+    "UP045",  # use X | None instead of Optional[X] (need typing module for Python 3.8)
+    "B904",   # raise from (valid but would change exception semantics)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mapachespim"]
+
+[tool.mypy]
+python_version = "3.9"
+warn_return_any = false
+warn_unused_ignores = true
+disallow_untyped_defs = true
+ignore_missing_imports = true
+show_error_codes = true
+# Allow calling methods on Optional types where we know they're set
+# (e.g., self.sim is always set after __init__)
+disable_error_code = ["union-attr", "no-any-return", "override", "misc", "return-value", "operator"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_functions = "test_*"
+addopts = "-v --tb=short"
+
+[tool.coverage.run]
+source = ["mapachespim"]
+branch = true
+omit = ["*/tests/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]

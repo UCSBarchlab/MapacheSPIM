@@ -5,44 +5,72 @@ Provides a Pythonic interface to the Unicorn CPU emulator for RISC-V and ARM.
 This replaces the SAIL-based backend with a more stable, battle-tested emulation engine.
 """
 
+from __future__ import annotations
+
 import struct
 from enum import IntEnum
-from pathlib import Path
+from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+
+if TYPE_CHECKING:
+    from unicorn import Uc
 
 try:
-    from unicorn import Uc, UcError, UC_ARCH_RISCV, UC_MODE_RISCV64, UC_ARCH_ARM64, UC_MODE_ARM
-    from unicorn import UC_ARCH_X86, UC_MODE_64
-    from unicorn import UC_PROT_ALL, UC_PROT_READ, UC_PROT_WRITE
-    from unicorn import UC_HOOK_CODE, UC_HOOK_MEM_UNMAPPED
-    from unicorn.riscv_const import UC_RISCV_REG_PC, UC_RISCV_REG_X0, UC_RISCV_REG_SP
-    from unicorn.arm64_const import UC_ARM64_REG_PC, UC_ARM64_REG_X0, UC_ARM64_REG_SP
+    from unicorn import (
+        UC_ARCH_ARM64,
+        UC_ARCH_RISCV,
+        UC_ARCH_X86,
+        UC_HOOK_CODE,
+        UC_HOOK_MEM_UNMAPPED,
+        UC_MODE_64,
+        UC_MODE_ARM,
+        UC_MODE_RISCV64,
+        UC_PROT_ALL,
+        UC_PROT_READ,
+        UC_PROT_WRITE,
+        Uc,
+        UcError,
+    )
+    from unicorn.arm64_const import UC_ARM64_REG_PC, UC_ARM64_REG_SP, UC_ARM64_REG_X0
+    from unicorn.riscv_const import UC_RISCV_REG_PC, UC_RISCV_REG_SP, UC_RISCV_REG_X0
     from unicorn.x86_const import (
-        UC_X86_REG_RIP, UC_X86_REG_RSP,
-        UC_X86_REG_RAX, UC_X86_REG_RBX, UC_X86_REG_RCX, UC_X86_REG_RDX,
-        UC_X86_REG_RSI, UC_X86_REG_RDI, UC_X86_REG_RBP,
-        UC_X86_REG_R8, UC_X86_REG_R9, UC_X86_REG_R10, UC_X86_REG_R11,
-        UC_X86_REG_R12, UC_X86_REG_R13, UC_X86_REG_R14, UC_X86_REG_R15
+        UC_X86_REG_R8,
+        UC_X86_REG_R9,
+        UC_X86_REG_R10,
+        UC_X86_REG_R11,
+        UC_X86_REG_R12,
+        UC_X86_REG_R13,
+        UC_X86_REG_R14,
+        UC_X86_REG_R15,
+        UC_X86_REG_RAX,
+        UC_X86_REG_RBP,
+        UC_X86_REG_RBX,
+        UC_X86_REG_RCX,
+        UC_X86_REG_RDI,
+        UC_X86_REG_RDX,
+        UC_X86_REG_RIP,
+        UC_X86_REG_RSI,
+        UC_X86_REG_RSP,
     )
 except ImportError as e:
     raise ImportError(
-        "Unicorn Engine not installed. Install with: pip install unicorn\n"
-        f"Original error: {e}"
+        f"Unicorn Engine not installed. Install with: pip install unicorn\nOriginal error: {e}"
     )
 
 try:
-    from capstone import Cs, CS_ARCH_RISCV, CS_MODE_RISCV64, CS_ARCH_ARM64, CS_MODE_ARM
-    from capstone import CS_ARCH_X86, CS_MODE_64 as CS_MODE_X86_64
+    from capstone import CS_ARCH_ARM64, CS_ARCH_RISCV, CS_ARCH_X86, CS_MODE_ARM, CS_MODE_RISCV64, Cs
+    from capstone import CS_MODE_64 as CS_MODE_X86_64
 except ImportError as e:
     raise ImportError(
-        "Capstone not installed. Install with: pip install capstone\n"
-        f"Original error: {e}"
+        f"Capstone not installed. Install with: pip install capstone\nOriginal error: {e}"
     )
 
-from .elf_loader import load_elf_file, ELFInfo, ISA as ELF_ISA
+from .elf_loader import ISA as ELF_ISA
+from .elf_loader import ELFSegment, load_elf_file
 
 
 class ISA(IntEnum):
     """ISA types supported by the simulator"""
+
     RISCV = 0
     ARM = 1
     X86_64 = 2
@@ -51,6 +79,7 @@ class ISA(IntEnum):
 
 class StepResult(IntEnum):
     """Result codes from step()"""
+
     OK = 0
     HALT = 1
     WAITING = 2
@@ -68,27 +97,30 @@ STACK_ADDR = STACK_TOP - STACK_SIZE  # Bottom of stack
 class ISAConfig:
     """Base class for ISA-specific configuration"""
 
-    def __init__(self, arch, mode):
+    arch: int
+    mode: int
+
+    def __init__(self, arch: int, mode: int) -> None:
         self.arch = arch
         self.mode = mode
 
-    def get_pc_reg(self):
+    def get_pc_reg(self) -> int:
         """Get the program counter register constant"""
         raise NotImplementedError
 
-    def get_sp_reg(self):
+    def get_sp_reg(self) -> int:
         """Get the stack pointer register constant"""
         raise NotImplementedError
 
-    def get_gpr_reg(self, n):
+    def get_gpr_reg(self, n: int) -> int:
         """Get general purpose register constant for register n (0-31)"""
         raise NotImplementedError
 
-    def get_reg_name(self, n):
+    def get_reg_name(self, n: int) -> str:
         """Get register name for register n"""
         raise NotImplementedError
 
-    def detect_syscall(self, uc, pc):
+    def detect_syscall(self, uc: Uc, pc: int) -> bool:
         """Detect if instruction at PC is a syscall"""
         raise NotImplementedError
 
@@ -96,54 +128,82 @@ class ISAConfig:
 class RISCVConfig(ISAConfig):
     """RISC-V 64-bit configuration"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(UC_ARCH_RISCV, UC_MODE_RISCV64)
 
-    def get_pc_reg(self):
+    def get_pc_reg(self) -> int:
         return UC_RISCV_REG_PC
 
-    def get_sp_reg(self):
+    def get_sp_reg(self) -> int:
         return UC_RISCV_REG_SP
 
-    def get_gpr_reg(self, n):
+    def get_gpr_reg(self, n: int) -> int:
         """Get RISC-V register constant for x0-x31"""
         if not 0 <= n <= 31:
             raise ValueError(f"Register number must be 0-31, got {n}")
         return UC_RISCV_REG_X0 + n
 
-    def get_reg_name(self, n):
+    def get_reg_name(self, n: int) -> str:
         """Get RISC-V register ABI name"""
         abi_names = [
-            "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2",
-            "s0", "s1", "a0", "a1", "a2", "a3", "a4", "a5",
-            "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7",
-            "s8", "s9", "s10", "s11", "t3", "t4", "t5", "t6"
+            "zero",
+            "ra",
+            "sp",
+            "gp",
+            "tp",
+            "t0",
+            "t1",
+            "t2",
+            "s0",
+            "s1",
+            "a0",
+            "a1",
+            "a2",
+            "a3",
+            "a4",
+            "a5",
+            "a6",
+            "a7",
+            "s2",
+            "s3",
+            "s4",
+            "s5",
+            "s6",
+            "s7",
+            "s8",
+            "s9",
+            "s10",
+            "s11",
+            "t3",
+            "t4",
+            "t5",
+            "t6",
         ]
         return abi_names[n] if 0 <= n <= 31 else f"x{n}"
 
-    def detect_syscall(self, uc, pc):
+    def detect_syscall(self, uc: Uc, pc: int) -> bool:
         """Check if instruction at PC is 'ecall' (0x00000073)"""
         try:
             instr_bytes = uc.mem_read(pc, 4)
-            instr = struct.unpack('<I', instr_bytes)[0]
+            instr = struct.unpack("<I", instr_bytes)[0]
             return instr == 0x00000073  # ecall instruction
         except Exception:
             return False
 
 
 class ARM64Config(ISAConfig):
-    """ARM64 (AArch64) configuration - Placeholder for Phase 3"""
+    """ARM64 (AArch64) configuration"""
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(UC_ARCH_ARM64, UC_MODE_ARM)
 
-    def get_pc_reg(self):
+    def get_pc_reg(self) -> int:
         return UC_ARM64_REG_PC
 
-    def get_sp_reg(self):
+    def get_sp_reg(self) -> int:
         return UC_ARM64_REG_SP
 
-    def get_gpr_reg(self, n):
+    def get_gpr_reg(self, n: int) -> int:
         """Get ARM64 register constant for x0-x30, sp"""
         if not 0 <= n <= 31:
             raise ValueError(f"Register number must be 0-31, got {n}")
@@ -151,17 +211,17 @@ class ARM64Config(ISAConfig):
             return UC_ARM64_REG_SP
         return UC_ARM64_REG_X0 + n
 
-    def get_reg_name(self, n):
+    def get_reg_name(self, n: int) -> str:
         """Get ARM64 register name"""
         if n == 31:
             return "sp"
         return f"x{n}" if 0 <= n <= 30 else f"?{n}"
 
-    def detect_syscall(self, uc, pc):
+    def detect_syscall(self, uc: Uc, pc: int) -> bool:
         """Check if instruction at PC is 'svc #0' or similar"""
         try:
             instr_bytes = uc.mem_read(pc, 4)
-            instr = struct.unpack('<I', instr_bytes)[0]
+            instr = struct.unpack("<I", instr_bytes)[0]
             # SVC instruction: 1101 0100 000x xxxx xxxx xxxx xxx0 0001
             return (instr & 0xFFE0001F) == 0xD4000001
         except Exception:
@@ -172,40 +232,66 @@ class X86_64Config(ISAConfig):
     """x86-64 configuration"""
 
     # x86-64 register constants ordered for our API
-    _GPR_REGS = [
-        UC_X86_REG_RAX, UC_X86_REG_RCX, UC_X86_REG_RDX, UC_X86_REG_RBX,
-        UC_X86_REG_RSP, UC_X86_REG_RBP, UC_X86_REG_RSI, UC_X86_REG_RDI,
-        UC_X86_REG_R8, UC_X86_REG_R9, UC_X86_REG_R10, UC_X86_REG_R11,
-        UC_X86_REG_R12, UC_X86_REG_R13, UC_X86_REG_R14, UC_X86_REG_R15
+    _GPR_REGS: List[int] = [
+        UC_X86_REG_RAX,
+        UC_X86_REG_RCX,
+        UC_X86_REG_RDX,
+        UC_X86_REG_RBX,
+        UC_X86_REG_RSP,
+        UC_X86_REG_RBP,
+        UC_X86_REG_RSI,
+        UC_X86_REG_RDI,
+        UC_X86_REG_R8,
+        UC_X86_REG_R9,
+        UC_X86_REG_R10,
+        UC_X86_REG_R11,
+        UC_X86_REG_R12,
+        UC_X86_REG_R13,
+        UC_X86_REG_R14,
+        UC_X86_REG_R15,
     ]
 
-    _GPR_NAMES = [
-        "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
-        "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
+    _GPR_NAMES: List[str] = [
+        "rax",
+        "rcx",
+        "rdx",
+        "rbx",
+        "rsp",
+        "rbp",
+        "rsi",
+        "rdi",
+        "r8",
+        "r9",
+        "r10",
+        "r11",
+        "r12",
+        "r13",
+        "r14",
+        "r15",
     ]
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__(UC_ARCH_X86, UC_MODE_64)
 
-    def get_pc_reg(self):
+    def get_pc_reg(self) -> int:
         return UC_X86_REG_RIP
 
-    def get_sp_reg(self):
+    def get_sp_reg(self) -> int:
         return UC_X86_REG_RSP
 
-    def get_gpr_reg(self, n):
+    def get_gpr_reg(self, n: int) -> int:
         """Get x86-64 register constant for register n (0-15)"""
         if not 0 <= n <= 15:
             raise ValueError(f"Register number must be 0-15 for x86-64, got {n}")
         return self._GPR_REGS[n]
 
-    def get_reg_name(self, n):
+    def get_reg_name(self, n: int) -> str:
         """Get x86-64 register name"""
         if 0 <= n <= 15:
             return self._GPR_NAMES[n]
         return f"?{n}"
 
-    def detect_syscall(self, uc, pc):
+    def detect_syscall(self, uc: Uc, pc: int) -> bool:
         """Check if instruction at PC is 'syscall' (0x0F 0x05)"""
         try:
             instr_bytes = uc.mem_read(pc, 2)
@@ -217,7 +303,10 @@ class X86_64Config(ISAConfig):
 class Disassembler:
     """Capstone-based disassembler for RISC-V, ARM64, and x86-64"""
 
-    def __init__(self, isa):
+    _cs: Cs
+    _isa: ISA
+
+    def __init__(self, isa: ISA) -> None:
         if isa == ISA.RISCV:
             self._cs = Cs(CS_ARCH_RISCV, CS_MODE_RISCV64)
         elif isa == ISA.ARM:
@@ -230,7 +319,7 @@ class Disassembler:
 
         self._cs.detail = False  # We don't need detailed instruction info
 
-    def disassemble_one(self, simulator, addr):
+    def disassemble_one(self, simulator: UnicornSimulator, addr: int) -> str:
         """
         Disassemble single instruction at address
 
@@ -255,9 +344,9 @@ class Disassembler:
         # If disassembly failed, show raw bytes
         if self._isa == ISA.X86_64:
             # Show first 4 bytes for x86
-            word = int.from_bytes(code[:4], byteorder='little')
+            word = int.from_bytes(code[:4], byteorder="little")
         else:
-            word = int.from_bytes(code, byteorder='little')
+            word = int.from_bytes(code, byteorder="little")
         return f".word 0x{word:08x}"
 
 
@@ -269,7 +358,17 @@ class UnicornSimulator:
     compatible with the original SAIL-based backend.
     """
 
-    def __init__(self, isa=None, config_file=None):
+    _isa: Optional[ISA]
+    _config: Optional[ISAConfig]
+    _uc: Optional[Uc]
+    _symbols: Dict[str, int]
+    _addr_to_symbol: Dict[int, Tuple[str, int]]
+    _disasm: Optional[Disassembler]
+    _entry_point: Optional[int]
+    _pending_syscall: bool
+    _last_error: Optional[str]
+
+    def __init__(self, isa: Optional[ISA] = None, config_file: Optional[str] = None) -> None:
         """
         Initialize the simulator
 
@@ -292,7 +391,7 @@ class UnicornSimulator:
         if isa is not None:
             self._init_unicorn(isa)
 
-    def _init_unicorn(self, isa):
+    def _init_unicorn(self, isa: ISA) -> None:
         """Initialize Unicorn engine with ISA-specific configuration"""
         if isa == ISA.RISCV:
             self._config = RISCVConfig()
@@ -322,9 +421,10 @@ class UnicornSimulator:
         # Install unmapped memory handler
         self._install_unmapped_handler()
 
-    def _install_syscall_hook(self):
+    def _install_syscall_hook(self) -> None:
         """Install code hook to detect syscalls"""
-        def syscall_hook(uc, address, size, user_data):
+
+        def syscall_hook(uc: Uc, address: int, size: int, user_data: Optional[object]) -> None:
             # Check if this is a syscall instruction
             if self._config.detect_syscall(uc, address):
                 self._pending_syscall = True
@@ -332,15 +432,18 @@ class UnicornSimulator:
 
         self._uc.hook_add(UC_HOOK_CODE, syscall_hook)
 
-    def _install_unmapped_handler(self):
+    def _install_unmapped_handler(self) -> None:
         """Install hook to handle unmapped memory accesses"""
-        def unmapped_handler(uc, access, address, size, value, user_data):
+
+        def unmapped_handler(
+            uc: Uc, access: int, address: int, size: int, value: int, user_data: Optional[object]
+        ) -> bool:
             self._last_error = f"Unmapped memory access at 0x{address:x}"
             return False  # Don't handle it, let it error
 
         self._uc.hook_add(UC_HOOK_MEM_UNMAPPED, unmapped_handler)
 
-    def _map_default_memory(self):
+    def _map_default_memory(self) -> None:
         """Map default memory regions for tests without ELF files"""
         if self._config.arch == UC_ARCH_ARM64:
             # Map 1MB at address 0 for ARM tests
@@ -372,7 +475,7 @@ class UnicornSimulator:
             except UcError:
                 pass
 
-    def _map_memory_for_segments(self, segments):
+    def _map_memory_for_segments(self, segments: List[ELFSegment]) -> None:
         """Map memory regions for ELF segments with page alignment"""
         for segment in segments:
             # Calculate page-aligned region
@@ -385,7 +488,7 @@ class UnicornSimulator:
             # Map memory with RWX permissions
             try:
                 self._uc.mem_map(page_aligned_addr, size, UC_PROT_ALL)
-            except UcError as e:
+            except UcError:
                 # Region might overlap with already-mapped memory
                 # This is OK - Unicorn will handle it
                 pass
@@ -398,9 +501,9 @@ class UnicornSimulator:
             if segment.memsz > segment.filesz:
                 bss_size = segment.memsz - segment.filesz
                 bss_addr = segment.vaddr + segment.filesz
-                self._uc.mem_write(bss_addr, b'\x00' * bss_size)
+                self._uc.mem_write(bss_addr, b"\x00" * bss_size)
 
-    def _setup_stack(self):
+    def _setup_stack(self) -> None:
         """Map and initialize stack memory"""
         try:
             self._uc.mem_map(STACK_ADDR, STACK_SIZE, UC_PROT_READ | UC_PROT_WRITE)
@@ -414,7 +517,7 @@ class UnicornSimulator:
         sp_reg = self._config.get_sp_reg()
         self._uc.reg_write(sp_reg, STACK_TOP - 8)
 
-    def load_elf(self, elf_path):
+    def load_elf(self, elf_path: str) -> bool:
         """
         Load an ELF file into simulator memory
 
@@ -464,7 +567,7 @@ class UnicornSimulator:
 
         return True
 
-    def step(self):
+    def step(self) -> StepResult:
         """
         Execute one instruction
 
@@ -497,7 +600,7 @@ class UnicornSimulator:
 
         return StepResult.OK
 
-    def run(self, max_steps=None):
+    def run(self, max_steps: Optional[int] = None) -> int:
         """
         Run until halt, syscall exit, or max_steps reached
 
@@ -520,18 +623,18 @@ class UnicornSimulator:
 
         return steps_executed
 
-    def get_pc(self):
+    def get_pc(self) -> int:
         """Get the program counter"""
         if self._uc is None:
             return 0
         return self._uc.reg_read(self._config.get_pc_reg())
 
-    def set_pc(self, pc):
+    def set_pc(self, pc: int) -> None:
         """Set the program counter"""
         if self._uc is not None:
             self._uc.reg_write(self._config.get_pc_reg(), pc)
 
-    def get_reg(self, reg_num):
+    def get_reg(self, reg_num: int) -> int:
         """
         Get register value
 
@@ -551,7 +654,7 @@ class UnicornSimulator:
         reg = self._config.get_gpr_reg(reg_num)
         return self._uc.reg_read(reg)
 
-    def set_reg(self, reg_num, value):
+    def set_reg(self, reg_num: int, value: int) -> None:
         """
         Set register value
 
@@ -575,7 +678,7 @@ class UnicornSimulator:
         reg = self._config.get_gpr_reg(reg_num)
         self._uc.reg_write(reg, value & 0xFFFFFFFFFFFFFFFF)
 
-    def read_mem(self, addr, length):
+    def read_mem(self, addr: int, length: int) -> bytes:
         """
         Read memory
 
@@ -596,7 +699,7 @@ class UnicornSimulator:
         except UcError as e:
             raise RuntimeError(f"Failed to read memory at 0x{addr:x}: {e}")
 
-    def write_mem(self, addr, data):
+    def write_mem(self, addr: int, data: Union[bytes, str]) -> bool:
         """
         Write memory
 
@@ -611,7 +714,7 @@ class UnicornSimulator:
             raise RuntimeError("Simulator not initialized")
 
         if isinstance(data, str):
-            data = data.encode('utf-8')
+            data = data.encode("utf-8")
 
         try:
             self._uc.mem_write(addr, bytes(data))
@@ -619,7 +722,7 @@ class UnicornSimulator:
         except UcError as e:
             raise RuntimeError(f"Failed to write memory at 0x{addr:x}: {e}")
 
-    def disasm(self, addr):
+    def disasm(self, addr: int) -> str:
         """
         Disassemble instruction at address
 
@@ -634,7 +737,7 @@ class UnicornSimulator:
 
         return self._disasm.disassemble_one(self, addr)
 
-    def get_symbols(self):
+    def get_symbols(self) -> Dict[str, int]:
         """
         Get all symbols from the symbol table
 
@@ -643,7 +746,7 @@ class UnicornSimulator:
         """
         return self._symbols.copy()
 
-    def lookup_symbol(self, name):
+    def lookup_symbol(self, name: str) -> Optional[int]:
         """
         Look up symbol address by name
 
@@ -655,7 +758,7 @@ class UnicornSimulator:
         """
         return self._symbols.get(name)
 
-    def addr_to_symbol(self, addr):
+    def addr_to_symbol(self, addr: int) -> Tuple[Optional[str], Optional[int]]:
         """
         Convert address to symbol name + offset
 
@@ -690,7 +793,7 @@ class UnicornSimulator:
 
         return (None, None)
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset the simulator to initial state"""
         # Unicorn doesn't have a native reset, so we reinitialize
         if self._isa is not None:
@@ -698,7 +801,7 @@ class UnicornSimulator:
             if self._entry_point is not None:
                 self.set_pc(self._entry_point)
 
-    def get_all_regs(self):
+    def get_all_regs(self) -> List[int]:
         """
         Get all register values as a list
 
@@ -708,7 +811,7 @@ class UnicornSimulator:
         num_regs = 16 if self._isa == ISA.X86_64 else 32
         return [self.get_reg(i) for i in range(num_regs)]
 
-    def get_isa(self):
+    def get_isa(self) -> Optional[ISA]:
         """
         Get the current ISA
 
@@ -717,7 +820,7 @@ class UnicornSimulator:
         """
         return self._isa
 
-    def get_isa_name(self):
+    def get_isa_name(self) -> str:
         """
         Get human-readable name of the current ISA
 
@@ -726,7 +829,7 @@ class UnicornSimulator:
         """
         return self._isa.name if self._isa is not None else "Unknown"
 
-    def get_register_count(self):
+    def get_register_count(self) -> int:
         """
         Get the number of general-purpose registers for the current ISA
 
@@ -737,7 +840,7 @@ class UnicornSimulator:
             return 16
         return 32
 
-    def get_reg_name(self, n):
+    def get_reg_name(self, n: int) -> str:
         """
         Get the ABI/conventional name for register n
 
@@ -751,7 +854,7 @@ class UnicornSimulator:
             return f"r{n}"
         return self._config.get_reg_name(n)
 
-    def _get_syscall_regs(self):
+    def _get_syscall_regs(self) -> Tuple[int, int, int]:
         """
         Get syscall register mappings for current ISA
 
@@ -766,7 +869,7 @@ class UnicornSimulator:
             # RISC-V/ARM: a7=syscall# (x17), a0=arg0 (x10), return in a0
             return (17, 10, 10)
 
-    def _handle_syscall(self):
+    def _handle_syscall(self) -> bool:
         """
         Handle SPIM-compatible syscalls
 
@@ -782,7 +885,7 @@ class UnicornSimulator:
             # Convert to signed 64-bit for proper display
             if value & (1 << 63):
                 value = value - (1 << 64)
-            print(value, end='')
+            print(value, end="")
 
         elif syscall_num == 4:
             # print_string - Print null-terminated string at address in arg0
@@ -797,7 +900,7 @@ class UnicornSimulator:
                     addr += 1
                     if len(chars) > 4096:  # Safety limit
                         break
-                print(''.join(chars), end='')
+                print("".join(chars), end="")
             except Exception:
                 pass
 
@@ -816,12 +919,12 @@ class UnicornSimulator:
         elif syscall_num == 11:
             # print_char - Print character in arg0
             char_code = self.get_reg(arg_reg) & 0xFF
-            print(chr(char_code), end='')
+            print(chr(char_code), end="")
 
         elif syscall_num == 12:
             # read_char - Read character from stdin, return in result reg
             try:
-                char = input()[0] if input() else '\0'
+                char = input()[0] if input() else "\0"
                 self.set_reg(result_reg, ord(char))
             except Exception:
                 self.set_reg(result_reg, 0)
@@ -832,7 +935,7 @@ class UnicornSimulator:
 
         return False
 
-    def check_termination(self, step_result):
+    def check_termination(self, step_result: StepResult) -> Tuple[bool, Optional[str]]:
         """
         Check if program should terminate based on step result
 
@@ -845,45 +948,50 @@ class UnicornSimulator:
         # Handle syscall - perform I/O and check for exit
         if step_result == StepResult.SYSCALL:
             if self._handle_syscall():
-                return (True, 'syscall_exit')
+                return (True, "syscall_exit")
 
         # Check for HALT
         if step_result == StepResult.HALT:
-            return (True, 'halt')
+            return (True, "halt")
 
         # Check for ERROR
         if step_result == StepResult.ERROR:
-            return (True, 'error')
+            return (True, "error")
 
         # Check for tohost write (HTIF mechanism)
-        tohost_addr = self.lookup_symbol('tohost')
+        tohost_addr = self.lookup_symbol("tohost")
         if tohost_addr is not None:
             try:
                 tohost_bytes = self.read_mem(tohost_addr, 8)
-                tohost_value = int.from_bytes(tohost_bytes, byteorder='little', signed=False)
+                tohost_value = int.from_bytes(tohost_bytes, byteorder="little", signed=False)
                 if tohost_value != 0:
-                    return (True, 'tohost')
+                    return (True, "tohost")
             except Exception:
                 pass
 
         return (False, None)
 
-    def __del__(self):
+    def __del__(self) -> None:
         """Cleanup when object is destroyed"""
         # Unicorn handles its own cleanup
         pass
 
-    def __enter__(self):
+    def __enter__(self) -> UnicornSimulator:
         """Context manager support"""
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[type],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[object],
+    ) -> None:
         """Context manager cleanup"""
         # Unicorn handles its own cleanup
         pass
 
 
-def detect_elf_isa(elf_path):
+def detect_elf_isa(elf_path: str) -> ISA:
     """
     Detect the ISA of an ELF file without loading it
 
@@ -907,7 +1015,9 @@ def detect_elf_isa(elf_path):
     return ISA.UNKNOWN
 
 
-def create_simulator(elf_path=None, config_file=None):
+def create_simulator(
+    elf_path: Optional[str] = None, config_file: Optional[str] = None
+) -> UnicornSimulator:
     """
     Factory function to create a simulator with automatic ISA detection
 
