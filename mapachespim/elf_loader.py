@@ -30,6 +30,7 @@ class ISA(IntEnum):
     RISCV = 0
     ARM = 1
     X86_64 = 2
+    MIPS = 3
     UNKNOWN = -1
 
 
@@ -41,6 +42,8 @@ class Architecture(IntEnum):
     ARM32 = 2
     ARM64 = 3
     X86_64 = 4
+    MIPS32 = 5
+    MIPS64 = 6
     UNKNOWN = -1
 
 
@@ -86,6 +89,8 @@ def detect_isa_from_elf(elf: ELFFileType) -> ISA:
         return ISA.ARM  # 32-bit ARM (we'll treat as ARM for now)
     elif machine == "EM_X86_64":
         return ISA.X86_64
+    elif machine == "EM_MIPS":
+        return ISA.MIPS
     else:
         return ISA.UNKNOWN
 
@@ -116,6 +121,11 @@ def detect_architecture(elf: ELFFileType, isa: ISA) -> Architecture:
     elif isa == ISA.X86_64:
         # x86-64 is always 64-bit
         return Architecture.X86_64
+    elif isa == ISA.MIPS:
+        if elf_class == "ELFCLASS64":
+            return Architecture.MIPS64
+        elif elf_class == "ELFCLASS32":
+            return Architecture.MIPS32
 
     return Architecture.UNKNOWN
 

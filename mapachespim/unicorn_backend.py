@@ -17,12 +17,16 @@ if TYPE_CHECKING:
 try:
     from unicorn import (
         UC_ARCH_ARM64,
+        UC_ARCH_MIPS,
         UC_ARCH_RISCV,
         UC_ARCH_X86,
         UC_HOOK_CODE,
         UC_HOOK_MEM_UNMAPPED,
+        UC_MODE_32,
         UC_MODE_64,
         UC_MODE_ARM,
+        UC_MODE_BIG_ENDIAN,
+        UC_MODE_MIPS32,
         UC_MODE_RISCV64,
         UC_PROT_ALL,
         UC_PROT_READ,
@@ -31,6 +35,7 @@ try:
         UcError,
     )
     from unicorn.arm64_const import UC_ARM64_REG_PC, UC_ARM64_REG_SP, UC_ARM64_REG_X0
+    from unicorn.mips_const import UC_MIPS_REG_0, UC_MIPS_REG_PC, UC_MIPS_REG_SP
     from unicorn.riscv_const import UC_RISCV_REG_PC, UC_RISCV_REG_SP, UC_RISCV_REG_X0
     from unicorn.x86_const import (
         UC_X86_REG_R8,
@@ -57,7 +62,17 @@ except ImportError as e:
     )
 
 try:
-    from capstone import CS_ARCH_ARM64, CS_ARCH_RISCV, CS_ARCH_X86, CS_MODE_ARM, CS_MODE_RISCV64, Cs
+    from capstone import (
+        CS_ARCH_ARM64,
+        CS_ARCH_MIPS,
+        CS_ARCH_RISCV,
+        CS_ARCH_X86,
+        CS_MODE_ARM,
+        CS_MODE_BIG_ENDIAN,
+        CS_MODE_MIPS32,
+        CS_MODE_RISCV64,
+        Cs,
+    )
     from capstone import CS_MODE_64 as CS_MODE_X86_64
 except ImportError as e:
     raise ImportError(
@@ -74,6 +89,7 @@ class ISA(IntEnum):
     RISCV = 0
     ARM = 1
     X86_64 = 2
+    MIPS = 3
     UNKNOWN = -1
 
 
@@ -300,8 +316,57 @@ class X86_64Config(ISAConfig):
             return False
 
 
+class MIPSConfig(ISAConfig):
+    """MIPS32 configuration"""
+
+    # MIPS register names in standard order ($0-$31)
+    _GPR_NAMES: List[str] = [
+        "zero", "at", "v0", "v1",  # $0-$3
+        "a0", "a1", "a2", "a3",    # $4-$7
+        "t0", "t1", "t2", "t3",    # $8-$11
+        "t4", "t5", "t6", "t7",    # $12-$15
+        "s0", "s1", "s2", "s3",    # $16-$19
+        "s4", "s5", "s6", "s7",    # $20-$23
+        "t8", "t9",                # $24-$25
+        "k0", "k1",                # $26-$27
+        "gp", "sp", "fp", "ra",    # $28-$31
+    ]
+
+    def __init__(self) -> None:
+        # MIPS32 big-endian mode
+        super().__init__(UC_ARCH_MIPS, UC_MODE_MIPS32 | UC_MODE_BIG_ENDIAN)
+
+    def get_pc_reg(self) -> int:
+        return UC_MIPS_REG_PC
+
+    def get_sp_reg(self) -> int:
+        return UC_MIPS_REG_SP
+
+    def get_gpr_reg(self, n: int) -> int:
+        """Get MIPS register constant for $0-$31"""
+        if not 0 <= n <= 31:
+            raise ValueError(f"Register number must be 0-31, got {n}")
+        return UC_MIPS_REG_0 + n
+
+    def get_reg_name(self, n: int) -> str:
+        """Get MIPS register name"""
+        if 0 <= n <= 31:
+            return self._GPR_NAMES[n]
+        return f"?{n}"
+
+    def detect_syscall(self, uc: Uc, pc: int) -> bool:
+        """Check if instruction at PC is 'syscall' (0x0000000C)"""
+        try:
+            instr_bytes = uc.mem_read(pc, 4)
+            # MIPS is big-endian in our configuration
+            instr = struct.unpack(">I", instr_bytes)[0]
+            return instr == 0x0000000C  # syscall instruction
+        except Exception:
+            return False
+
+
 class Disassembler:
-    """Capstone-based disassembler for RISC-V, ARM64, and x86-64"""
+    """Capstone-based disassembler for RISC-V, ARM64, x86-64, and MIPS"""
 
     _cs: Cs
     _isa: ISA
@@ -313,6 +378,8 @@ class Disassembler:
             self._cs = Cs(CS_ARCH_ARM64, CS_MODE_ARM)
         elif isa == ISA.X86_64:
             self._cs = Cs(CS_ARCH_X86, CS_MODE_X86_64)
+        elif isa == ISA.MIPS:
+            self._cs = Cs(CS_ARCH_MIPS, CS_MODE_MIPS32 | CS_MODE_BIG_ENDIAN)
         else:
             raise ValueError(f"Unsupported ISA for disassembly: {isa}")
         self._isa = isa
@@ -399,6 +466,8 @@ class UnicornSimulator:
             self._config = ARM64Config()
         elif isa == ISA.X86_64:
             self._config = X86_64Config()
+        elif isa == ISA.MIPS:
+            self._config = MIPSConfig()
         else:
             raise ValueError(f"Unsupported ISA: {isa}")
 
@@ -460,6 +529,24 @@ class UnicornSimulator:
             # Map stack region (2MB ending near 0x7FFFFFFFFFFF - typical Linux)
             try:
                 self._uc.mem_map(0x7FFFFE00000, 0x200000, UC_PROT_ALL)
+            except UcError:
+                pass
+        elif self._config.arch == UC_ARCH_MIPS:
+            # Map main region (4MB from 0x00400000) for MIPS
+            # Note: 0x00400000 is the traditional MIPS user-space .text address
+            # 0x80000000 is kernel space (kseg0) and has special handling
+            try:
+                self._uc.mem_map(0x00400000, 0x400000, UC_PROT_ALL)
+            except UcError:
+                pass
+            # Map data region (4MB from 0x10000000) - traditional MIPS .data address
+            try:
+                self._uc.mem_map(0x10000000, 0x400000, UC_PROT_ALL)
+            except UcError:
+                pass
+            # Map stack region (near top of user space)
+            try:
+                self._uc.mem_map(0x7FE00000, 0x200000, UC_PROT_ALL)
             except UcError:
                 pass
         else:  # RISC-V
@@ -865,6 +952,9 @@ class UnicornSimulator:
             # x86-64 Linux syscall ABI: rax=syscall#, rdi=arg0, return in rax
             # Our register indices: rax=0, rdi=7
             return (0, 7, 0)
+        elif self._isa == ISA.MIPS:
+            # MIPS SPIM ABI: $v0=syscall# (reg 2), $a0=arg0 (reg 4), return in $v0
+            return (2, 4, 2)
         else:
             # RISC-V/ARM: a7=syscall# (x17), a0=arg0 (x10), return in a0
             return (17, 10, 10)
@@ -999,7 +1089,7 @@ def detect_elf_isa(elf_path: str) -> ISA:
         elf_path (str): Path to ELF file
 
     Returns:
-        ISA: ISA type (ISA.RISCV, ISA.ARM, ISA.X86_64, or ISA.UNKNOWN)
+        ISA: ISA type (ISA.RISCV, ISA.ARM, ISA.X86_64, ISA.MIPS, or ISA.UNKNOWN)
     """
     try:
         elf_info = load_elf_file(elf_path)
@@ -1009,6 +1099,8 @@ def detect_elf_isa(elf_path: str) -> ISA:
             return ISA.ARM
         elif elf_info.isa == ELF_ISA.X86_64:
             return ISA.X86_64
+        elif elf_info.isa == ELF_ISA.MIPS:
+            return ISA.MIPS
     except Exception:
         pass
 
