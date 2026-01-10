@@ -57,9 +57,10 @@ class TestCrossISASimplePrograms(unittest.TestCase):
         if self.arm_exists:
             sim = Simulator()
             sim.load_elf(self.ARM_SIMPLE)
-            steps = sim.run(max_steps=100)
+            # ARM fibonacci(7) takes ~418 steps due to recursive calls
+            steps = sim.run(max_steps=500)
             results['ARM'] = steps
-            self.assertLess(steps, 100, "ARM should complete")
+            self.assertLess(steps, 500, "ARM should complete")
 
         # Both should complete in a reasonable number of steps
         for isa, steps in results.items():

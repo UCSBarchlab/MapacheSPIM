@@ -10,23 +10,15 @@ build/
 
 # Example binaries (executables inside subdirectories)
 examples/*/fibonacci/fibonacci
+examples/*/fibonacci/fibonacci_debug
 examples/*/matrix_multiply/matrix_mult
-examples/*/test_simple/simple
-examples/*/hello_world/hello_world
+examples/*/hello_asm/hello_asm
+examples/*/guess_game/guess_game
+examples/*/array_stats/array_stats
 examples/*/*.o
 examples/*/*.dis
 examples/*/*/*.o
 examples/*/*/*.dis
-
-# lib build artifacts
-lib/build/
-lib/*.dylib
-lib/*.so
-lib/*.a
-lib/test_sailsim
-
-# Backend build directories (submodules have their own .gitignore)
-backends/*/sail-*/build/
 
 # OS files
 .DS_Store
@@ -51,8 +43,4 @@ dist/
 *.egg
 
 # Temporary/debug files
-*.txt
-!requirements.txt
-!CMakeLists.txt
-fault.txt
 *.log

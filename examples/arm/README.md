@@ -1,6 +1,6 @@
 # ARM64 Assembly Examples for MapacheSPIM
 
-This directory contains educational ARM64 (AArch64) assembly examples designed to demonstrate various programming concepts using the Sail ARM formal specification emulator.
+Educational ARM64 (AArch64) assembly examples designed to teach computer architecture concepts using the Unicorn Engine emulator.
 
 ## Prerequisites
 
@@ -21,17 +21,7 @@ sudo apt-get install gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
 
 **Alternative toolchains:**
 - ARM GNU Toolchain: https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads
-- LLVM/Clang with ARM support (requires additional configuration)
-
-### MapacheSPIM
-
-Build and install MapacheSPIM with ARM support:
-```bash
-cd ../..
-mkdir -p build && cd build
-cmake -DBUILD_ARM_LIBRARY=ON ..
-make
-```
+- LLVM/Clang with ARM support
 
 ## Building Examples
 
@@ -42,9 +32,11 @@ make
 
 ### Build Individual Examples
 ```bash
-make test_simple    # Simple arithmetic operations
-make hello_world    # Hello World with syscalls
-make fibonacci      # Recursive Fibonacci calculator
+make hello_asm        # Basic I/O and syscalls
+make guess_game       # Interactive number guessing
+make fibonacci        # Recursive Fibonacci
+make array_stats      # Array processing
+make matrix_multiply  # Matrix multiplication
 ```
 
 ### Clean Build Artifacts
@@ -54,54 +46,43 @@ make clean
 
 ## Running Examples
 
-### Using MapacheSPIM CLI
 ```bash
-make run-simple      # Run simple test
-make run-hello       # Run hello world
-make run-fibonacci   # Run Fibonacci calculator
-```
+# Start MapacheSPIM
+mapachespim
 
-### Direct Execution
-```bash
-../../mapachespim_cli.py test_simple/simple
-../../mapachespim_cli.py hello_world/hello
-../../mapachespim_cli.py fibonacci/fibonacci
+# Load and run an example
+(mapachespim) load examples/arm/fibonacci/fibonacci
+(mapachespim) run
 ```
 
 ## Examples Overview
 
-### 1. Simple Test (`test_simple/simple.s`)
+### 1. Hello Assembly (`hello_asm/hello_asm.s`)
+**Difficulty:** Beginner
+
 **Learning Objectives:**
 - Basic ARM64 instruction syntax
-- Register operations
-- Immediate values
-- Branching
+- String output with syscalls
+- Simple arithmetic operations
+- Program structure and exit
 
-**Instructions Covered:**
-- `mov` - Move immediate to register
-- `add` - Addition
-- `sub` - Subtraction
-- `lsl` - Logical shift left
-- `b` - Unconditional branch
-- `svc` - Supervisor call (syscall)
+### 2. Guess Game (`guess_game/guess_game.s`)
+**Difficulty:** Beginner+
 
-### 2. Hello World (`hello_world/hello.s`)
 **Learning Objectives:**
-- String data in assembly
-- System calls
-- Memory addressing
-
-**Concepts:**
-- `.data` section for strings
-- `adr` for PC-relative addressing
-- ARM syscall convention (syscall number in x8)
+- User input with read_int syscall
+- Conditional branching (cbz, cmp, beq, blt, bgt)
+- Loop structures
+- Interactive programs
 
 ### 3. Fibonacci (`fibonacci/fibonacci.s`)
+**Difficulty:** Intermediate
+
 **Learning Objectives:**
 - Recursive function calls
 - Stack frame management
 - ARM64 calling convention
-- Register save/restore
+- Register save/restore with stp/ldp
 
 **ARM64 Calling Convention:**
 - x0-x7: Argument/result registers
@@ -110,28 +91,25 @@ make run-fibonacci   # Run Fibonacci calculator
 - x19-x28: Callee-saved registers
 - x29: Frame pointer (FP)
 - x30: Link register (LR) - return address
-- sp: Stack pointer
+- sp: Stack pointer (16-byte aligned)
 
-**Stack Alignment:**
-- ARM64 requires 16-byte stack alignment
-- Use `stp`/`ldp` for paired register saves
+### 4. Array Statistics (`array_stats/array_stats.s`)
+**Difficulty:** Intermediate
 
-## Disassembly
+**Learning Objectives:**
+- Array traversal in memory
+- Load/store instructions (ldr/str)
+- Calculating sum, min, max, average
+- Working with data sections
 
-View disassembly of compiled programs:
+### 5. Matrix Multiply (`matrix_multiply/matrix_mult.s`)
+**Difficulty:** Advanced
 
-```bash
-make dis-simple       # Disassemble simple test
-make dis-hello        # Disassemble hello world
-make dis-fibonacci    # Disassemble Fibonacci
-```
-
-## Toolchain Verification
-
-Check that all required tools are installed:
-```bash
-make check-tools
-```
+**Learning Objectives:**
+- Nested loop structures
+- 2D array indexing
+- Memory layout for matrices
+- Complex pointer arithmetic
 
 ## ARM64 Assembly Quick Reference
 
@@ -189,17 +167,23 @@ my_function:
     ret                          // Return to caller
 ```
 
-## Linker Script
+## Syscalls
 
-The `linker.ld` file defines the memory layout:
-- **Base address**: 0x80000000
-- **Memory size**: 64MB RAM
-- **Sections**: `.text`, `.rodata`, `.data`, `.bss`
-- **Stack**: 1MB at end of RAM
+MapacheSPIM uses SPIM-compatible syscalls:
+
+| # | Name | Arguments | Description |
+|---|------|-----------|-------------|
+| 1 | print_int | x0 = integer | Print integer |
+| 4 | print_string | x0 = address | Print null-terminated string |
+| 5 | read_int | | Read integer into x0 |
+| 10 | exit | | Exit program |
+| 11 | print_char | x0 = char | Print ASCII character |
+
+**Syscall Convention:** Place syscall number in x8, arguments in x0-x2, then execute `svc #0`.
 
 ## Differences from RISC-V
 
-If you're familiar with RISC-V assembly, key differences:
+If you're familiar with RISC-V assembly:
 
 | Concept | RISC-V | ARM64 |
 |---------|--------|-------|
@@ -212,12 +196,20 @@ If you're familiar with RISC-V assembly, key differences:
 | Return address | `ra` (x1) | `x30` (LR) |
 | Syscall number | `a7` (x17) | `x8` |
 
+## Linker Script
+
+The `linker.ld` file defines the memory layout:
+- **Base address**: 0x80000000
+- **Memory size**: 64MB RAM
+- **Sections**: `.text`, `.rodata`, `.data`, `.bss`
+- **Stack**: 1MB at end of RAM
+
 ## Resources
 
-- **ARM Architecture Reference Manual**: https://developer.arm.com/documentation/
-- **ARM Assembly Language**: https://developer.arm.com/documentation/den0024/latest
-- **Sail ARM Model**: https://github.com/rems-project/sail-arm
-- **MapacheSPIM Documentation**: ../../docs/
+- [ARM Architecture Reference Manual](https://developer.arm.com/documentation/)
+- [ARM Assembly Language](https://developer.arm.com/documentation/den0024/latest)
+- [MapacheSPIM Documentation](../../docs/)
+- [Examples Guide](../README.md)
 
 ## Troubleshooting
 
@@ -232,22 +224,3 @@ If you have a different toolchain (e.g., `aarch64-linux-gnu-`), override the PRE
 ```bash
 make PREFIX=aarch64-linux-gnu-
 ```
-
-### MapacheSPIM CLI Not Found
-Ensure MapacheSPIM is built and the CLI path in the Makefile is correct:
-```bash
-MAPACHE_CLI = ../../mapachespim_cli.py
-```
-
-## Contributing
-
-When adding new examples:
-1. Follow the existing code structure and comments
-2. Include learning objectives in file headers
-3. Add comprehensive inline comments
-4. Update this README with example description
-5. Add build targets to Makefile
-
-## License
-
-These examples are part of the MapacheSPIM project and follow the same license terms.

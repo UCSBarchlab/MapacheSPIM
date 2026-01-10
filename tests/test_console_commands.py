@@ -563,15 +563,15 @@ class TestTabCompletion(unittest.TestCase):
         result = self.console.complete_load('examples/riscv/', 'load examples/riscv/', 5, 20)
         # Should find directories inside examples/riscv/
         self.assertTrue(any('fibonacci' in r for r in result))
-        self.assertTrue(any('test_simple' in r for r in result))
+        self.assertTrue(any('hello_asm' in r for r in result))
 
     def test_complete_load_partial_name(self):
         """Test tab completion with partial directory name"""
         result = self.console.complete_load('examples/riscv/fib', 'load examples/riscv/fib', 5, 23)
         # Should find fibonacci directory
         self.assertTrue(any('fibonacci' in r for r in result))
-        # Should NOT find test_simple
-        self.assertFalse(any('test_simple' in r for r in result))
+        # Should NOT find hello_asm (different prefix)
+        self.assertFalse(any('hello_asm' in r for r in result))
 
     def test_complete_load_returns_full_paths(self):
         """Test that completions are full paths, not just filenames"""

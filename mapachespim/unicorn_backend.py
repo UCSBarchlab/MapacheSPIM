@@ -556,6 +556,13 @@ class UnicornSimulator:
             except UcError:
                 pass
 
+            # Also map sign-extended version for RV64 lui addresses
+            # When lui loads values like 0x80100, it sign-extends to 0xFFFFFFFF80100000
+            try:
+                self._uc.mem_map(0xFFFFFFFF80000000, 0x400000, UC_PROT_ALL)
+            except UcError:
+                pass
+
             # Also map stack region for tests (include STACK_TOP itself)
             try:
                 self._uc.mem_map(STACK_ADDR, STACK_SIZE + 0x100000, UC_PROT_ALL)
@@ -583,12 +590,27 @@ class UnicornSimulator:
             # Write segment data
             if segment.data:
                 self._uc.mem_write(segment.vaddr, segment.data)
+                # For RISC-V 64-bit, also write to sign-extended address
+                # This handles lui sign-extension when accessing addresses >= 0x80000000
+                if self._isa == ISA.RISCV and segment.vaddr >= 0x80000000:
+                    sign_extended_addr = segment.vaddr | 0xFFFFFFFF00000000
+                    try:
+                        self._uc.mem_write(sign_extended_addr, segment.data)
+                    except UcError:
+                        pass  # Memory might not be mapped there
 
             # Zero-fill BSS (if memsz > filesz)
             if segment.memsz > segment.filesz:
                 bss_size = segment.memsz - segment.filesz
                 bss_addr = segment.vaddr + segment.filesz
                 self._uc.mem_write(bss_addr, b"\x00" * bss_size)
+                # Also zero-fill sign-extended BSS for RISC-V
+                if self._isa == ISA.RISCV and bss_addr >= 0x80000000:
+                    sign_extended_bss = bss_addr | 0xFFFFFFFF00000000
+                    try:
+                        self._uc.mem_write(sign_extended_bss, b"\x00" * bss_size)
+                    except UcError:
+                        pass
 
     def _setup_stack(self) -> None:
         """Map and initialize stack memory"""
@@ -955,8 +977,11 @@ class UnicornSimulator:
         elif self._isa == ISA.MIPS:
             # MIPS SPIM ABI: $v0=syscall# (reg 2), $a0=arg0 (reg 4), return in $v0
             return (2, 4, 2)
+        elif self._isa == ISA.ARM:
+            # ARM64: x8=syscall#, x0=arg0, return in x0
+            return (8, 0, 0)
         else:
-            # RISC-V/ARM: a7=syscall# (x17), a0=arg0 (x10), return in a0
+            # RISC-V: a7=syscall# (x17), a0=arg0 (x10), return in a0
             return (17, 10, 10)
 
     def _handle_syscall(self) -> bool:

@@ -58,9 +58,10 @@ class TestARMSimpleCorrectness(unittest.TestCase):
         sim = Simulator()
         sim.load_elf(self.SIMPLE_PATH)
 
-        steps = sim.run(max_steps=100)
+        # fibonacci(7) takes ~418 steps due to recursive calls
+        steps = sim.run(max_steps=500)
         # Should complete in reasonable number of steps
-        self.assertLess(steps, 100, "Program should complete within 100 steps")
+        self.assertLess(steps, 500, "Program should complete within 500 steps")
         self.assertGreater(steps, 0, "Program should execute at least one step")
 
 

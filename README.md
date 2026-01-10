@@ -199,7 +199,7 @@ See [Console Guide](docs/user/console-guide.md) for complete command reference.
 MapacheSPIM is powered by the [Unicorn Engine](https://www.unicorn-engine.org/), a battle-tested CPU emulator framework based on QEMU. This means:
 
 - **Reliable** - Built on the same codebase that powers countless virtual machines
-- **Multi-ISA** - Support for RISC-V 64-bit and ARM64 (AArch64) out of the box
+- **Multi-ISA** - Support for RISC-V, ARM64, x86-64, and MIPS32
 - **Fast** - Efficient emulation using proven QEMU technology
 - **Easy to Install** - Pure `pip install`, no C/C++ compilation required
 
@@ -213,8 +213,10 @@ MapacheSPIM/
 │   ├── unicorn_backend.py   # Unicorn-based simulator
 │   ├── elf_loader.py        # ELF parsing with pyelftools
 │   └── console.py           # Interactive console
-├── examples/riscv/          # RISC-V example programs
-└── examples/arm/            # ARM64 example programs
+├── examples/riscv/          # RISC-V 64-bit examples
+├── examples/arm/            # ARM64 (AArch64) examples
+├── examples/x86_64/         # x86-64 examples
+└── examples/mips/           # MIPS32 examples
 ```
 
 The same console commands and Python API work across all supported ISAs. Just load an ELF file and MapacheSPIM detects the architecture automatically.
@@ -239,7 +241,7 @@ Inspired by SPIM, designed for education:
 ## Testing
 
 ```bash
-# Run all tests (183 tests)
+# Run all tests (265 tests)
 python -m pytest tests/ -v
 
 # Or run individual test suites
