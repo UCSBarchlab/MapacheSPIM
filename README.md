@@ -270,4 +270,4 @@ All tests verify:
 - Issues: [GitHub Issues](https://github.com/mapachespim/MapacheSPIM/issues)
 - Discussions: [GitHub Discussions](https://github.com/mapachespim/MapacheSPIM/discussions)
 
-<img src="docs/Mapache.png" alt="MapacheSPIM Logo">
+<img src="docs/Mapache.png" alt="MapacheSPIM Logo" width="300">

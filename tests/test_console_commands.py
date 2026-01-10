@@ -21,7 +21,7 @@ from mapachespim import StepResult
 class TestConsoleCommands(unittest.TestCase):
     """Test suite for console commands using test_simple program"""
 
-    SIMPLE_PATH = 'examples/riscv/test_simple/simple'
+    SIMPLE_PATH = 'tests/fixtures/test_simple'
 
     # Expected register values from EXPECTED_BEHAVIOR.md
     EXPECTED_FINAL_REGS = {
@@ -484,7 +484,7 @@ class TestConsoleCommands(unittest.TestCase):
 class TestHelpExamples(unittest.TestCase):
     """Test that examples in help text actually work"""
 
-    SIMPLE_PATH = 'examples/riscv/test_simple/simple'
+    SIMPLE_PATH = 'tests/fixtures/test_simple'
 
     def setUp(self):
         """Create a fresh console for each test"""
@@ -498,9 +498,9 @@ class TestHelpExamples(unittest.TestCase):
 
     def test_load_example(self):
         """Verify load command example from help text"""
-        # From help: load examples/riscv/test_simple/simple
-        self.console.onecmd('load examples/riscv/test_simple/simple')
-        self.assertEqual(self.console.loaded_file, 'examples/riscv/test_simple/simple')
+        # From help: load tests/fixtures/test_simple
+        self.console.onecmd('load tests/fixtures/test_simple')
+        self.assertEqual(self.console.loaded_file, 'tests/fixtures/test_simple')
 
     def test_step_example(self):
         """Verify step command examples from help text"""

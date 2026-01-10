@@ -1,12 +1,14 @@
 # ============================================================================
-# Makefile for ARM64 Assembly Examples
+# Makefile for MIPS Assembly Examples
 # ============================================================================
 #
-# This Makefile builds ARM64 (AArch64) assembly programs for execution
-# on the MapacheSPIM simulator.
+# This Makefile builds MIPS32 assembly programs for execution on the Unicorn
+# CPU emulator via MapacheSPIM.
 #
 # Prerequisites:
-#   - ARM64 GNU toolchain (aarch64-linux-gnu-* or aarch64-elf-*)
+#   macOS: brew install mips64-elf-binutils mips64-elf-gcc
+#          (or use mips-linux-gnu-* from Linux toolchain)
+#   Linux: apt install binutils-mips-linux-gnu gcc-mips-linux-gnu
 #
 # Usage:
 #   make                 # Build all examples
@@ -16,13 +18,14 @@
 #   make array_stats     # Build array_stats example
 #   make matrix_multiply # Build matrix_multiply example
 #   make clean           # Remove all build artifacts
+#   make check-tools     # Verify toolchain is installed
 #
 # ============================================================================
 
 # Toolchain configuration
-# Uses aarch64-elf toolchain (install via: brew install aarch64-elf-gcc)
-# You can override this: make PREFIX=aarch64-linux-gnu-
-PREFIX ?= aarch64-elf-
+# Common prefixes: mips-linux-gnu-, mips64-elf-, mips-unknown-elf-
+# You can override this: make PREFIX=mips-linux-gnu-
+PREFIX ?= mips-linux-gnu-
 
 AS = $(PREFIX)as
 LD = $(PREFIX)ld
@@ -30,11 +33,12 @@ OBJDUMP = $(PREFIX)objdump
 OBJCOPY = $(PREFIX)objcopy
 
 # Assembler flags
-# -march=armv8-a: ARM v8 architecture
-ASFLAGS = -march=armv8-a
+# -mips32: MIPS32 architecture
+# -EB: Big endian
+ASFLAGS = -mips32 -EB
 
 # Linker flags
-LDFLAGS = -T linker.ld
+LDFLAGS = -T linker.ld -EB
 
 # ============================================================================
 # Targets
@@ -120,10 +124,10 @@ clean:
 
 # Check if toolchain is installed
 check-tools:
-	@echo "Checking for ARM64 toolchain..."
-	@which $(AS) > /dev/null || (echo "ERROR: $(AS) not found. Please install ARM64 toolchain."; exit 1)
-	@which $(LD) > /dev/null || (echo "ERROR: $(LD) not found. Please install ARM64 toolchain."; exit 1)
-	@echo "ARM64 toolchain found: $(shell $(AS) --version | head -1)"
+	@echo "Checking for MIPS toolchain..."
+	@which $(AS) > /dev/null || (echo "ERROR: $(AS) not found. Please install MIPS toolchain."; exit 1)
+	@which $(LD) > /dev/null || (echo "ERROR: $(LD) not found. Please install MIPS toolchain."; exit 1)
+	@echo "MIPS toolchain found: $(shell $(AS) --version | head -1)"
 	@echo "All tools ready!"
 
 .PHONY: all clean check-tools

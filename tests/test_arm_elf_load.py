@@ -12,7 +12,7 @@ from mapachespim import create_simulator
 
 def test_arm_elf():
     """Test loading and examining an ARM ELF"""
-    elf_path = "examples/arm/test_simple/simple"
+    elf_path = "examples/arm/fibonacci/fibonacci"
 
     print("=== ARM ELF Load Test ===\n")
     print(f"Loading: {elf_path}")

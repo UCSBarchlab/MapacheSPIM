@@ -18,7 +18,7 @@ def test_run_to_completion():
     sim = Simulator()
 
     print("Loading simple program...")
-    sim.load_elf('examples/riscv/test_simple/simple')
+    sim.load_elf('tests/fixtures/test_simple')
 
     pc = sim.get_pc()
     print(f"Entry point: {pc:#x}")

@@ -314,6 +314,10 @@ class Assembler:
 
             # Assemble instruction
             try:
+                # For RISC-V, disable compressed instructions for predictable 4-byte encoding
+                if self.isa in ("riscv64", "riscv"):
+                    instr = f".option norvc\n{instr}"
+
                 encoding, count = self._ks.asm(instr, current_addr)
                 if encoding is None or count == 0:
                     errors.append(f"Line {line.line_number}: Failed to assemble: {line.instruction}")

@@ -18,8 +18,8 @@ from mapachespim import Simulator, ISA
 class TestCrossISASimplePrograms(unittest.TestCase):
     """Test that simple programs behave consistently across ISAs"""
 
-    RISCV_SIMPLE = 'examples/riscv/test_simple/simple'
-    ARM_SIMPLE = 'examples/arm/test_simple/simple'
+    RISCV_SIMPLE = 'tests/fixtures/test_simple'
+    ARM_SIMPLE = 'examples/arm/fibonacci/fibonacci'
 
     @classmethod
     def setUpClass(cls):
@@ -83,8 +83,8 @@ class TestCrossISASimplePrograms(unittest.TestCase):
 class TestISAAPIConsistency(unittest.TestCase):
     """Test that the ISA API behaves consistently across architectures"""
 
-    RISCV_SIMPLE = 'examples/riscv/test_simple/simple'
-    ARM_SIMPLE = 'examples/arm/test_simple/simple'
+    RISCV_SIMPLE = 'tests/fixtures/test_simple'
+    ARM_SIMPLE = 'examples/arm/fibonacci/fibonacci'
 
     @classmethod
     def setUpClass(cls):
@@ -133,8 +133,8 @@ class TestISAAPIConsistency(unittest.TestCase):
 class TestCrossISAExecution(unittest.TestCase):
     """Test execution behavior across ISAs"""
 
-    RISCV_SIMPLE = 'examples/riscv/test_simple/simple'
-    ARM_SIMPLE = 'examples/arm/test_simple/simple'
+    RISCV_SIMPLE = 'tests/fixtures/test_simple'
+    ARM_SIMPLE = 'examples/arm/fibonacci/fibonacci'
 
     @classmethod
     def setUpClass(cls):

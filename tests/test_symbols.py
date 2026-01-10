@@ -147,7 +147,7 @@ class TestSymbolTableWithDifferentPrograms(unittest.TestCase):
     def test_test_simple_symbols(self):
         """Test test_simple program symbols"""
         sim = Simulator()
-        sim.load_elf('examples/riscv/test_simple/simple')
+        sim.load_elf('tests/fixtures/test_simple')
 
         symbols = sim.get_symbols()
         # Even simple programs may have symbols

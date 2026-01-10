@@ -20,7 +20,7 @@ class TestDisassemblyAPI(unittest.TestCase):
     def setUp(self):
         """Create a fresh simulator for each test"""
         self.sim = Simulator()
-        self.sim.load_elf('examples/riscv/test_simple/simple')
+        self.sim.load_elf('tests/fixtures/test_simple')
 
     def test_disasm_basic(self):
         """Test basic disassembly of first instruction"""
@@ -143,7 +143,7 @@ class TestDisassemblyConsole(unittest.TestCase):
         """Create a fresh console for each test"""
         self.console = MapacheSPIMConsole(verbose=False)
         self.console.stdout = sys.stdout
-        self.console.onecmd('load examples/riscv/test_simple/simple')
+        self.console.onecmd('load tests/fixtures/test_simple')
 
     def test_disasm_command_basic(self):
         """Test basic disasm command"""
@@ -204,7 +204,7 @@ class TestDisassemblyIntegration(unittest.TestCase):
     def setUp(self):
         """Create a fresh simulator for each test"""
         self.sim = Simulator()
-        self.sim.load_elf('examples/riscv/test_simple/simple')
+        self.sim.load_elf('tests/fixtures/test_simple')
 
     def test_disasm_at_pc(self):
         """Test disassembling instruction at current PC"""
@@ -273,7 +273,7 @@ class TestDisassemblyEdgeCases(unittest.TestCase):
     def setUp(self):
         """Create a fresh simulator for each test"""
         self.sim = Simulator()
-        self.sim.load_elf('examples/riscv/test_simple/simple')
+        self.sim.load_elf('tests/fixtures/test_simple')
 
     def test_disasm_unaligned_address(self):
         """Test disassembly of unaligned address"""

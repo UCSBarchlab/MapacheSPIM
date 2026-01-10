@@ -42,6 +42,16 @@ _start:
     lea     fib_result(%rip), %rcx
     movl    %eax, (%rcx)            # save result to memory
 
+    # Print result
+    movq    %rax, %rdi              # move result to rdi for print_int
+    movq    $1, %rax                # syscall 1 = print_int
+    syscall
+
+    # Print newline
+    movq    $10, %rdi
+    movq    $11, %rax               # syscall 11 = print_char
+    syscall
+
     # Exit via SPIM-compatible syscall
     mov     $10, %rax               # syscall 10 = exit
     syscall
@@ -137,4 +147,29 @@ base_case_one:
 #
 # Fibonacci sequence reference:
 # F(0)=0, F(1)=1, F(2)=1, F(3)=2, F(4)=3, F(5)=5, F(6)=8, F(7)=13
+# ============================================================================
+
+# ============================================================================
+# x86-64 vs RISC-V DIFFERENCES
+# ============================================================================
+#
+#   RISC-V              x86-64 (AT&T syntax)
+#   ------              --------------------
+#   beqz a0, label      testl %edi, %edi + jz   (test and jump if zero)
+#   beq  a0, t0, label  cmpl $1, %edi + je      (compare + jump)
+#   jal  ra, func       call func               (function call)
+#   sd   ra, 16(sp)     pushq %rbp              (save to stack)
+#   ld   ra, 16(sp)     popq %rbp               (restore from stack)
+#   addi sp, sp, -24    (automatic via push)    (stack allocation)
+#   ret                 ret                      (return)
+#
+# ============================================================================
+# EXERCISES FOR STUDENTS
+# ============================================================================
+#
+# 1. Change the input value and verify the result
+# 2. Add code to count the total number of function calls
+# 3. Implement an iterative (non-recursive) version
+# 4. Modify to calculate factorial instead of Fibonacci
+#
 # ============================================================================

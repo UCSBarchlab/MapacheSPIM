@@ -22,7 +22,7 @@ def test_riscv_elf_detection():
 
 def test_arm_elf_detection():
     """Test ISA detection for ARM ELF file"""
-    arm_elf = Path("examples/arm/test_simple/simple")
+    arm_elf = Path("examples/arm/fibonacci/fibonacci")
     assert arm_elf.exists(), f"Test file not found: {arm_elf}"
 
     isa = detect_elf_isa(str(arm_elf))
@@ -45,7 +45,7 @@ def test_create_simulator_riscv():
 
 def test_create_simulator_arm():
     """Test create_simulator with ARM ELF"""
-    arm_elf = "examples/arm/test_simple/simple"
+    arm_elf = "examples/arm/fibonacci/fibonacci"
     sim = create_simulator(arm_elf)
 
     # Verify simulator was created and ELF loaded

@@ -18,7 +18,7 @@ from mapachespim import Simulator, ISA
 class TestARMSimpleCorrectness(unittest.TestCase):
     """Test ARM64 test_simple program executes correctly"""
 
-    SIMPLE_PATH = 'examples/arm/test_simple/simple'
+    SIMPLE_PATH = 'examples/arm/fibonacci/fibonacci'
 
     @classmethod
     def setUpClass(cls):
@@ -67,7 +67,7 @@ class TestARMSimpleCorrectness(unittest.TestCase):
 class TestARMRegisterAccess(unittest.TestCase):
     """Test ARM64 register access"""
 
-    SIMPLE_PATH = 'examples/arm/test_simple/simple'
+    SIMPLE_PATH = 'examples/arm/fibonacci/fibonacci'
 
     @classmethod
     def setUpClass(cls):
@@ -97,7 +97,7 @@ class TestARMRegisterAccess(unittest.TestCase):
 class TestARMISADetection(unittest.TestCase):
     """Test ARM64 ISA detection"""
 
-    SIMPLE_PATH = 'examples/arm/test_simple/simple'
+    SIMPLE_PATH = 'examples/arm/fibonacci/fibonacci'
 
     @classmethod
     def setUpClass(cls):

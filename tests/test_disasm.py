@@ -17,7 +17,7 @@ def test_disasm():
     print("Testing disassembly...")
 
     sim = Simulator()
-    sim.load_elf('examples/riscv/test_simple/simple')
+    sim.load_elf('tests/fixtures/test_simple')
 
     print("\nDisassembling first 9 instructions:")
     print("-" * 60)

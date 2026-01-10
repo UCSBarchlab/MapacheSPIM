@@ -236,7 +236,7 @@ class TestProgramCompletion(unittest.TestCase):
     def test_simple_executes(self):
         """test_simple executes correctly"""
         sim = Simulator()
-        sim.load_elf('examples/riscv/test_simple/simple')
+        sim.load_elf('tests/fixtures/test_simple')
 
         # test_simple doesn't have tohost, so we just verify it loads and runs
         # Run a fixed number of steps
@@ -249,13 +249,13 @@ class TestProgramCompletion(unittest.TestCase):
     def test_can_detect_completion(self):
         """Verify we can distinguish completion from timeout"""
         sim = Simulator()
-        sim.load_elf('examples/riscv/test_simple/simple')
+        sim.load_elf('tests/fixtures/test_simple')
 
         # Run with very low limit
         steps_low = sim.run(max_steps=5)
 
         # Reset and run with high limit
-        sim.load_elf('examples/riscv/test_simple/simple')
+        sim.load_elf('tests/fixtures/test_simple')
         steps_high = sim.run(max_steps=100)
 
         # With low limit, might not complete

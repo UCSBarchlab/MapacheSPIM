@@ -19,7 +19,7 @@ from mapachespim import Simulator
 class TestPrintStringSyscall(unittest.TestCase):
     """Test syscall 4 (print_string)"""
 
-    HELLO_PATH = 'examples/riscv/hello_world/hello'
+    HELLO_PATH = 'tests/fixtures/hello_world'
 
     def test_hello_world_prints_correctly(self):
         """Verify hello world program prints correct string"""
@@ -71,7 +71,7 @@ class TestSyscallDetection(unittest.TestCase):
         from mapachespim import StepResult
 
         sim = Simulator()
-        sim.load_elf('examples/riscv/hello_world/hello')
+        sim.load_elf('tests/fixtures/hello_world')
 
         # Suppress output
         old_stdout = sys.stdout

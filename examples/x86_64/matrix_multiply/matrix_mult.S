@@ -176,3 +176,26 @@ end_outer:
 # [ 84   69   54 ]     (4*9+5*6+6*3=84,  4*8+5*5+6*2=69,  4*7+5*4+6*1=54)
 # [138  114   90 ]     (7*9+8*6+9*3=138, 7*8+8*5+9*2=114, 7*7+8*4+9*1=90)
 # ============================================================================
+
+# ============================================================================
+# x86-64 vs RISC-V DIFFERENCES
+# ============================================================================
+#
+#   RISC-V              x86-64 (AT&T syntax)
+#   ------              --------------------
+#   mul  t4, t0, t6     imul $3, %eax           (multiply)
+#   slli t4, t4, 2      (use scale in address)  (shift for array index)
+#   lw   t4, 0(t4)      mov (%r12,%rax,4), %ecx (load with scaled index)
+#   sw   t3, 0(t4)      mov %r11d, (%r14,%rax,4)(store with scaled index)
+#   bge  t0, t6, end    cmp $3, %r8d + jge      (compare + jump)
+#
+# ============================================================================
+# EXERCISES FOR STUDENTS
+# ============================================================================
+#
+# 1. Modify the matrices A and B and verify the output
+# 2. Add code to print matrices A and B before multiplication
+# 3. Implement matrix addition instead of multiplication
+# 4. Extend to handle 4x4 matrices
+#
+# ============================================================================

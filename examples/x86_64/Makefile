@@ -2,8 +2,8 @@
 # Makefile for x86-64 Assembly Examples
 # ============================================================================
 #
-# This Makefile builds x86-64 assembly programs for execution on the Unicorn
-# CPU emulator via MapacheSPIM.
+# This Makefile builds x86-64 assembly programs for execution
+# on the MapacheSPIM simulator.
 #
 # Prerequisites:
 #   macOS: brew install x86_64-elf-binutils x86_64-elf-gcc
@@ -11,6 +11,11 @@
 #
 # Usage:
 #   make                 # Build all examples
+#   make hello_asm       # Build hello_asm example
+#   make guess_game      # Build guess_game example
+#   make fibonacci       # Build fibonacci example
+#   make array_stats     # Build array_stats example
+#   make matrix_multiply # Build matrix_multiply example
 #   make clean           # Remove all build artifacts
 #
 # ============================================================================
@@ -20,48 +25,74 @@ AS = x86_64-elf-as
 ASFLAGS = --64
 LD = x86_64-elf-ld
 LDFLAGS = -T linker.ld -nostdlib -static
+OBJDUMP = x86_64-elf-objdump
 
 # ============================================================================
 # Targets
 # ============================================================================
 
 # Default target: build all examples
-all: test_simple/simple matrix_multiply/matrix_mult fibonacci/fibonacci
+all: hello_asm/hello_asm guess_game/guess_game fibonacci/fibonacci \
+     array_stats/array_stats matrix_multiply/matrix_mult
 
-# Simple test example
-test_simple/simple: test_simple/simple.o linker.ld
-	@echo "Linking simple test program..."
+# Hello Assembly Tutorial example
+hello_asm/hello_asm: hello_asm/hello_asm.o linker.ld
+	@echo "Linking hello_asm program..."
 	$(LD) $(LDFLAGS) -o $@ $<
-	@echo "Generating disassembly..."
-	objdump -d $@ > test_simple/simple.dis
-	@echo "Simple test build complete!"
+	@echo "Generating disassembly for hello_asm..."
+	$(OBJDUMP) -d $@ > hello_asm/hello_asm.dis
+	@echo "Hello Assembly build complete!"
 
-test_simple/simple.o: test_simple/simple.S
-	@echo "Assembling simple test program..."
+hello_asm/hello_asm.o: hello_asm/hello_asm.s
+	@echo "Assembling hello_asm program..."
 	$(AS) $(ASFLAGS) -o $@ $<
 
-# Matrix multiply example
-matrix_multiply/matrix_mult: matrix_multiply/matrix_mult.o linker.ld
-	@echo "Linking matrix multiply program..."
+# Guess Game example
+guess_game/guess_game: guess_game/guess_game.o linker.ld
+	@echo "Linking guess_game program..."
 	$(LD) $(LDFLAGS) -o $@ $<
-	@echo "Generating disassembly..."
-	objdump -d $@ > matrix_multiply/matrix_mult.dis
-	@echo "Matrix multiply build complete!"
+	@echo "Generating disassembly for guess_game..."
+	$(OBJDUMP) -d $@ > guess_game/guess_game.dis
+	@echo "Guess Game build complete!"
 
-matrix_multiply/matrix_mult.o: matrix_multiply/matrix_mult.S
-	@echo "Assembling matrix multiply program..."
+guess_game/guess_game.o: guess_game/guess_game.s
+	@echo "Assembling guess_game program..."
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # Fibonacci example
 fibonacci/fibonacci: fibonacci/fibonacci.o linker.ld
 	@echo "Linking fibonacci program..."
 	$(LD) $(LDFLAGS) -o $@ $<
-	@echo "Generating disassembly..."
-	objdump -d $@ > fibonacci/fibonacci.dis
+	@echo "Generating disassembly for fibonacci..."
+	$(OBJDUMP) -d $@ > fibonacci/fibonacci.dis
 	@echo "Fibonacci build complete!"
 
-fibonacci/fibonacci.o: fibonacci/fibonacci.S
+fibonacci/fibonacci.o: fibonacci/fibonacci.s
 	@echo "Assembling fibonacci program..."
+	$(AS) $(ASFLAGS) -o $@ $<
+
+# Array Statistics example
+array_stats/array_stats: array_stats/array_stats.o linker.ld
+	@echo "Linking array_stats program..."
+	$(LD) $(LDFLAGS) -o $@ $<
+	@echo "Generating disassembly for array_stats..."
+	$(OBJDUMP) -d $@ > array_stats/array_stats.dis
+	@echo "Array Stats build complete!"
+
+array_stats/array_stats.o: array_stats/array_stats.s
+	@echo "Assembling array_stats program..."
+	$(AS) $(ASFLAGS) -o $@ $<
+
+# Matrix Multiplication example
+matrix_multiply/matrix_mult: matrix_multiply/matrix_mult.o linker.ld
+	@echo "Linking matrix multiplication program..."
+	$(LD) $(LDFLAGS) -o $@ $<
+	@echo "Generating disassembly for matrix multiplication..."
+	$(OBJDUMP) -d $@ > matrix_multiply/matrix_mult.dis
+	@echo "Matrix multiplication build complete!"
+
+matrix_multiply/matrix_mult.o: matrix_multiply/matrix_mult.s
+	@echo "Assembling matrix multiplication program..."
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # ============================================================================
@@ -71,25 +102,19 @@ fibonacci/fibonacci.o: fibonacci/fibonacci.S
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
-	rm -f test_simple/*.o test_simple/simple test_simple/*.dis
-	rm -f matrix_multiply/*.o matrix_multiply/matrix_mult matrix_multiply/*.dis
+	rm -f hello_asm/*.o hello_asm/hello_asm hello_asm/*.dis
+	rm -f guess_game/*.o guess_game/guess_game guess_game/*.dis
 	rm -f fibonacci/*.o fibonacci/fibonacci fibonacci/*.dis
+	rm -f array_stats/*.o array_stats/array_stats array_stats/*.dis
+	rm -f matrix_multiply/*.o matrix_multiply/matrix_mult matrix_multiply/*.dis
 	@echo "Clean complete!"
 
-# Show disassembly
-dis-simple: test_simple/simple
-	@echo "Disassembly of simple test:"
-	@echo "============================"
-	objdump -d $<
+# Check if toolchain is installed
+check-tools:
+	@echo "Checking for x86-64 toolchain..."
+	@which $(AS) > /dev/null || (echo "ERROR: $(AS) not found. Please install x86-64 toolchain."; exit 1)
+	@which $(LD) > /dev/null || (echo "ERROR: $(LD) not found. Please install x86-64 toolchain."; exit 1)
+	@echo "x86-64 toolchain found: $(shell $(AS) --version | head -1)"
+	@echo "All tools ready!"
 
-dis-matrix: matrix_multiply/matrix_mult
-	@echo "Disassembly of matrix multiply:"
-	@echo "==============================="
-	objdump -d $<
-
-dis-fibonacci: fibonacci/fibonacci
-	@echo "Disassembly of fibonacci:"
-	@echo "========================="
-	objdump -d $<
-
-.PHONY: all clean dis-simple dis-matrix dis-fibonacci
+.PHONY: all clean check-tools

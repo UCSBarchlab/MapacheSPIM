@@ -45,7 +45,8 @@ SAIL_SIM = ../sail-riscv/build/c_emulator/sail_riscv_sim
 # ============================================================================
 
 # Default target: build all examples
-all: matrix_multiply/matrix_mult fibonacci/fibonacci hello_world/hello
+all: hello_asm/hello_asm guess_game/guess_game fibonacci/fibonacci \
+     array_stats/array_stats matrix_multiply/matrix_mult
 
 # Matrix multiplication example
 matrix_multiply/matrix_mult: matrix_multiply/matrix_mult.o linker.ld
@@ -71,16 +72,40 @@ fibonacci/fibonacci.o: fibonacci/fibonacci.s
 	@echo "Assembling fibonacci program..."
 	$(AS) $(ASFLAGS) -o $@ $<
 
-# Hello World example
-hello_world/hello: hello_world/hello.o linker.ld
-	@echo "Linking hello world program..."
+# Hello Assembly Tutorial example
+hello_asm/hello_asm: hello_asm/hello_asm.o linker.ld
+	@echo "Linking hello_asm program..."
 	$(LD) $(LDFLAGS) -o $@ $<
-	@echo "Generating disassembly for hello world..."
-	$(OBJDUMP) -d $@ > hello_world/hello.dis
-	@echo "Hello world build complete!"
+	@echo "Generating disassembly for hello_asm..."
+	$(OBJDUMP) -d $@ > hello_asm/hello_asm.dis
+	@echo "Hello Assembly build complete!"
 
-hello_world/hello.o: hello_world/hello.s
-	@echo "Assembling hello world program..."
+hello_asm/hello_asm.o: hello_asm/hello_asm.s
+	@echo "Assembling hello_asm program..."
+	$(AS) $(ASFLAGS) -o $@ $<
+
+# Array Statistics example
+array_stats/array_stats: array_stats/array_stats.o linker.ld
+	@echo "Linking array_stats program..."
+	$(LD) $(LDFLAGS) -o $@ $<
+	@echo "Generating disassembly for array_stats..."
+	$(OBJDUMP) -d $@ > array_stats/array_stats.dis
+	@echo "Array Stats build complete!"
+
+array_stats/array_stats.o: array_stats/array_stats.s
+	@echo "Assembling array_stats program..."
+	$(AS) $(ASFLAGS) -o $@ $<
+
+# Guess Game example
+guess_game/guess_game: guess_game/guess_game.o linker.ld
+	@echo "Linking guess_game program..."
+	$(LD) $(LDFLAGS) -o $@ $<
+	@echo "Generating disassembly for guess_game..."
+	$(OBJDUMP) -d $@ > guess_game/guess_game.dis
+	@echo "Guess Game build complete!"
+
+guess_game/guess_game.o: guess_game/guess_game.s
+	@echo "Assembling guess_game program..."
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # ============================================================================
@@ -115,9 +140,11 @@ run-fibonacci-mem: fibonacci/fibonacci
 # Clean build artifacts
 clean:
 	@echo "Cleaning build artifacts..."
-	rm -f matrix_multiply/*.o matrix_multiply/matrix_mult matrix_multiply/*.dis
+	rm -f hello_asm/*.o hello_asm/hello_asm hello_asm/*.dis
+	rm -f guess_game/*.o guess_game/guess_game guess_game/*.dis
 	rm -f fibonacci/*.o fibonacci/fibonacci fibonacci/*.dis
-	rm -f hello_world/*.o hello_world/hello hello_world/*.dis
+	rm -f array_stats/*.o array_stats/array_stats array_stats/*.dis
+	rm -f matrix_multiply/*.o matrix_multiply/matrix_mult matrix_multiply/*.dis
 	@echo "Clean complete!"
 
 # Show disassembly for matrix multiplication

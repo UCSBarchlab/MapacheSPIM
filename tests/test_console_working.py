@@ -18,7 +18,7 @@ from mapachespim.console import MapacheSPIMConsole
 class TestConsoleCommands(unittest.TestCase):
     """Test suite for console commands using test_simple program"""
 
-    SIMPLE_PATH = 'examples/riscv/test_simple/simple'
+    SIMPLE_PATH = 'tests/fixtures/test_simple'
     FIBONACCI_PATH = 'examples/riscv/fibonacci/fibonacci'
     FIBONACCI_DEBUG_PATH = 'examples/riscv/fibonacci/fibonacci_debug'
 
