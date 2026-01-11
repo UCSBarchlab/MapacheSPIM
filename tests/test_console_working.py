@@ -20,7 +20,7 @@ class TestConsoleCommands(unittest.TestCase):
 
     SIMPLE_PATH = 'tests/fixtures/test_simple'
     FIBONACCI_PATH = 'examples/riscv/fibonacci/fibonacci'
-    FIBONACCI_DEBUG_PATH = 'examples/riscv/fibonacci/fibonacci_debug'
+    DEBUG_TEST_PATH = 'tests/fixtures/debug_test'
 
     def setUp(self):
         """Create a fresh console for each test"""
@@ -441,10 +441,10 @@ class TestConsoleCommands(unittest.TestCase):
         """Test 'list' command with program compiled with -g"""
         # Check if debug binary exists
         from pathlib import Path
-        if not Path(self.FIBONACCI_DEBUG_PATH).exists():
-            self.skipTest(f'Debug binary not found: {self.FIBONACCI_DEBUG_PATH}')
+        if not Path(self.DEBUG_TEST_PATH).exists():
+            self.skipTest(f'Debug binary not found: {self.DEBUG_TEST_PATH}')
 
-        self.console.onecmd(f'load {self.FIBONACCI_DEBUG_PATH}')
+        self.console.onecmd(f'load {self.DEBUG_TEST_PATH}')
 
         # Should have debug info
         self.assertTrue(self.console.source_info.has_debug_info)
@@ -459,10 +459,10 @@ class TestConsoleCommands(unittest.TestCase):
     def test_list_after_stepping(self):
         """Test 'list' shows correct line after stepping"""
         from pathlib import Path
-        if not Path(self.FIBONACCI_DEBUG_PATH).exists():
-            self.skipTest(f'Debug binary not found: {self.FIBONACCI_DEBUG_PATH}')
+        if not Path(self.DEBUG_TEST_PATH).exists():
+            self.skipTest(f'Debug binary not found: {self.DEBUG_TEST_PATH}')
 
-        self.console.onecmd(f'load {self.FIBONACCI_DEBUG_PATH}')
+        self.console.onecmd(f'load {self.DEBUG_TEST_PATH}')
 
         # Step a few times
         self.console.onecmd('step 3')
@@ -477,44 +477,44 @@ class TestConsoleCommands(unittest.TestCase):
     def test_list_with_function_name(self):
         """Test 'list <function>' to show source around function"""
         from pathlib import Path
-        if not Path(self.FIBONACCI_DEBUG_PATH).exists():
-            self.skipTest(f'Debug binary not found: {self.FIBONACCI_DEBUG_PATH}')
+        if not Path(self.DEBUG_TEST_PATH).exists():
+            self.skipTest(f'Debug binary not found: {self.DEBUG_TEST_PATH}')
 
-        self.console.onecmd(f'load {self.FIBONACCI_DEBUG_PATH}')
+        self.console.onecmd(f'load {self.DEBUG_TEST_PATH}')
 
         # Try listing around 'fibonacci' function
         self.console.onecmd('list fibonacci')
 
         # Should not crash
-        self.assertEqual(self.console.loaded_file, self.FIBONACCI_DEBUG_PATH)
+        self.assertEqual(self.console.loaded_file, self.DEBUG_TEST_PATH)
 
     def test_list_with_line_number(self):
         """Test 'list <line>' to show source around specific line"""
         from pathlib import Path
-        if not Path(self.FIBONACCI_DEBUG_PATH).exists():
-            self.skipTest(f'Debug binary not found: {self.FIBONACCI_DEBUG_PATH}')
+        if not Path(self.DEBUG_TEST_PATH).exists():
+            self.skipTest(f'Debug binary not found: {self.DEBUG_TEST_PATH}')
 
-        self.console.onecmd(f'load {self.FIBONACCI_DEBUG_PATH}')
+        self.console.onecmd(f'load {self.DEBUG_TEST_PATH}')
 
         # Try listing around line 40
         self.console.onecmd('list 40')
 
         # Should not crash
-        self.assertEqual(self.console.loaded_file, self.FIBONACCI_DEBUG_PATH)
+        self.assertEqual(self.console.loaded_file, self.DEBUG_TEST_PATH)
 
     def test_list_alias(self):
         """Test 'l' alias for list command"""
         from pathlib import Path
-        if not Path(self.FIBONACCI_DEBUG_PATH).exists():
-            self.skipTest(f'Debug binary not found: {self.FIBONACCI_DEBUG_PATH}')
+        if not Path(self.DEBUG_TEST_PATH).exists():
+            self.skipTest(f'Debug binary not found: {self.DEBUG_TEST_PATH}')
 
-        self.console.onecmd(f'load {self.FIBONACCI_DEBUG_PATH}')
+        self.console.onecmd(f'load {self.DEBUG_TEST_PATH}')
 
         # 'l' should work the same as 'list'
         self.console.onecmd('l')
 
         # Should not crash
-        self.assertEqual(self.console.loaded_file, self.FIBONACCI_DEBUG_PATH)
+        self.assertEqual(self.console.loaded_file, self.DEBUG_TEST_PATH)
 
     def test_list_without_loaded_program(self):
         """Test 'list' without loading a program first"""
