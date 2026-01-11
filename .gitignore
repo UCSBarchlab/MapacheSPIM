@@ -8,17 +8,10 @@ build/
 *.so
 *.dylib
 
-# Example binaries (executables inside subdirectories)
-examples/*/fibonacci/fibonacci
-examples/*/fibonacci/fibonacci_debug
-examples/*/matrix_multiply/matrix_mult
-examples/*/hello_asm/hello_asm
-examples/*/guess_game/guess_game
-examples/*/array_stats/array_stats
-examples/*/*.o
-examples/*/*.dis
+# Example build artifacts (but not the binaries themselves)
 examples/*/*/*.o
 examples/*/*/*.dis
+examples/*/fibonacci/fibonacci_debug
 
 # OS files
 .DS_Store
