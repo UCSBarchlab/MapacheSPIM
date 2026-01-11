@@ -13,6 +13,8 @@
 # - Register allocation and management
 # - MIPS calling convention
 # ============================================================================
+.isa mips32
+
 
 .section .data
     # Matrix A (3x3) - stored in row-major order

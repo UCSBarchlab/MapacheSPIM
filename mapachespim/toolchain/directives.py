@@ -86,12 +86,16 @@ class DirectiveParser:
     # Regex patterns
     LABEL_PATTERN = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*):(.*)$')
     DIRECTIVE_PATTERN = re.compile(r'^\s*\.(\w+)\s*(.*)$')
-    # Hash comment: # at start, or # preceded by space and NOT followed by digit (ARM immediate)
-    HASH_COMMENT = re.compile(r'(^|\s)#(?!\d).*$')
+    # Hash comment: # at start, or # preceded by space and NOT followed by digit/minus (ARM immediate)
+    # This handles both #42 and #-32 as ARM immediates, not comments
+    HASH_COMMENT = re.compile(r'(^|\s)#(?!-?\d).*$')
     COMMENT_PATTERNS = [
         re.compile(r'//.*$'),  # C++ style
         re.compile(r';.*$'),   # Semicolon comments
     ]
+
+    # Valid ISA values for .isa directive
+    VALID_ISAS = {"riscv64", "arm64", "x86_64", "mips32"}
 
     def __init__(self) -> None:
         self.sections: Dict[str, SectionData] = {}
@@ -101,6 +105,7 @@ class DirectiveParser:
         self.constants: Dict[str, int] = {}
         self.errors: List[str] = []
         self.warnings: List[str] = []
+        self.isa: Optional[str] = None  # ISA from .isa directive
 
         # Initialize default sections
         for name in [".text", ".data", ".rodata", ".bss"]:
@@ -217,6 +222,24 @@ class DirectiveParser:
         """Process a directive and update section data."""
         directive = parsed.directive
         args = parsed.directive_args
+
+        # ISA directive - must specify target architecture
+        if directive == "isa":
+            if not args:
+                self.errors.append(
+                    f"Line {parsed.line_number}: .isa directive requires an argument "
+                    f"(one of: {', '.join(sorted(self.VALID_ISAS))})"
+                )
+                return
+            isa_value = args[0].lower().replace("-", "_")
+            if isa_value not in self.VALID_ISAS:
+                self.errors.append(
+                    f"Line {parsed.line_number}: Invalid ISA '{args[0]}'. "
+                    f"Valid options: {', '.join(sorted(self.VALID_ISAS))}"
+                )
+                return
+            self.isa = isa_value
+            return
 
         # Section directives
         if directive in ("text", "data", "rodata", "bss"):

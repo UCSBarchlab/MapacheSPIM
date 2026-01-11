@@ -13,6 +13,8 @@
 # - Register allocation and management
 # - RISC-V calling convention
 # ============================================================================
+.isa riscv64
+
 
 .section .data
     # Matrix A (3x3) - stored in row-major order
@@ -180,6 +182,13 @@ end_outer:
 # [ 84   69   54 ]     (4*9+5*6+6*3=84,  4*8+5*5+6*2=69,  4*7+5*4+6*1=54)
 # [138  114   90 ]     (7*9+8*6+9*3=138, 7*8+8*5+9*2=114, 7*7+8*4+9*1=90)
 # ============================================================================
+
+# Stack space in .bss section
+.section .bss
+    .align 4
+    _stack_bottom:
+        .space 4096
+    _stack_start:
 
 # HTIF (Host-Target Interface) section for Sail emulator
 .section .tohost,"aw",@progbits

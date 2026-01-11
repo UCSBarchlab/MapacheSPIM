@@ -108,7 +108,7 @@ def assemble_file(
         source_path: Path to the assembly source file.
         output_path: Path for the output ELF file. If None, uses source
                      path with .elf extension.
-        isa: Target ISA. If None, attempts to auto-detect from source.
+        isa: Target ISA. If None, looks for .isa directive in source.
         entry_symbol: Entry point symbol name (default: "_start").
 
     Returns:
@@ -120,6 +120,8 @@ def assemble_file(
         >>> if result.success:
         ...     print(f"Assembled to {result.entry_point:#x}")
     """
+    from .directives import DirectiveParser
+
     source_path = Path(source_path)
 
     if not source_path.exists():
@@ -137,13 +139,13 @@ def assemble_file(
             errors=[f"Failed to read source file: {e}"],
         )
 
-    # Auto-detect ISA if not specified
+    # If ISA not specified via flag, check for .isa directive in source
     if isa is None:
-        isa = _detect_isa_from_source(source, source_path)
+        isa = _detect_isa_from_directive(source)
         if isa is None:
             return AssemblyResult(
                 elf_bytes=b"",
-                errors=["Could not auto-detect ISA. Please specify --isa."],
+                errors=[_isa_not_specified_error()],
             )
 
     # Assemble
@@ -160,46 +162,45 @@ def assemble_file(
     return result
 
 
-def _detect_isa_from_source(source: str, path: Path) -> Optional[str]:
+def _detect_isa_from_directive(source: str) -> Optional[str]:
     """
-    Attempt to detect ISA from source code or file path.
+    Look for .isa directive in source code.
 
-    Detection heuristics:
-    1. Look for .arch or .isa directive
-    2. Check for ISA-specific instructions
-    3. Check directory name hints
+    Returns the ISA if found, None otherwise.
     """
-    source_lower = source.lower()
+    from .directives import DirectiveParser
 
-    # Check for explicit ISA directives
-    if ".arch rv64" in source_lower or ".riscv" in source_lower:
-        return "riscv64"
-    if ".arch armv8" in source_lower or ".aarch64" in source_lower:
-        return "arm64"
-    if ".code64" in source_lower or ".intel_syntax" in source_lower:
-        return "x86_64"
-    if ".mips" in source_lower or ".set mips" in source_lower:
-        return "mips32"
-
-    # Check for ISA-specific instructions
-    if "ecall" in source_lower or "addi " in source_lower:
-        return "riscv64"
-    if "svc " in source_lower or "mov x" in source_lower:
-        return "arm64"
-    if "syscall" in source_lower or "mov %rax" in source_lower:
-        return "x86_64"
-    if "syscall" in source_lower and "$v0" in source_lower:
-        return "mips32"
-
-    # Check directory path for hints
-    path_str = str(path).lower()
-    if "riscv" in path_str or "rv64" in path_str:
-        return "riscv64"
-    if "arm" in path_str or "aarch64" in path_str:
-        return "arm64"
-    if "x86" in path_str or "x64" in path_str:
-        return "x86_64"
-    if "mips" in path_str:
-        return "mips32"
+    # Quick scan for .isa directive without full parse
+    for line in source.splitlines():
+        line = line.strip()
+        # Skip empty lines and comments
+        if not line or line.startswith('#') or line.startswith('//') or line.startswith(';'):
+            continue
+        # Check for .isa directive
+        if line.lower().startswith('.isa'):
+            parts = line.split(None, 1)
+            if len(parts) >= 2:
+                isa_value = parts[1].strip().lower().replace("-", "_")
+                if isa_value in DirectiveParser.VALID_ISAS:
+                    return isa_value
+        # Stop after first non-empty, non-comment, non-.isa line
+        # (the .isa directive should be at the top of the file)
+        if not line.startswith('.'):
+            break
 
     return None
+
+
+def _isa_not_specified_error() -> str:
+    """Generate helpful error message when ISA is not specified."""
+    return """ISA not specified
+
+Please specify the target architecture using one of:
+
+  1. Command-line flag:
+     mapachespim-as program.s --isa riscv64
+
+  2. File directive (add at start of file):
+     .isa riscv64
+
+Supported ISAs: arm64, mips32, riscv64, x86_64"""

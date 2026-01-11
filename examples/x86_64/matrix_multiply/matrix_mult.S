@@ -13,6 +13,8 @@
 # - Register allocation and management
 # - x86-64 calling convention
 # ============================================================================
+.isa x86_64
+
 
 .section .data
     # Matrix A (3x3) - stored in row-major order

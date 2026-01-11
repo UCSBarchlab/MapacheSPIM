@@ -15,6 +15,8 @@
 # - Base case and recursive case handling
 # - Register save/restore conventions
 # ============================================================================
+.isa riscv64
+
 
 .section .data
     # Input value: calculate Fibonacci(7)
@@ -24,6 +26,13 @@
     # Storage for result
     fib_result:
         .word 0
+
+.section .bss
+    # Stack space (4KB)
+    .align 4
+    _stack_bottom:
+        .space 4096
+    _stack_start:
 
 .section .text
 .globl _start

@@ -15,6 +15,8 @@
 # - Base case and recursive case handling
 # - Callee-saved register preservation ($s0-$s7)
 # ============================================================================
+.isa mips32
+
 
 .section .data
     # Input value: calculate Fibonacci(7)

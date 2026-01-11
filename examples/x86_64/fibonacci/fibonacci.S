@@ -15,6 +15,8 @@
 # - Base case and recursive case handling
 # - Callee-saved register preservation
 # ============================================================================
+.isa x86_64
+
 
 .section .data
     # Input value: calculate Fibonacci(7)

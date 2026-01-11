@@ -15,6 +15,8 @@
 # - Base case and recursive case handling
 # - Register save/restore conventions
 # ============================================================================
+.isa arm64
+
 
 .section .data
     # Input value: calculate Fibonacci(7)

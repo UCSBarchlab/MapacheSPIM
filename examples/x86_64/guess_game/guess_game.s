@@ -13,6 +13,8 @@
 #
 # Note: This uses AT&T syntax (GNU assembler style)
 # ============================================================================
+.isa x86_64
+
 
     .data
 
