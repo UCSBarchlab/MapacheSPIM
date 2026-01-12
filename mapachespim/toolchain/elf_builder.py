@@ -194,6 +194,49 @@ class ELFBuilder:
         """Add a symbol to the ELF."""
         self.symbols.append(symbol)
 
+    def add_debug_sections(
+        self,
+        debug_abbrev: bytes,
+        debug_info: bytes,
+        debug_line: bytes,
+    ) -> None:
+        """
+        Add DWARF debug sections to the ELF.
+
+        Debug sections are non-loadable (no SHF_ALLOC flag), so they
+        only get section headers, not program headers.
+
+        Args:
+            debug_abbrev: .debug_abbrev section content.
+            debug_info: .debug_info section content.
+            debug_line: .debug_line section content.
+        """
+        # Debug sections: SHT_PROGBITS, no flags (not loadable), address 0
+        self.sections.append(Section(
+            name=".debug_abbrev",
+            data=debug_abbrev,
+            address=0,
+            sh_type=SHT_PROGBITS,
+            sh_flags=0,
+            alignment=1,
+        ))
+        self.sections.append(Section(
+            name=".debug_info",
+            data=debug_info,
+            address=0,
+            sh_type=SHT_PROGBITS,
+            sh_flags=0,
+            alignment=1,
+        ))
+        self.sections.append(Section(
+            name=".debug_line",
+            data=debug_line,
+            address=0,
+            sh_type=SHT_PROGBITS,
+            sh_flags=0,
+            alignment=1,
+        ))
+
     def build(self) -> bytes:
         """
         Build the complete ELF file.

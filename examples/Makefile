@@ -2,13 +2,25 @@
 #
 # Usage:
 #   make          - build all examples
+#   make debug    - build all examples with debug info (-g flag)
 #   make clean    - remove generated binaries
 #   make riscv    - build only RISC-V examples
 #   make mips     - build only MIPS examples
 #   make arm      - build only ARM64 examples
 #   make x86_64   - build only x86-64 examples
+#
+# For debug builds:
+#   make debug            - build all with debug info
+#   make DEBUG=1          - same as 'make debug'
+#   make DEBUG=1 riscv    - build RISC-V with debug info
 
 AS = mapachespim-as
+ASFLAGS =
+
+# Add -g flag for debug builds
+ifdef DEBUG
+ASFLAGS += -g
+endif
 
 # Find all assembly source files
 RISCV_SRCS   := $(wildcard riscv/*/*.s)
@@ -24,10 +36,13 @@ X86_64_BINS  := $(patsubst %.S,%,$(patsubst %.s,%,$(X86_64_SRCS)))
 
 ALL_BINS     := $(RISCV_BINS) $(MIPS_BINS) $(ARM_BINS) $(X86_64_BINS)
 
-.PHONY: all clean riscv mips arm x86_64
+.PHONY: all clean riscv mips arm x86_64 debug
 
 all: $(ALL_BINS)
 	@echo "Built $(words $(ALL_BINS)) example programs"
+
+debug: ASFLAGS += -g
+debug: all
 
 riscv: $(RISCV_BINS)
 	@echo "Built $(words $(RISCV_BINS)) RISC-V examples"
@@ -43,19 +58,19 @@ x86_64: $(X86_64_BINS)
 
 # Pattern rules for each ISA
 riscv/%: riscv/%.s
-	@$(AS) $< -o $@ && echo "  $@"
+	@$(AS) $(ASFLAGS) $< -o $@ && echo "  $@"
 
 mips/%: mips/%.s
-	@$(AS) $< -o $@ && echo "  $@"
+	@$(AS) $(ASFLAGS) $< -o $@ && echo "  $@"
 
 arm/%: arm/%.s
-	@$(AS) $< -o $@ && echo "  $@"
+	@$(AS) $(ASFLAGS) $< -o $@ && echo "  $@"
 
 x86_64/%: x86_64/%.s
-	@$(AS) $< -o $@ && echo "  $@"
+	@$(AS) $(ASFLAGS) $< -o $@ && echo "  $@"
 
 x86_64/%: x86_64/%.S
-	@$(AS) $< -o $@ && echo "  $@"
+	@$(AS) $(ASFLAGS) $< -o $@ && echo "  $@"
 
 clean:
 	@echo "Cleaning generated binaries..."

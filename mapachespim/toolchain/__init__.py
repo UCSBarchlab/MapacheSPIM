@@ -60,6 +60,8 @@ def assemble(
     source: str,
     isa: str,
     entry_symbol: str = "_start",
+    debug: bool = False,
+    source_filename: str = "",
 ) -> AssemblyResult:
     """
     Assemble source code into an ELF executable.
@@ -68,6 +70,8 @@ def assemble(
         source: Assembly source code as a string.
         isa: Target ISA - one of "riscv64", "arm64", "x86_64", "mips32".
         entry_symbol: Entry point symbol name (default: "_start").
+        debug: If True, include DWARF debug information.
+        source_filename: Source filename for debug info.
 
     Returns:
         AssemblyResult containing the ELF bytes, symbols, and any errors.
@@ -86,7 +90,12 @@ def assemble(
     """
     try:
         assembler = Assembler(isa)
-        return assembler.assemble(source, entry_symbol=entry_symbol)
+        return assembler.assemble(
+            source,
+            entry_symbol=entry_symbol,
+            debug=debug,
+            source_filename=source_filename,
+        )
     except Exception as e:
         return AssemblyResult(
             elf_bytes=b"",
@@ -100,6 +109,7 @@ def assemble_file(
     output_path: Optional[Union[str, Path]] = None,
     isa: Optional[str] = None,
     entry_symbol: str = "_start",
+    debug: bool = False,
 ) -> AssemblyResult:
     """
     Assemble a source file into an ELF executable.
@@ -110,6 +120,7 @@ def assemble_file(
                      path with .elf extension.
         isa: Target ISA. If None, looks for .isa directive in source.
         entry_symbol: Entry point symbol name (default: "_start").
+        debug: If True, include DWARF debug information.
 
     Returns:
         AssemblyResult containing the ELF bytes, symbols, and any errors.
@@ -148,8 +159,14 @@ def assemble_file(
                 errors=[_isa_not_specified_error()],
             )
 
-    # Assemble
-    result = assemble(source, isa=isa, entry_symbol=entry_symbol)
+    # Assemble with source filename for debug info
+    result = assemble(
+        source,
+        isa=isa,
+        entry_symbol=entry_symbol,
+        debug=debug,
+        source_filename=source_path.name,
+    )
 
     # Write output if successful and path provided
     if result.success and output_path is not None:

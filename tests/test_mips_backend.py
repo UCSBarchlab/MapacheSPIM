@@ -236,5 +236,57 @@ class TestMIPSISAEnum(unittest.TestCase):
         self.assertEqual(sim.get_isa_name(), "MIPS")
 
 
+class TestMIPSELFLoading(unittest.TestCase):
+    """Test MIPS ELF file loading"""
+
+    def test_mips_elf_loads_and_steps(self):
+        """Test that MIPS ELF files load and PC advances when stepping
+
+        This is a regression test for a Unicorn quirk where MIPS PC
+        doesn't advance if emu_start end_address equals pc + 4.
+        """
+        from pathlib import Path
+        from mapachespim import create_simulator
+
+        mips_elf = Path("examples/mips/guess_game/guess_game")
+        if not mips_elf.exists():
+            self.skipTest(f"MIPS test binary not found: {mips_elf}")
+
+        sim = create_simulator(str(mips_elf))
+        self.assertEqual(sim.get_isa_name(), "MIPS")
+
+        # PC must advance after stepping
+        pc_before = sim.get_pc()
+        sim.step()
+        pc_after = sim.get_pc()
+
+        self.assertNotEqual(pc_before, pc_after,
+            f"MIPS PC should advance after step: was 0x{pc_before:x}, still 0x{pc_after:x}")
+        self.assertEqual(pc_after, pc_before + 4,
+            f"MIPS PC should advance by 4 bytes: expected 0x{pc_before+4:x}, got 0x{pc_after:x}")
+
+    def test_mips_multiple_steps(self):
+        """Test stepping through multiple MIPS instructions"""
+        from pathlib import Path
+        from mapachespim import create_simulator
+
+        mips_elf = Path("examples/mips/guess_game/guess_game")
+        if not mips_elf.exists():
+            self.skipTest(f"MIPS test binary not found: {mips_elf}")
+
+        sim = create_simulator(str(mips_elf))
+        entry_pc = sim.get_pc()
+
+        # Step 5 times
+        for i in range(5):
+            pc_before = sim.get_pc()
+            result = sim.step()
+            pc_after = sim.get_pc()
+
+            # PC should advance (unless we hit a branch)
+            self.assertNotEqual(pc_before, pc_after,
+                f"Step {i+1}: PC should advance from 0x{pc_before:x}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -26,6 +26,7 @@ except Exception as e:
     keystone = None
 
 from .directives import DirectiveParser, LineType
+from .dwarf import DWARFv2Builder
 from .elf_builder import ELFBuilder, Section, Symbol, STT_FUNC, STT_NOTYPE, STB_GLOBAL, STB_LOCAL
 from .memory_map import get_layout, MemoryLayout
 
@@ -51,6 +52,12 @@ class AssemblyResult:
 
     entry_point: int = 0
     """Entry point address."""
+
+    debug_lines: List[Tuple[int, int]] = field(default_factory=list)
+    """Debug line info: list of (address, source_line_number)."""
+
+    source_filename: str = ""
+    """Source filename for debug info."""
 
     @property
     def success(self) -> bool:
@@ -181,6 +188,8 @@ class Assembler:
         self,
         source: str,
         entry_symbol: str = "_start",
+        debug: bool = False,
+        source_filename: str = "",
     ) -> AssemblyResult:
         """
         Assemble source code into an ELF executable.
@@ -188,11 +197,13 @@ class Assembler:
         Args:
             source: Assembly source code.
             entry_symbol: Entry point symbol name.
+            debug: If True, generate DWARF debug information.
+            source_filename: Source filename for debug info.
 
         Returns:
             AssemblyResult with ELF bytes and metadata.
         """
-        result = AssemblyResult(isa=self.isa)
+        result = AssemblyResult(isa=self.isa, source_filename=source_filename)
 
         # Parse source
         parser = DirectiveParser()
@@ -249,11 +260,13 @@ class Assembler:
             all_labels.update(text_labels)
 
         # Pass 2: Assemble .text section with all labels known
+        debug_lines: List[Tuple[int, int]] = []
         if text_section:
-            code, code_labels, asm_errors = self._assemble_section(
+            code, code_labels, asm_errors, section_debug_lines = self._assemble_section(
                 text_section, self._layout.text_base, all_labels
             )
             result.errors.extend(asm_errors)
+            debug_lines = section_debug_lines
 
             # Update labels with actual positions (may differ slightly for x86-64)
             for name, addr in code_labels.items():
@@ -302,6 +315,26 @@ class Assembler:
             ))
 
         result.symbols = all_labels
+        result.debug_lines = debug_lines
+
+        # Generate DWARF debug sections if requested
+        if debug and debug_lines:
+            # Calculate code range
+            text_start = self._layout.text_base
+            text_end = text_start + len(text_section.data) if text_section else text_start
+
+            # Determine address size and instruction length
+            addr_size = 8 if self._layout.is_64bit else 4
+            min_instr_len = self._config.get("instr_size") or 1
+
+            # Build DWARF sections
+            dwarf = DWARFv2Builder(addr_size=addr_size)
+            abbrev = dwarf.build_debug_abbrev()
+            info = dwarf.build_debug_info(source_filename or "source.s", text_start, text_end)
+            line = dwarf.build_debug_line(source_filename or "source.s", debug_lines, min_instr_len)
+
+            builder.add_debug_sections(abbrev, info, line)
+
         result.elf_bytes = builder.build()
 
         return result
@@ -425,18 +458,20 @@ class Assembler:
         section: "SectionData",
         base_addr: int,
         labels: Dict[str, int],
-    ) -> Tuple[bytes, Dict[str, int], List[str]]:
+    ) -> Tuple[bytes, Dict[str, int], List[str], List[Tuple[int, int]]]:
         """
         Assemble instructions in a section.
 
         Returns:
-            (assembled_bytes, label_addresses, errors)
+            (assembled_bytes, label_addresses, errors, debug_lines)
+            where debug_lines is a list of (address, source_line_number) tuples.
         """
         from .directives import SectionData
 
         code = bytearray()
         label_addrs: Dict[str, int] = {}
         errors: List[str] = []
+        debug_lines: List[Tuple[int, int]] = []
         current_addr = base_addr
 
         for line in section.lines:
@@ -447,6 +482,9 @@ class Assembler:
             # Skip non-instructions
             if line.line_type != LineType.INSTRUCTION or not line.instruction:
                 continue
+
+            # Record debug line info before assembling
+            debug_lines.append((current_addr, line.line_number))
 
             instr = line.instruction
 
@@ -485,7 +523,7 @@ class Assembler:
             except keystone.KsError as e:
                 errors.append(f"Line {line.line_number}: {e} - {line.instruction}")
 
-        return bytes(code), label_addrs, errors
+        return bytes(code), label_addrs, errors, debug_lines
 
     def _expand_riscv_pseudo(
         self,
@@ -536,7 +574,8 @@ class Assembler:
                 except (ValueError, KeyError):
                     pass  # Let Keystone try
 
-        # Handle 'la' (load address)
+        # Handle 'la' (load address) - use PC-relative auipc + addi
+        # This works correctly for all addresses in RV64, unlike lui which sign-extends
         if mnemonic == "la":
             ops = [o.strip() for o in operands.split(',')]
             if len(ops) == 2:
@@ -544,7 +583,21 @@ class Assembler:
                 symbol = ops[1].strip()
                 if symbol in labels:
                     target = labels[symbol]
-                    return self._expand_riscv_pseudo(f"li {reg}, {target}", addr, labels)
+                    # Calculate PC-relative offset
+                    # auipc is at addr, so offset = target - addr
+                    offset = target - addr
+                    # Split into upper 20 bits and lower 12 bits
+                    # Add 0x800 to round properly when lower bits are negative
+                    upper = ((offset + 0x800) >> 12) & 0xFFFFF
+                    lower = offset - (upper << 12)
+                    # Ensure lower is in signed 12-bit range
+                    if lower > 2047:
+                        lower -= 4096
+                        upper = (upper + 1) & 0xFFFFF
+                    elif lower < -2048:
+                        lower += 4096
+                        upper = (upper - 1) & 0xFFFFF
+                    return f"auipc {reg}, {upper}; addi {reg}, {reg}, {lower}"
 
         # Handle 'call' pseudo
         if mnemonic == "call":

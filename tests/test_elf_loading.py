@@ -57,6 +57,32 @@ def test_create_simulator_arm():
         sim.step()
 
 
+def test_mips_elf_detection():
+    """Test ISA detection for MIPS ELF file"""
+    mips_elf = Path("examples/mips/guess_game/guess_game")
+    assert mips_elf.exists(), f"Test file not found: {mips_elf}"
+
+    isa = detect_elf_isa(str(mips_elf))
+    assert isa == ISA.MIPS, f"Expected MIPS, got {isa.name}"
+
+
+def test_create_simulator_mips():
+    """Test create_simulator with MIPS ELF"""
+    mips_elf = "examples/mips/guess_game/guess_game"
+    sim = create_simulator(mips_elf)
+
+    # Verify simulator was created and ELF loaded
+    pc = sim.get_pc()
+    assert pc != 0, "Entry PC should not be zero"
+
+    # Verify it's a MIPS simulator
+    assert sim.get_isa_name() == "MIPS", "Should be MIPS simulator"
+
+    # Execute a few instructions to verify it works
+    for _ in range(5):
+        sim.step()
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main([__file__, "-v"]))

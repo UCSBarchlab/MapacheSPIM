@@ -31,15 +31,48 @@ class SourceInfo:
     addr_to_line: Dict[int, Tuple[str, int]]
     source_cache: Dict[str, List[str]]
     has_debug_info: bool
+    _sorted_addrs: List[int]  # Cached sorted address list for binary search
 
     def __init__(self) -> None:
         self.addr_to_line = {}  # address -> (filename, line_number)
         self.source_cache = {}  # filename -> list of source lines
         self.has_debug_info = False
+        self._sorted_addrs = []
+
+    def _build_sorted_addrs(self) -> None:
+        """Build sorted address list for efficient lookup"""
+        if not self._sorted_addrs and self.addr_to_line:
+            self._sorted_addrs = sorted(self.addr_to_line.keys())
 
     def get_location(self, addr: int) -> Optional[Tuple[str, int]]:
-        """Get source location for an address. Returns (filename, line_num) or None"""
-        return self.addr_to_line.get(addr)
+        """Get source location for an address.
+
+        Returns (filename, line_num) or None.
+
+        For addresses within multi-instruction pseudo-ops (like 'la' which expands
+        to auipc+addi), finds the nearest address <= the query address. This is
+        standard debugger behavior - showing the source line that started the
+        current instruction sequence.
+        """
+        # Try exact match first (fast path)
+        if addr in self.addr_to_line:
+            return self.addr_to_line[addr]
+
+        # Build sorted address list if needed
+        self._build_sorted_addrs()
+
+        if not self._sorted_addrs:
+            return None
+
+        # Binary search for largest address <= addr
+        import bisect
+        idx = bisect.bisect_right(self._sorted_addrs, addr) - 1
+
+        if idx >= 0:
+            nearest_addr = self._sorted_addrs[idx]
+            return self.addr_to_line[nearest_addr]
+
+        return None
 
     def get_source_lines(
         self, filename: str, start_line: int, count: int = 10
@@ -902,54 +935,70 @@ class MapacheSPIMConsole(cmd.Cmd):
         """Disassemble instructions at address
 
         Usage:
-            disasm <address> [count]
+            disasm [address|pc] [count]
 
         Disassembles instructions starting at the given address.
+        If no address is specified, defaults to the current PC.
         Default count is 10 instructions if not specified.
 
         Arguments:
-            address - Memory address in hex (0x...) or decimal
+            address - Memory address in hex (0x...) or 'pc' for current PC
             count   - Number of instructions to disassemble (optional, default=10)
 
         Aliases:
             d - Short alias for disasm
 
         Examples:
+            disasm                      # Disassemble 10 from current PC
+            disasm pc                   # Same as above
+            disasm pc 5                 # Disassemble 5 from PC
             disasm 0x80000000           # Disassemble 10 instructions
             disasm 0x80000000 5         # Disassemble 5 instructions
             d 0x80000000                # Using alias
-            pc                          # Get current PC
-            disasm 0x80000000 20        # Disassemble from entry
 
         Tips:
-            - Use 'pc' to find current program counter
+            - Use 'pc' command to see current program counter value
             - Instruction sizes: RISC-V/ARM64 = 4 bytes, x86-64 = variable
             - Use 'mem <addr>' to see raw instruction bytes
         """
-        if not arg:
-            self.print_error('Error: Please specify an address (e.g., "disasm 0x80000000").')
-            return
+        parts = arg.split() if arg else []
 
-        parts = arg.split()
-
-        # Parse address
-        try:
-            addr = int(parts[0], 0)
-        except ValueError:
-            self.print_error(f'Error: Invalid address "{parts[0]}".')
-            return
-
-        # Parse count (default 10)
-        count = 10
-        if len(parts) > 1:
-            try:
-                count = int(parts[1], 0)
-                if count <= 0:
-                    self.print_error("Error: Count must be positive.")
+        # Default to current PC if no args
+        if not parts:
+            addr = self.sim.get_pc()
+            count = 10
+        elif parts[0].lower() in ("pc", "$"):
+            # "pc" or "$" means current PC
+            addr = self.sim.get_pc()
+            count = 10
+            if len(parts) > 1:
+                try:
+                    count = int(parts[1], 0)
+                    if count <= 0:
+                        self.print_error("Error: Count must be positive.")
+                        return
+                except ValueError:
+                    self.print_error(f'Error: Invalid count "{parts[1]}".')
                     return
+        else:
+            # Parse address
+            try:
+                addr = int(parts[0], 0)
             except ValueError:
-                self.print_error(f'Error: Invalid count "{parts[1]}".')
+                self.print_error(f'Error: Invalid address "{parts[0]}".')
                 return
+
+            # Parse count (default 10)
+            count = 10
+            if len(parts) > 1:
+                try:
+                    count = int(parts[1], 0)
+                    if count <= 0:
+                        self.print_error("Error: Count must be positive.")
+                        return
+                except ValueError:
+                    self.print_error(f'Error: Invalid count "{parts[1]}".')
+                    return
 
         # Disassemble instructions
         print(file=self.stdout)

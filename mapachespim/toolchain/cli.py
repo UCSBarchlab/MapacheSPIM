@@ -6,7 +6,8 @@ Command-line interface for assembling source files to ELF executables.
 
 Usage:
     mapachespim-as program.s -o program.elf --isa riscv64
-    mapachespim-as program.s  # Auto-detect ISA, output to program.elf
+    mapachespim-as program.s -g  # With debug info for source-level debugging
+    mapachespim-as program.s     # Auto-detect ISA, output to program.elf
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ def main(args: list[str] | None = None) -> int:
         epilog="""
 Examples:
     mapachespim-as program.s -o program.elf --isa riscv64
-    mapachespim-as hello.s --isa arm64
+    mapachespim-as hello.s --isa arm64 -g  # With debug info
     mapachespim-as test.s  # Auto-detect ISA from source
 
 Supported ISAs:
@@ -62,6 +63,12 @@ Supported ISAs:
         type=str,
         default="_start",
         help="Entry point symbol (default: _start)",
+    )
+
+    parser.add_argument(
+        "-g", "--debug",
+        action="store_true",
+        help="Generate DWARF debug information",
     )
 
     parser.add_argument(
@@ -105,6 +112,7 @@ Supported ISAs:
         output_path=output_path,
         isa=parsed.isa,
         entry_symbol=parsed.entry,
+        debug=parsed.debug,
     )
 
     # Report warnings
@@ -122,7 +130,8 @@ Supported ISAs:
         isa_name = result.isa.upper() if result.isa else "Unknown"
         size = len(result.elf_bytes)
         symbols = len(result.symbols)
-        print(f"Assembled: {output_path} ({isa_name}, {size} bytes, {symbols} symbols)")
+        debug_str = ", debug" if parsed.debug else ""
+        print(f"Assembled: {output_path} ({isa_name}, {size} bytes, {symbols} symbols{debug_str})")
         print(f"Entry point: 0x{result.entry_point:08x}")
 
     return 0

@@ -428,13 +428,14 @@ class TestConsoleCommands(unittest.TestCase):
 
     def test_list_without_debug_info(self):
         """Test 'list' command with program compiled without -g"""
-        self.console.onecmd(f'load {self.FIBONACCI_PATH}')
+        # Use test_simple which has no debug info
+        self.console.onecmd(f'load {self.SIMPLE_PATH}')
 
         # Should display helpful message about missing debug info
         self.console.onecmd('list')
 
         # Verify console doesn't crash and file is still loaded
-        self.assertEqual(self.console.loaded_file, self.FIBONACCI_PATH)
+        self.assertEqual(self.console.loaded_file, self.SIMPLE_PATH)
         self.assertFalse(self.console.source_info.has_debug_info)
 
     def test_list_with_debug_info(self):

@@ -646,6 +646,8 @@ class UnicornSimulator:
             detected_isa = ISA.ARM
         elif elf_info.isa == ELF_ISA.X86_64:
             detected_isa = ISA.X86_64
+        elif elf_info.isa == ELF_ISA.MIPS:
+            detected_isa = ISA.MIPS
         else:
             raise RuntimeError(f"Unknown ISA in ELF file: {elf_path}")
 
@@ -691,10 +693,12 @@ class UnicornSimulator:
 
         try:
             # Execute one instruction
-            # x86 instructions can be up to 15 bytes, RISC-V/ARM are 4 bytes
-            max_instr_size = 15 if self._isa == ISA.X86_64 else 4
+            # Use a large end address - the count=1 ensures we stop after one instruction.
+            # Note: MIPS has a Unicorn quirk where pc+4 as end address doesn't advance PC.
+            # Using a larger offset (0x10000) works for all ISAs.
+            end_addr = pc + 0x10000
             # The hook will stop execution if a syscall is detected
-            self._uc.emu_start(pc, pc + max_instr_size, count=1)
+            self._uc.emu_start(pc, end_addr, count=1)
         except UcError as e:
             self._last_error = f"Execution error at PC=0x{pc:x}: {e}"
             return StepResult.ERROR
