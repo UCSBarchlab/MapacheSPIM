@@ -371,16 +371,15 @@ class TestInstructionSizeEstimation:
         errors = verify_label_accuracy(source, "x86_64")
         assert not errors, f"Label mismatches:\n" + "\n".join(errors)
 
-    @pytest.mark.skip(reason="Cross-section RIP-relative addressing not yet supported")
     def test_x86_rip_relative_lea(self):
-        """x86-64 LEA with RIP-relative addressing (the known problem case)."""
+        """x86-64 LEA with RIP-relative addressing (cross-section reference)."""
         source = """
         .data
         msg: .asciz "Hello"
 
         .text
         start:
-            lea rax, msg(%rip)
+            leaq msg(%rip), %rax
         after_lea:
             nop
         """
@@ -940,7 +939,6 @@ class TestRegressions:
         errors = verify_label_accuracy(source, "arm64")
         assert not errors, f"ARM64 multiple adr failed:\n" + "\n".join(errors)
 
-    @pytest.mark.skip(reason="Cross-section RIP-relative addressing not yet supported")
     def test_x86_rip_relative_before_call(self):
         """
         x86-64: RIP-relative LEA before call instruction.
@@ -953,7 +951,7 @@ class TestRegressions:
 
         .text
         _start:
-            lea rax, msg(%rip)
+            leaq msg(%rip), %rax
             call helper
             ret
         helper:

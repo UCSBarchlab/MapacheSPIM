@@ -593,5 +593,334 @@ class TestAllProgramsComplete(unittest.TestCase):
                     f"{isa_name} {elf_path}: Should complete in <{max_steps} steps, took {steps}")
 
 
+class TestGuessGameAllISAs(unittest.TestCase):
+    """Test guess_game interactive program on all ISAs.
+
+    The guess_game is an interactive number guessing game that:
+    1. Prints welcome messages
+    2. Reads user input (syscall 5 = read_int)
+    3. Compares guess to secret number (42)
+    4. Exits when correct
+
+    Since it's interactive, we test:
+    - Program loads and starts correctly
+    - Required symbols exist
+    - Program reaches input syscall
+    - With correct input injected, completes successfully
+    """
+
+    GUESS_GAME_EXAMPLES = [
+        ("examples/riscv/guess_game/guess_game", "RISCV"),
+        ("examples/arm/guess_game/guess_game", "ARM"),
+        ("examples/x86_64/guess_game/guess_game", "X86_64"),
+        ("examples/mips/guess_game/guess_game", "MIPS"),
+    ]
+
+    def _get_syscall_regs(self, isa_name: str):
+        """Get syscall register mappings for ISA."""
+        if isa_name == "X86_64":
+            return (0, 7, 0)  # rax=syscall#, rdi=arg0, return in rax
+        elif isa_name == "MIPS":
+            return (2, 4, 2)  # $v0=syscall#, $a0=arg0, return in $v0
+        elif isa_name == "ARM":
+            return (8, 0, 0)  # x8=syscall#, x0=arg0, return in x0
+        else:  # RISCV
+            return (17, 10, 10)  # a7=syscall#, a0=arg0, return in a0
+
+    def _run_with_input(self, sim, input_value: int, isa_name: str, max_steps: int = 5000):
+        """Run program, injecting input when read_int syscall is hit.
+
+        Note: We handle syscalls manually instead of using check_termination()
+        because check_termination() calls _handle_syscall() which uses input().
+        """
+        syscall_reg, _, result_reg = self._get_syscall_regs(isa_name)
+
+        for step in range(max_steps):
+            result = sim.step()
+
+            if result == StepResult.SYSCALL:
+                syscall_num = sim.get_reg(syscall_reg)
+                if syscall_num == 5:  # read_int - inject our value
+                    # For ARM64, result_reg is 0 (x0) which is writable
+                    if isa_name == "ARM":
+                        sim._uc.reg_write(sim._config.get_gpr_reg(result_reg), input_value)
+                    else:
+                        sim.set_reg(result_reg, input_value)
+                elif syscall_num == 10 or syscall_num == 93:  # exit
+                    return step + 1, "syscall_exit"
+                # For other syscalls (like print_string), let them pass
+                # They don't need handling since we're not checking output
+
+            elif result == StepResult.HALT:
+                return step + 1, "halt"
+            elif result == StepResult.ERROR:
+                return step + 1, "error"
+
+        return max_steps, "timeout"
+
+    def test_riscv_guess_game_loads(self):
+        """RISC-V guess_game loads and has required symbols"""
+        elf = Path("examples/riscv/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        symbols = sim.get_symbols()
+
+        # Verify required symbols exist
+        self.assertIn("secret", symbols, "Should have 'secret' symbol")
+        self.assertIn("welcome", symbols, "Should have 'welcome' symbol")
+        self.assertIn("_start", symbols, "Should have '_start' symbol")
+
+    def test_arm_guess_game_loads(self):
+        """ARM64 guess_game loads and has required symbols"""
+        elf = Path("examples/arm/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        symbols = sim.get_symbols()
+
+        self.assertIn("secret", symbols, "Should have 'secret' symbol")
+        self.assertIn("welcome", symbols, "Should have 'welcome' symbol")
+
+    def test_x86_guess_game_loads(self):
+        """x86-64 guess_game loads and has required symbols"""
+        elf = Path("examples/x86_64/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        symbols = sim.get_symbols()
+
+        self.assertIn("secret", symbols, "Should have 'secret' symbol")
+        self.assertIn("welcome", symbols, "Should have 'welcome' symbol")
+
+    def test_mips_guess_game_loads(self):
+        """MIPS guess_game loads and has required symbols"""
+        elf = Path("examples/mips/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        symbols = sim.get_symbols()
+
+        self.assertIn("secret", symbols, "Should have 'secret' symbol")
+        self.assertIn("welcome", symbols, "Should have 'welcome' symbol")
+
+    def test_riscv_guess_game_correct_guess(self):
+        """RISC-V guess_game completes when correct answer (42) is given"""
+        elf = Path("examples/riscv/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        steps, reason = self._run_with_input(sim, 42, "RISCV")
+
+        self.assertIn(reason, ["exit", "syscall_exit"],
+            f"RISC-V guess_game should exit cleanly with correct answer, got {reason}")
+        self.assertLess(steps, 5000,
+            f"RISC-V guess_game should complete quickly with correct answer")
+
+    def test_arm_guess_game_correct_guess(self):
+        """ARM64 guess_game completes when correct answer (42) is given"""
+        elf = Path("examples/arm/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        steps, reason = self._run_with_input(sim, 42, "ARM")
+
+        self.assertIn(reason, ["exit", "syscall_exit"],
+            f"ARM64 guess_game should exit cleanly with correct answer, got {reason}")
+        self.assertLess(steps, 5000,
+            f"ARM64 guess_game should complete quickly with correct answer")
+
+    def test_x86_guess_game_correct_guess(self):
+        """x86-64 guess_game completes when correct answer (42) is given"""
+        elf = Path("examples/x86_64/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        steps, reason = self._run_with_input(sim, 42, "X86_64")
+
+        self.assertIn(reason, ["exit", "syscall_exit"],
+            f"x86-64 guess_game should exit cleanly with correct answer, got {reason}")
+        self.assertLess(steps, 5000,
+            f"x86-64 guess_game should complete quickly with correct answer")
+
+    def test_mips_guess_game_correct_guess(self):
+        """MIPS guess_game completes when correct answer (42) is given"""
+        elf = Path("examples/mips/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        steps, reason = self._run_with_input(sim, 42, "MIPS")
+
+        self.assertIn(reason, ["exit", "syscall_exit"],
+            f"MIPS guess_game should exit cleanly with correct answer, got {reason}")
+        self.assertLess(steps, 5000,
+            f"MIPS guess_game should complete quickly with correct answer")
+
+    def test_riscv_guess_game_wrong_then_right(self):
+        """RISC-V guess_game handles wrong guess then correct"""
+        elf = Path("examples/riscv/guess_game/guess_game")
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+        syscall_reg, _, result_reg = self._get_syscall_regs("RISCV")
+
+        guesses = [10, 42]  # Wrong, then correct
+        guess_idx = 0
+
+        for step in range(10000):
+            result = sim.step()
+
+            if result == StepResult.SYSCALL:
+                syscall_num = sim.get_reg(syscall_reg)
+                if syscall_num == 5:  # read_int
+                    if guess_idx < len(guesses):
+                        sim.set_reg(result_reg, guesses[guess_idx])
+                        guess_idx += 1
+                    else:
+                        sim.set_reg(result_reg, 42)  # Fallback
+                elif syscall_num == 10 or syscall_num == 93:  # exit
+                    break
+                # Other syscalls (print_string, etc.) - continue execution
+
+            elif result == StepResult.HALT:
+                break
+            elif result == StepResult.ERROR:
+                self.fail("RISC-V guess_game encountered an error")
+        else:
+            self.fail("RISC-V guess_game should complete with two guesses")
+
+        self.assertEqual(guess_idx, 2, "Should have used exactly 2 guesses")
+
+
+class TestComprehensiveISACoverage(unittest.TestCase):
+    """Comprehensive test coverage for all ISAs and example programs.
+
+    This test class ensures every ISA/program combination works correctly.
+    """
+
+    ALL_ISAS = ["riscv", "arm", "x86_64", "mips"]
+
+    NON_INTERACTIVE_PROGRAMS = [
+        "hello_asm",
+        "fibonacci",
+        "array_stats",
+        "matrix_multiply",
+    ]
+
+    def _get_program_path(self, isa: str, program: str) -> Path:
+        """Get path to program binary, handling naming variations."""
+        if program == "matrix_multiply":
+            return Path(f"examples/{isa}/{program}/matrix_mult")
+        return Path(f"examples/{isa}/{program}/{program}")
+
+    def test_all_isas_load_all_programs(self):
+        """Every ISA can load every non-interactive example program"""
+        for isa in self.ALL_ISAS:
+            for program in self.NON_INTERACTIVE_PROGRAMS:
+                with self.subTest(isa=isa, program=program):
+                    path = self._get_program_path(isa, program)
+                    if not path.exists():
+                        self.skipTest(f"Not found: {path}")
+
+                    sim = create_simulator(str(path))
+                    self.assertIsNotNone(sim, f"{isa}/{program} should load")
+
+                    # Verify basic execution
+                    pc_before = sim.get_pc()
+                    sim.step()
+                    pc_after = sim.get_pc()
+
+                    self.assertNotEqual(pc_before, pc_after,
+                        f"{isa}/{program}: PC should advance after step")
+
+    def test_all_isas_have_symbols(self):
+        """Every program has expected symbols"""
+        expected_symbols = {
+            "hello_asm": ["_start"],
+            "fibonacci": ["_start", "fibonacci"],
+            "array_stats": ["_start", "array"],
+            "matrix_multiply": ["_start", "matrix_a", "matrix_b", "matrix_c"],
+        }
+
+        for isa in self.ALL_ISAS:
+            for program, symbols in expected_symbols.items():
+                with self.subTest(isa=isa, program=program):
+                    path = self._get_program_path(isa, program)
+                    if not path.exists():
+                        self.skipTest(f"Not found: {path}")
+
+                    sim = create_simulator(str(path))
+                    actual_symbols = sim.get_symbols()
+
+                    for sym in symbols:
+                        self.assertIn(sym, actual_symbols,
+                            f"{isa}/{program} should have '{sym}' symbol")
+
+    def test_all_isas_complete_programs(self):
+        """Every non-interactive program completes within step limits"""
+        step_limits = {
+            "hello_asm": 100,
+            "fibonacci": 1000,
+            "array_stats": 5000,
+            "matrix_multiply": 5000,
+        }
+
+        for isa in self.ALL_ISAS:
+            for program, max_steps in step_limits.items():
+                with self.subTest(isa=isa, program=program):
+                    path = self._get_program_path(isa, program)
+                    if not path.exists():
+                        self.skipTest(f"Not found: {path}")
+
+                    sim = create_simulator(str(path))
+                    steps = sim.run(max_steps=max_steps)
+
+                    self.assertLess(steps, max_steps,
+                        f"{isa}/{program} should complete in <{max_steps} steps")
+
+    def test_all_isas_disassembly_works(self):
+        """Disassembly works for all ISAs"""
+        for isa in self.ALL_ISAS:
+            with self.subTest(isa=isa):
+                path = self._get_program_path(isa, "hello_asm")
+                if not path.exists():
+                    self.skipTest(f"Not found: {path}")
+
+                sim = create_simulator(str(path))
+                pc = sim.get_pc()
+                disasm = sim.disasm(pc)
+
+                self.assertIsInstance(disasm, str, f"{isa} disasm should return string")
+                self.assertGreater(len(disasm), 0, f"{isa} disasm should not be empty")
+                self.assertNotIn("invalid", disasm.lower(),
+                    f"{isa} disasm should produce valid output")
+
+    def test_all_isas_memory_access(self):
+        """Memory read/write works for all ISAs"""
+        for isa in self.ALL_ISAS:
+            with self.subTest(isa=isa):
+                path = self._get_program_path(isa, "array_stats")
+                if not path.exists():
+                    self.skipTest(f"Not found: {path}")
+
+                sim = create_simulator(str(path))
+                symbols = sim.get_symbols()
+
+                if "array" in symbols:
+                    addr = symbols["array"]
+                    # Read some bytes
+                    data = sim.read_mem(addr, 4)
+                    self.assertEqual(len(data), 4, f"{isa} should read 4 bytes")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
