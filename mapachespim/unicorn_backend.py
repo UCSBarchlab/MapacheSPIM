@@ -614,6 +614,20 @@ class UnicornSimulator:
 
     def _setup_stack(self) -> None:
         """Map and initialize stack memory"""
+        # MIPS requires stack in user segment (< 0x80000000)
+        # Addresses >= 0x80000000 are kernel-only in MIPS
+        if self._isa == ISA.MIPS:
+            mips_stack_top = 0x80000000  # Just below kernel space
+            mips_stack_size = 0x200000   # 2MB
+            mips_stack_addr = mips_stack_top - mips_stack_size
+            try:
+                self._uc.mem_map(mips_stack_addr, mips_stack_size, UC_PROT_READ | UC_PROT_WRITE)
+            except UcError:
+                pass  # Already mapped in _map_default_memory
+            sp_reg = self._config.get_sp_reg()
+            self._uc.reg_write(sp_reg, mips_stack_top - 8)
+            return
+
         try:
             self._uc.mem_map(STACK_ADDR, STACK_SIZE, UC_PROT_READ | UC_PROT_WRITE)
         except UcError as e:

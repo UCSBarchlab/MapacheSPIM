@@ -97,6 +97,9 @@ class DirectiveParser:
     # Valid ISA values for .isa directive
     VALID_ISAS = {"riscv64", "arm64", "x86_64", "mips32"}
 
+    # Big-endian ISAs (default is little-endian)
+    BIG_ENDIAN_ISAS = {"mips32"}
+
     def __init__(self) -> None:
         self.sections: Dict[str, SectionData] = {}
         self.current_section: str = ".text"
@@ -110,6 +113,12 @@ class DirectiveParser:
         # Initialize default sections
         for name in [".text", ".data", ".rodata", ".bss"]:
             self.sections[name] = SectionData(name=name)
+
+    def _get_endianness(self) -> str:
+        """Return byte order for data directives based on ISA."""
+        if self.isa in self.BIG_ENDIAN_ISAS:
+            return 'big'
+        return 'little'
 
     def parse(self, source: str) -> Dict[str, SectionData]:
         """
@@ -291,10 +300,11 @@ class DirectiveParser:
             return
 
         if directive in ("half", "short", "2byte"):
+            endian = self._get_endianness()
             for arg in args:
                 try:
                     value = self._evaluate_expr(arg)
-                    section.data.extend((value & 0xFFFF).to_bytes(2, 'little'))
+                    section.data.extend((value & 0xFFFF).to_bytes(2, endian))
                     section.current_offset += 2
                 except Exception:
                     section.data.extend(b'\x00\x00')
@@ -302,10 +312,11 @@ class DirectiveParser:
             return
 
         if directive in ("word", "long", "4byte"):
+            endian = self._get_endianness()
             for arg in args:
                 try:
                     value = self._evaluate_expr(arg)
-                    section.data.extend((value & 0xFFFFFFFF).to_bytes(4, 'little'))
+                    section.data.extend((value & 0xFFFFFFFF).to_bytes(4, endian))
                     section.current_offset += 4
                 except Exception:
                     section.data.extend(b'\x00\x00\x00\x00')
@@ -313,10 +324,11 @@ class DirectiveParser:
             return
 
         if directive in ("dword", "quad", "8byte"):
+            endian = self._get_endianness()
             for arg in args:
                 try:
                     value = self._evaluate_expr(arg)
-                    section.data.extend(value.to_bytes(8, 'little'))
+                    section.data.extend(value.to_bytes(8, endian))
                     section.current_offset += 8
                 except Exception:
                     section.data.extend(b'\x00' * 8)

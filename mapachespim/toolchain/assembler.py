@@ -252,10 +252,11 @@ class Assembler:
                 all_labels[label_name] = base + offset
 
         # Calculate .text section label positions
+        # Pass all_labels (which now contains data section labels) for pseudo-instruction sizing
         text_section = sections.get(".text")
         if text_section:
             text_labels = self._calculate_text_labels(
-                text_section, self._layout.text_base
+                text_section, self._layout.text_base, all_labels
             )
             all_labels.update(text_labels)
 
@@ -343,24 +344,36 @@ class Assembler:
         self,
         section: "SectionData",
         base_addr: int,
+        data_labels: Optional[Dict[str, int]] = None,
     ) -> Dict[str, int]:
         """
-        Calculate label addresses in .text section without assembling.
+        Calculate label addresses in .text section.
 
         Pass 1 of two-pass assembly: determine where each label will be
         based on instruction count.
 
         For fixed-size ISAs (RISC-V, ARM64, MIPS): 4 bytes per instruction.
-        For variable-size ISAs (x86-64): estimate based on instruction type.
+        For variable-size ISAs (x86-64): use iterative assembly until stable.
+
+        Args:
+            section: The text section to process.
+            base_addr: Base address for the section.
+            data_labels: Optional dict of data section labels for pseudo-instruction sizing.
 
         Returns:
             Dictionary of label name -> address.
         """
         from .directives import LineType
 
+        instr_size = self._config.get("instr_size", 4)
+
+        # Variable-length ISA (x86-64) needs iterative approach
+        if instr_size is None:
+            return self._calculate_x86_text_labels_iterative(section, base_addr)
+
+        # Fixed-size ISA: single pass with size estimation
         labels: Dict[str, int] = {}
         current_addr = base_addr
-        instr_size = self._config.get("instr_size", 4)
 
         for line in section.lines:
             # Record label position
@@ -371,24 +384,128 @@ class Assembler:
             if line.line_type != LineType.INSTRUCTION or not line.instruction:
                 continue
 
-            # Calculate instruction size
-            if instr_size is not None:
-                # Fixed-size ISA (RISC-V, ARM64, MIPS)
-                # Check for pseudo-instructions that expand to multiple instructions
-                size = self._estimate_fixed_instr_size(line.instruction, instr_size)
-                current_addr += size
-            else:
-                # Variable-size ISA (x86-64)
-                # Estimate based on instruction type
-                current_addr += self._estimate_x86_instr_size(line.instruction)
+            # Check for pseudo-instructions that expand to multiple instructions
+            size = self._estimate_fixed_instr_size(line.instruction, instr_size, data_labels)
+            current_addr += size
 
         return labels
 
-    def _estimate_fixed_instr_size(self, instr: str, base_size: int) -> int:
+    def _calculate_x86_text_labels_iterative(
+        self,
+        section: "SectionData",
+        base_addr: int,
+        max_iterations: int = 5,
+    ) -> Dict[str, int]:
+        """
+        Calculate x86-64 label addresses using iterative refinement.
+
+        For variable-length instruction sets, instruction sizes can depend on
+        label addresses (e.g., short vs near jumps). This method iterates
+        until label addresses stabilize.
+
+        Args:
+            section: The text section to process.
+            base_addr: Base address for the section.
+            max_iterations: Maximum iterations before giving up.
+
+        Returns:
+            Dictionary of label name -> address.
+        """
+        from .directives import LineType
+
+        labels: Dict[str, int] = {}
+
+        for iteration in range(max_iterations):
+            new_labels: Dict[str, int] = {}
+            current_addr = base_addr
+
+            for line in section.lines:
+                # Record label at current position
+                if line.label:
+                    new_labels[line.label] = current_addr
+
+                # Skip non-instructions
+                if line.line_type != LineType.INSTRUCTION or not line.instruction:
+                    continue
+
+                # Get actual instruction size by assembling
+                size = self._get_x86_actual_size(line.instruction, current_addr, labels)
+                current_addr += size
+
+            # Check for convergence
+            if new_labels == labels:
+                return new_labels
+
+            labels = new_labels
+
+        # Return best effort if max iterations reached
+        return labels
+
+    def _get_x86_actual_size(
+        self,
+        instr: str,
+        addr: int,
+        labels: Dict[str, int],
+    ) -> int:
+        """
+        Get actual x86-64 instruction size by assembling it.
+
+        Args:
+            instr: Instruction text (AT&T or Intel syntax).
+            addr: Current address for PC-relative calculations.
+            labels: Currently known label addresses.
+
+        Returns:
+            Instruction size in bytes.
+        """
+        # Convert to Intel syntax, resolving known labels
+        converted = self._convert_x86_att_to_intel(instr, labels)
+
+        # Try to assemble
+        try:
+            encoding, count = self._ks.asm(converted, addr)
+            if encoding is not None and count > 0:
+                return len(encoding)
+        except:
+            pass
+
+        # Assembly failed - likely unresolved forward reference
+        # Try with a placeholder to get encoding size
+        parts = converted.split(None, 1)
+        mnemonic = parts[0].lower() if parts else ""
+
+        # For branch/call instructions, use placeholder offset
+        if mnemonic in ('jmp', 'call', 'je', 'jne', 'jz', 'jnz', 'jl', 'jle',
+                        'jg', 'jge', 'ja', 'jae', 'jb', 'jbe', 'jo', 'jno',
+                        'js', 'jns', 'jc', 'jnc', 'loop', 'loope', 'loopne'):
+            # Use a medium-range placeholder to get near (not short) encoding
+            placeholder_addr = addr + 0x100
+            placeholder_instr = f"{mnemonic} {placeholder_addr}"
+            try:
+                encoding, count = self._ks.asm(placeholder_instr, addr)
+                if encoding is not None and count > 0:
+                    return len(encoding)
+            except:
+                pass
+
+        # Final fallback: use existing estimation
+        return self._estimate_x86_instr_size(instr)
+
+    def _estimate_fixed_instr_size(
+        self,
+        instr: str,
+        base_size: int,
+        data_labels: Optional[Dict[str, int]] = None,
+    ) -> int:
         """
         Estimate instruction size for fixed-size ISAs.
 
         Accounts for pseudo-instructions that expand to multiple instructions.
+
+        Args:
+            instr: The instruction text.
+            base_size: Base instruction size (typically 4 bytes).
+            data_labels: Optional dict of data section labels for address lookups.
         """
         parts = instr.split(None, 1)
         if not parts:
@@ -396,9 +513,45 @@ class Assembler:
 
         mnemonic = parts[0].lower()
 
-        # MIPS pseudo-branches expand to 2 instructions (slt + branch)
+        # MIPS pseudo-instructions and branch delay slots
         if self.isa in ("mips32", "mips"):
+            # Pseudo-branches expand to 3 instructions: slt + bne + nop (delay slot)
             if mnemonic in ("blt", "bge", "ble", "bgt"):
+                return base_size * 3
+            # Regular branches/jumps include delay slot nop: 2 instructions
+            if mnemonic in ("j", "jal", "jr", "jalr", "beq", "bne", "beqz", "bnez",
+                            "bgtz", "bgez", "bltz", "blez", "bgezal", "bltzal"):
+                return base_size * 2  # Branch + delay slot nop
+            # li with large immediate expands to lui + ori
+            if mnemonic == "li":
+                operands = parts[1] if len(parts) > 1 else ""
+                ops = [o.strip() for o in operands.split(',')]
+                if len(ops) == 2:
+                    try:
+                        imm_str = ops[1].strip()
+                        if imm_str.startswith('0x'):
+                            imm = int(imm_str, 16)
+                        else:
+                            imm = int(imm_str)
+                        # MIPS immediate is 16-bit signed
+                        if not (-32768 <= imm <= 65535):
+                            return base_size * 2  # lui + ori
+                    except ValueError:
+                        pass
+            # la (load address) - size depends on target address lower 16 bits
+            if mnemonic == "la":
+                operands = parts[1] if len(parts) > 1 else ""
+                ops = [o.strip() for o in operands.split(',')]
+                if len(ops) == 2 and data_labels:
+                    symbol = ops[1].strip()
+                    if symbol in data_labels:
+                        target = data_labels[symbol]
+                        # If lower 16 bits are 0, only lui is needed (4 bytes)
+                        # Otherwise lui + ori (8 bytes)
+                        if (target & 0xFFFF) == 0:
+                            return base_size  # lui only
+                        return base_size * 2  # lui + ori
+                # Unknown symbol - conservatively estimate as lui + ori
                 return base_size * 2
 
         # RISC-V pseudo-instructions that might expand
@@ -421,9 +574,26 @@ class Assembler:
             # la always expands to lui + addi
             if mnemonic == "la":
                 return base_size * 2
-            # call may expand to auipc + jalr for far calls
+            # call is typically a single jal instruction (4 bytes)
+            # Keystone handles near calls as jal, not auipc+jalr
             if mnemonic == "call":
-                return base_size * 2  # Conservative estimate
+                return base_size  # Single jal instruction
+
+        # ARM64 pseudo-instructions that expand to multiple instructions
+        if self.isa in ("arm64", "aarch64"):
+            operands = parts[1] if len(parts) > 1 else ""
+            # adr with symbol -> movz + movk sequence (typically 2 instrs for 32-bit addr)
+            if mnemonic == "adr":
+                # Check if it's using a symbol (not a numeric offset)
+                ops = [o.strip() for o in operands.split(',')]
+                if len(ops) == 2:
+                    symbol = ops[1].strip()
+                    # If it's not a number, it's a symbol that needs expansion
+                    if not symbol.startswith('#') and not symbol.lstrip('-').isdigit():
+                        return base_size * 2  # movz + movk
+            # ldr x0, =symbol -> expands to adr -> movz + movk
+            if mnemonic == "ldr" and "=" in operands:
+                return base_size * 2
 
         return base_size
 
@@ -439,18 +609,70 @@ class Assembler:
             return 1
 
         mnemonic = parts[0].lower().rstrip('bwlq')
+        operands = parts[1] if len(parts) > 1 else ""
 
-        # Single-byte instructions
-        if mnemonic in ('nop', 'ret', 'syscall', 'hlt', 'cld', 'std'):
-            return 1 if mnemonic == 'nop' else 2
+        # Single/two-byte instructions
+        if mnemonic == 'nop':
+            return 1
+        if mnemonic == 'ret':
+            return 1
+        if mnemonic in ('syscall', 'hlt', 'cld', 'std', 'cdqe', 'cqo'):
+            return 2
 
-        # Near jumps/calls with label: typically 5 bytes (1 opcode + 4 offset)
-        if mnemonic in ('jmp', 'call', 'je', 'jne', 'jz', 'jnz', 'jl', 'jle',
-                        'jg', 'jge', 'ja', 'jae', 'jb', 'jbe', 'jo', 'jno',
-                        'js', 'jns', 'jc', 'jnc'):
+        # Near jumps/calls with label: 5 bytes (1 opcode + 4 offset)
+        # But conditional jumps can be 2 bytes for short jumps, assume 6 for safety
+        if mnemonic in ('jmp', 'call'):
             return 5
+        if mnemonic in ('je', 'jne', 'jz', 'jnz', 'jl', 'jle', 'jg', 'jge',
+                        'ja', 'jae', 'jb', 'jbe', 'jo', 'jno', 'js', 'jns',
+                        'jc', 'jnc', 'loop', 'loope', 'loopne'):
+            return 6  # 0F XX + 4-byte offset
 
-        # Most other instructions: 3-7 bytes, use 5 as conservative estimate
+        # RIP-relative addressing: 7 bytes
+        # Format: symbol(%rip) or [rip + symbol]
+        if '%rip' in operands or 'rip' in operands.lower():
+            # REX.W (1) + opcode (1-2) + ModR/M (1) + disp32 (4) = 7-8 bytes
+            return 7
+
+        # LEA with memory operand
+        if mnemonic == 'lea':
+            if '%rip' in operands or 'rip' in operands.lower():
+                return 7
+            return 4  # Base case
+
+        # MOV with 64-bit immediate
+        if mnemonic == 'mov':
+            # Check for 64-bit register destination with immediate
+            if operands.startswith('$') or operands.startswith('%'):
+                # AT&T: movq $imm, %reg or Intel mov reg, imm
+                if any(r in operands for r in ['%rax', '%rbx', '%rcx', '%rdx',
+                                                '%rsi', '%rdi', '%rbp', '%rsp',
+                                                '%r8', '%r9', '%r10', '%r11',
+                                                '%r12', '%r13', '%r14', '%r15',
+                                                'rax', 'rbx', 'rcx', 'rdx']):
+                    # Could be 10 bytes for movabs
+                    if '$' in operands:
+                        return 10
+                    return 7
+            # Simple reg-reg or reg-mem: 2-4 bytes
+            return 3
+
+        # TEST, CMP with register: 2-3 bytes
+        if mnemonic in ('test', 'cmp'):
+            if '(' not in operands and '[' not in operands:
+                return 3
+
+        # ADD, SUB, XOR, AND, OR with immediate or register: 3-7 bytes
+        if mnemonic in ('add', 'sub', 'xor', 'and', 'or'):
+            if '$' in operands or any(c.isdigit() for c in operands[:5]):
+                return 7  # Could have 32-bit immediate
+            return 3  # Register-register
+
+        # Push/pop: 1-2 bytes
+        if mnemonic in ('push', 'pop'):
+            return 2
+
+        # Default for unknown instructions
         return 5
 
     def _assemble_section(
@@ -762,20 +984,19 @@ class Assembler:
                     target = labels[symbol]
                     return self._expand_mips_pseudo(f"li {reg}, {target}", addr, labels)
 
-        # Handle 'j' (unconditional jump) - MIPS uses absolute address
+        # Handle 'j' (unconditional jump) - Keystone expects byte address
         if mnemonic == "j":
             symbol = operands.strip()
             if symbol in labels:
                 target = labels[symbol]
-                # MIPS j uses 26-bit absolute address (shifted left 2)
-                return f"j {target >> 2}"
+                return f"j {target}"
 
-        # Handle 'jal' (jump and link)
+        # Handle 'jal' (jump and link) - Keystone expects byte address
         if mnemonic == "jal":
             symbol = operands.strip()
             if symbol in labels:
                 target = labels[symbol]
-                return f"jal {target >> 2}"
+                return f"jal {target}"
 
         # Handle branch instructions with symbols
         mips_branches = ["beq", "bne", "blez", "bgtz", "bltz", "bgez"]
@@ -786,8 +1007,8 @@ class Assembler:
                 rs, rt, symbol = ops[0], ops[1], ops[2].strip()
                 if symbol in labels:
                     target = labels[symbol]
-                    # Keystone expects byte offset from current instruction
-                    offset = target - addr
+                    # Keystone expects offset from text_base, not from current instruction
+                    offset = target - self._layout.text_base
                     # Convert $zero to $0 for Keystone
                     rs = "$0" if rs == "$zero" else rs
                     rt = "$0" if rt == "$zero" else rt
@@ -797,7 +1018,8 @@ class Assembler:
                 rs, symbol = ops[0], ops[1].strip()
                 if symbol in labels:
                     target = labels[symbol]
-                    offset = target - addr
+                    # Keystone expects offset from text_base, not from current instruction
+                    offset = target - self._layout.text_base
                     rs = "$0" if rs == "$zero" else rs
                     return f"{mnemonic} {rs}, {offset}"
 
@@ -830,8 +1052,8 @@ class Assembler:
                     else:
                         slt_instr = f"{slt_op} $1, {rs}, {rt}"
 
-                    # Branch offset is from the branch instruction (addr + 4)
-                    offset = target - (addr + 4)
+                    # Keystone expects offset from text_base, not from current instruction
+                    offset = target - self._layout.text_base
                     branch_instr = f"{branch_op} $1, $0, {offset}"
 
                     return f"{slt_instr}; {branch_instr}"
@@ -905,28 +1127,26 @@ class Assembler:
                     return self._expand_arm64_pseudo(f"adr {reg}, {symbol}", addr, labels)
 
         # Handle 'b' (unconditional branch) with symbol
+        # Note: Keystone expects absolute target address for ARM64 branches
         if mnemonic == "b":
             symbol = operands.strip()
             if symbol in labels:
                 target = labels[symbol]
-                offset = target - addr
-                return f"b {offset}"
+                return f"b 0x{target:x}"
 
         # Handle 'bl' (branch and link) with symbol
         if mnemonic == "bl":
             symbol = operands.strip()
             if symbol in labels:
                 target = labels[symbol]
-                offset = target - addr
-                return f"bl {offset}"
+                return f"bl 0x{target:x}"
 
         # Handle conditional branches (b.eq, b.ne, etc.)
         if mnemonic.startswith("b."):
             symbol = operands.strip()
             if symbol in labels:
                 target = labels[symbol]
-                offset = target - addr
-                return f"{mnemonic} {offset}"
+                return f"{mnemonic} 0x{target:x}"
 
         # Handle cbz/cbnz (compare and branch if zero/not zero)
         if mnemonic in ("cbz", "cbnz"):
@@ -935,8 +1155,7 @@ class Assembler:
                 reg, symbol = ops[0], ops[1].strip()
                 if symbol in labels:
                     target = labels[symbol]
-                    offset = target - addr
-                    return f"{mnemonic} {reg}, {offset}"
+                    return f"{mnemonic} {reg}, 0x{target:x}"
 
         # Handle tbz/tbnz (test bit and branch if zero/not zero)
         if mnemonic in ("tbz", "tbnz"):
@@ -945,8 +1164,7 @@ class Assembler:
                 reg, bit, symbol = ops[0], ops[1], ops[2].strip()
                 if symbol in labels:
                     target = labels[symbol]
-                    offset = target - addr
-                    return f"{mnemonic} {reg}, {bit}, {offset}"
+                    return f"{mnemonic} {reg}, {bit}, 0x{target:x}"
 
         return instr
 
