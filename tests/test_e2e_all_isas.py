@@ -351,5 +351,247 @@ class TestMemoryOperations(unittest.TestCase):
         self._test_memory_ops("examples/mips/hello_asm/hello_asm", "MIPS")
 
 
+class TestHelloAsmAllISAs(unittest.TestCase):
+    """Test hello_asm program runs to completion on all ISAs"""
+
+    def _run_hello(self, elf_path: str, isa_name: str) -> int:
+        """Run hello_asm and return step count"""
+        elf = Path(elf_path)
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+
+        # Run with step limit - hello_asm should complete quickly
+        MAX_STEPS = 100
+        steps = sim.run(max_steps=MAX_STEPS)
+
+        self.assertLess(steps, MAX_STEPS,
+            f"{isa_name}: hello_asm should complete in <{MAX_STEPS} steps, took {steps}")
+
+        return steps
+
+    def test_riscv_hello_completes(self):
+        """RISC-V hello_asm completes"""
+        steps = self._run_hello("examples/riscv/hello_asm/hello_asm", "RISCV")
+        self.assertGreater(steps, 5, "Should execute more than 5 instructions")
+
+    def test_arm_hello_completes(self):
+        """ARM64 hello_asm completes"""
+        steps = self._run_hello("examples/arm/hello_asm/hello_asm", "ARM")
+        self.assertGreater(steps, 5, "Should execute more than 5 instructions")
+
+    def test_x86_hello_completes(self):
+        """x86-64 hello_asm completes"""
+        steps = self._run_hello("examples/x86_64/hello_asm/hello_asm", "X86_64")
+        self.assertGreater(steps, 5, "Should execute more than 5 instructions")
+
+    def test_mips_hello_completes(self):
+        """MIPS hello_asm completes"""
+        steps = self._run_hello("examples/mips/hello_asm/hello_asm", "MIPS")
+        self.assertGreater(steps, 5, "Should execute more than 5 instructions")
+
+
+class TestArrayStatsAllISAs(unittest.TestCase):
+    """Test array_stats program computes correct statistics on all ISAs
+
+    The array is: [23, 7, 42, 15, 8, 31, 4, 19]
+    Expected: sum=149, min=4, max=42, count=8
+    """
+
+    def _get_endianness(self, isa_name: str) -> str:
+        """Return byte order for ISA"""
+        return 'big' if isa_name == "MIPS" else 'little'
+
+    def _run_array_stats(self, elf_path: str, isa_name: str):
+        """Run array_stats and verify results"""
+        elf = Path(elf_path)
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+
+        # Run to completion
+        MAX_STEPS = 5000
+        steps = sim.run(max_steps=MAX_STEPS)
+
+        self.assertLess(steps, MAX_STEPS,
+            f"{isa_name}: array_stats should complete in <{MAX_STEPS} steps, took {steps}")
+
+        return sim, steps
+
+    def _read_array(self, sim, symbol: str, count: int, isa_name: str):
+        """Read an array of words from memory"""
+        addr = sim.lookup_symbol(symbol)
+        if addr is None:
+            return None
+
+        byteorder = self._get_endianness(isa_name)
+        values = []
+        for i in range(count):
+            word_bytes = sim.read_mem(addr + i * 4, 4)
+            value = int.from_bytes(word_bytes, byteorder=byteorder, signed=True)
+            values.append(value)
+        return values
+
+    def test_riscv_array_stats_runs(self):
+        """RISC-V array_stats completes"""
+        sim, steps = self._run_array_stats("examples/riscv/array_stats/array_stats", "RISCV")
+        # Verify array is loaded correctly
+        array = self._read_array(sim, 'array', 8, "RISCV")
+        if array:
+            self.assertEqual(array, [23, 7, 42, 15, 8, 31, 4, 19],
+                "RISC-V: Array should contain expected values")
+
+    def test_arm_array_stats_runs(self):
+        """ARM64 array_stats completes"""
+        sim, steps = self._run_array_stats("examples/arm/array_stats/array_stats", "ARM")
+        array = self._read_array(sim, 'array', 8, "ARM")
+        if array:
+            self.assertEqual(array, [23, 7, 42, 15, 8, 31, 4, 19],
+                "ARM64: Array should contain expected values")
+
+    def test_x86_array_stats_runs(self):
+        """x86-64 array_stats completes"""
+        sim, steps = self._run_array_stats("examples/x86_64/array_stats/array_stats", "X86_64")
+        array = self._read_array(sim, 'array', 8, "X86_64")
+        if array:
+            self.assertEqual(array, [23, 7, 42, 15, 8, 31, 4, 19],
+                "x86-64: Array should contain expected values")
+
+    def test_mips_array_stats_runs(self):
+        """MIPS array_stats completes"""
+        sim, steps = self._run_array_stats("examples/mips/array_stats/array_stats", "MIPS")
+        array = self._read_array(sim, 'array', 8, "MIPS")
+        if array:
+            self.assertEqual(array, [23, 7, 42, 15, 8, 31, 4, 19],
+                "MIPS: Array should contain expected values")
+
+
+class TestMatrixMultiplyAllISAs(unittest.TestCase):
+    """Test matrix_multiply program computes correct result on all ISAs
+
+    Matrix A (3x3):     Matrix B (3x3):     Expected C (3x3):
+    [ 1  2  3 ]         [ 9  8  7 ]         [ 30  24  18 ]
+    [ 4  5  6 ]    *    [ 6  5  4 ]    =    [ 84  69  54 ]
+    [ 7  8  9 ]         [ 3  2  1 ]         [138 114  90 ]
+    """
+
+    EXPECTED_RESULT = [
+        [30, 24, 18],
+        [84, 69, 54],
+        [138, 114, 90]
+    ]
+
+    def _get_endianness(self, isa_name: str) -> str:
+        """Return byte order for ISA"""
+        return 'big' if isa_name == "MIPS" else 'little'
+
+    def _read_matrix(self, sim, symbol: str, isa_name: str):
+        """Read a 3x3 matrix from memory"""
+        addr = sim.lookup_symbol(symbol)
+        if addr is None:
+            return None
+
+        byteorder = self._get_endianness(isa_name)
+        matrix = []
+        for row in range(3):
+            row_values = []
+            for col in range(3):
+                offset = (row * 3 + col) * 4
+                word_bytes = sim.read_mem(addr + offset, 4)
+                value = int.from_bytes(word_bytes, byteorder=byteorder, signed=True)
+                row_values.append(value)
+            matrix.append(row_values)
+        return matrix
+
+    def _run_matrix_multiply(self, elf_path: str, isa_name: str):
+        """Run matrix_multiply and return simulator"""
+        elf = Path(elf_path)
+        if not elf.exists():
+            self.skipTest(f"Not found: {elf}")
+
+        sim = create_simulator(str(elf))
+
+        # Run to completion
+        MAX_STEPS = 5000
+        steps = sim.run(max_steps=MAX_STEPS)
+
+        self.assertLess(steps, MAX_STEPS,
+            f"{isa_name}: matrix_multiply should complete in <{MAX_STEPS} steps, took {steps}")
+
+        return sim, steps
+
+    def test_riscv_matrix_result(self):
+        """RISC-V matrix_multiply produces correct result"""
+        sim, steps = self._run_matrix_multiply("examples/riscv/matrix_multiply/matrix_mult", "RISCV")
+        result = self._read_matrix(sim, 'matrix_c', "RISCV")
+        if result:
+            self.assertEqual(result, self.EXPECTED_RESULT,
+                f"RISC-V: Matrix C should be {self.EXPECTED_RESULT}, got {result}")
+
+    def test_arm_matrix_result(self):
+        """ARM64 matrix_multiply produces correct result"""
+        sim, steps = self._run_matrix_multiply("examples/arm/matrix_multiply/matrix_mult", "ARM")
+        result = self._read_matrix(sim, 'matrix_c', "ARM")
+        if result:
+            self.assertEqual(result, self.EXPECTED_RESULT,
+                f"ARM64: Matrix C should be {self.EXPECTED_RESULT}, got {result}")
+
+    def test_x86_matrix_result(self):
+        """x86-64 matrix_multiply produces correct result"""
+        sim, steps = self._run_matrix_multiply("examples/x86_64/matrix_multiply/matrix_mult", "X86_64")
+        result = self._read_matrix(sim, 'matrix_c', "X86_64")
+        if result:
+            self.assertEqual(result, self.EXPECTED_RESULT,
+                f"x86-64: Matrix C should be {self.EXPECTED_RESULT}, got {result}")
+
+    def test_mips_matrix_result(self):
+        """MIPS matrix_multiply produces correct result"""
+        sim, steps = self._run_matrix_multiply("examples/mips/matrix_multiply/matrix_mult", "MIPS")
+        result = self._read_matrix(sim, 'matrix_c', "MIPS")
+        if result:
+            self.assertEqual(result, self.EXPECTED_RESULT,
+                f"MIPS: Matrix C should be {self.EXPECTED_RESULT}, got {result}")
+
+
+class TestAllProgramsComplete(unittest.TestCase):
+    """Ensure all example programs complete without hanging"""
+
+    ALL_EXAMPLES = [
+        # (path, isa, max_steps)
+        ("examples/riscv/hello_asm/hello_asm", "RISCV", 100),
+        ("examples/riscv/fibonacci/fibonacci", "RISCV", 1000),
+        ("examples/riscv/array_stats/array_stats", "RISCV", 5000),
+        ("examples/riscv/matrix_multiply/matrix_mult", "RISCV", 5000),
+        ("examples/arm/hello_asm/hello_asm", "ARM", 100),
+        ("examples/arm/fibonacci/fibonacci", "ARM", 1000),
+        ("examples/arm/array_stats/array_stats", "ARM", 5000),
+        ("examples/arm/matrix_multiply/matrix_mult", "ARM", 5000),
+        ("examples/x86_64/hello_asm/hello_asm", "X86_64", 100),
+        ("examples/x86_64/fibonacci/fibonacci", "X86_64", 1000),
+        ("examples/x86_64/array_stats/array_stats", "X86_64", 5000),
+        ("examples/x86_64/matrix_multiply/matrix_mult", "X86_64", 5000),
+        ("examples/mips/hello_asm/hello_asm", "MIPS", 100),
+        ("examples/mips/fibonacci/fibonacci", "MIPS", 1000),
+        ("examples/mips/array_stats/array_stats", "MIPS", 5000),
+        ("examples/mips/matrix_multiply/matrix_mult", "MIPS", 5000),
+    ]
+
+    def test_all_examples_complete(self):
+        """All example programs complete within step limits"""
+        for elf_path, isa_name, max_steps in self.ALL_EXAMPLES:
+            with self.subTest(program=elf_path, isa=isa_name):
+                elf = Path(elf_path)
+                if not elf.exists():
+                    self.skipTest(f"Not found: {elf}")
+
+                sim = create_simulator(str(elf))
+                steps = sim.run(max_steps=max_steps)
+
+                self.assertLess(steps, max_steps,
+                    f"{isa_name} {elf_path}: Should complete in <{max_steps} steps, took {steps}")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1052,8 +1052,11 @@ class Assembler:
                     else:
                         slt_instr = f"{slt_op} $1, {rs}, {rt}"
 
-                    # Keystone expects offset from text_base, not from current instruction
-                    offset = target - self._layout.text_base
+                    # Keystone expects offset from text_base, not from current instruction.
+                    # When we return "slt; beq", Keystone assembles both at `addr`, but
+                    # the beq is actually 4 bytes after the slt. Keystone miscalculates
+                    # the branch offset by 4 bytes, so we compensate by subtracting 4.
+                    offset = target - self._layout.text_base - 4
                     branch_instr = f"{branch_op} $1, $0, {offset}"
 
                     return f"{slt_instr}; {branch_instr}"
