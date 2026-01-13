@@ -922,5 +922,90 @@ class TestComprehensiveISACoverage(unittest.TestCase):
                     self.assertEqual(len(data), 4, f"{isa} should read 4 bytes")
 
 
+class TestExecuteMode(unittest.TestCase):
+    """Test the -e/--execute CLI mode for all ISAs and programs.
+
+    This ensures the execute mode works correctly for running programs
+    from the command line without entering the REPL.
+    """
+
+    ALL_ISAS = ["riscv", "arm", "x86_64", "mips"]
+
+    ALL_PROGRAMS = [
+        "hello_asm",
+        "fibonacci",
+        "array_stats",
+        "matrix_multiply",
+    ]
+
+    def _get_program_path(self, isa: str, program: str) -> Path:
+        """Get path to program binary, handling naming variations."""
+        if program == "matrix_multiply":
+            return Path(f"examples/{isa}/{program}/matrix_mult")
+        return Path(f"examples/{isa}/{program}/{program}")
+
+    def test_execute_mode_all_programs(self):
+        """All example programs complete successfully with -e flag"""
+        import subprocess
+        import sys
+
+        for isa in self.ALL_ISAS:
+            for program in self.ALL_PROGRAMS:
+                with self.subTest(isa=isa, program=program):
+                    path = self._get_program_path(isa, program)
+                    if not path.exists():
+                        self.skipTest(f"Not found: {path}")
+
+                    result = subprocess.run(
+                        [sys.executable, "-m", "mapachespim.console", "-e", str(path)],
+                        capture_output=True,
+                        text=True,
+                        timeout=30,
+                    )
+
+                    self.assertEqual(
+                        result.returncode, 0,
+                        f"{isa}/{program} should exit with code 0. "
+                        f"stderr: {result.stderr}"
+                    )
+
+    def test_execute_mode_error_on_missing_file(self):
+        """Execute mode reports error for missing file"""
+        import subprocess
+        import sys
+
+        result = subprocess.run(
+            [sys.executable, "-m", "mapachespim.console", "-e", "nonexistent.elf"],
+            capture_output=True,
+            text=True,
+        )
+
+        self.assertEqual(result.returncode, 1, "Should exit with code 1")
+        self.assertIn("not found", result.stderr.lower(),
+            "Should report file not found error")
+
+    def test_execute_mode_hello_has_output(self):
+        """Execute mode shows program output for hello_asm"""
+        import subprocess
+        import sys
+
+        for isa in self.ALL_ISAS:
+            with self.subTest(isa=isa):
+                path = Path(f"examples/{isa}/hello_asm/hello_asm")
+                if not path.exists():
+                    self.skipTest(f"Not found: {path}")
+
+                result = subprocess.run(
+                    [sys.executable, "-m", "mapachespim.console", "-e", str(path)],
+                    capture_output=True,
+                    text=True,
+                    timeout=30,
+                )
+
+                self.assertEqual(result.returncode, 0)
+                self.assertIn("Hello", result.stdout,
+                    f"{isa}/hello_asm should output 'Hello'")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
