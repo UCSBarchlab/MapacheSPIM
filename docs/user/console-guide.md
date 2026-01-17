@@ -1,15 +1,15 @@
 # MapacheSPIM Interactive Console Guide
 
-SPIM-like interactive console for RISC-V programs using the Sail formal specification.
+SPIM-like interactive console for RISC-V programs using the Unicorn Engine.
 
 ## Quick Start
 
 ```bash
 # Launch interactive console
-./mapachespim_console
+mapachespim
 
 # Or load a program on startup
-./mapachespim_console examples/riscv/fibonacci/fibonacci
+mapachespim examples/riscv/fibonacci/fibonacci
 ```
 
 ## Basic Commands
@@ -144,8 +144,7 @@ SPIM-like interactive console for RISC-V programs using the Sail formal specific
 ## Example Session
 
 ```
-$ ./mapachespim_console
-Sail RISC-V simulator initialized.
+$ mapachespim
 Welcome to MapacheSPIM. Type help or ? to list commands.
 
 (mapachespim) load examples/riscv/fibonacci/fibonacci
@@ -203,13 +202,13 @@ The console shows both numeric (x0-x31) and ABI names:
 
 ```bash
 # Launch console
-./mapachespim_console
+mapachespim
 
 # Load file on startup
-./mapachespim_console examples/riscv/fibonacci/fibonacci
+mapachespim examples/riscv/fibonacci/fibonacci
 
 # Quiet mode (less verbose)
-./mapachespim_console -q examples/riscv/fibonacci/fibonacci
+mapachespim -q examples/riscv/fibonacci/fibonacci
 ```
 
 ## Keyboard Shortcuts
@@ -275,16 +274,15 @@ The `-g` flag adds DWARF debug information that maps machine addresses to source
 
 MapacheSPIM is similar to SPIM but has key differences:
 
-1. **RISC-V instead of MIPS**: Uses RISC-V ISA with Sail formal spec
+1. **RISC-V instead of MIPS**: Uses RISC-V ISA via Unicorn Engine
 2. **ELF files**: Loads compiled ELF binaries (not assembly source)
-3. **Formal specification**: Uses Sail RISC-V model (not custom simulator)
-4. **64-bit**: Full RV64I support by default
-5. **Source display**: Optional via `list` command (requires `-g` flag)
+3. **64-bit**: Full RV64I support by default
+4. **Source display**: Optional via `list` command (requires `-g` flag)
 
 ## Troubleshooting
 
 **Console won't start:**
-- Make sure the C library is built: `cd lib/build && cmake .. && make`
+- Make sure you've installed the package: `pip install -e .`
 - Check Python path includes mapachespim package
 
 **Can't load ELF file:**

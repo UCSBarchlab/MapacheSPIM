@@ -7,8 +7,6 @@ Get started with MapacheSPIM in 5 minutes. This guide will help you install the 
 You'll need:
 - macOS or Linux (Windows via WSL)
 - Python 3.8+
-- CMake 3.10+
-- C++ compiler (GCC or Clang)
 
 Check your Python version:
 ```bash
@@ -17,35 +15,10 @@ python3 --version  # Should be 3.8 or higher
 
 ## Installation
 
-### Option 1: Quick Install (Recommended)
-
 ```bash
 # Clone the repository
-git clone --recursive https://github.com/your-org/MapacheSPIM.git
+git clone https://github.com/UCSBarchlab/MapacheSPIM.git
 cd MapacheSPIM
-
-# One-command setup (if available)
-./scripts/setup.sh
-```
-
-### Option 2: Manual Install
-
-```bash
-# Clone with submodules
-git clone --recursive https://github.com/your-org/MapacheSPIM.git
-cd MapacheSPIM
-
-# Build Sail RISC-V backend
-cd backends/riscv/sail-riscv
-./build_simulators.sh
-cd ../../..
-
-# Build C library
-cd lib
-mkdir -p build && cd build
-cmake ..
-make
-cd ../..
 
 # Create virtual environment (recommended)
 python3 -m venv venv
@@ -267,11 +240,11 @@ Now that you've run your first program:
 
 If the console doesn't start, try:
 ```bash
-# Run from Python package
-python3 -m mapachespim.console
+# Make sure your virtual environment is activated
+source venv/bin/activate
 
-# Or use the script directly
-./mapachespim_console
+# Or run from Python package
+python3 -m mapachespim.console
 ```
 
 ### Import Error
@@ -281,30 +254,11 @@ Make sure you installed the Python package:
 pip3 install -e .
 ```
 
-### Build Errors
-
-Check you have all prerequisites:
-```bash
-python3 --version  # 3.8+
-cmake --version    # 3.10+
-gcc --version      # Any recent version
-```
-
-### Library Not Found
-
-Build the C library first:
-```bash
-cd lib/build
-cmake ..
-make
-cd ../..
-```
-
 ### Still Stuck?
 
 - Check the [full console guide](console-guide.md)
 - Look at [example programs](../../examples/README.md)
-- Open an issue on GitHub
+- Open an issue on [GitHub](https://github.com/UCSBarchlab/MapacheSPIM/issues)
 
 ## What's Next?
 

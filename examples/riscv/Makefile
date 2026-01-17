@@ -2,12 +2,11 @@
 # Makefile for RISC-V Assembly Examples
 # ============================================================================
 #
-# This Makefile builds RISC-V assembly programs for execution on the Sail
-# RISC-V emulator.
+# This Makefile builds RISC-V assembly programs for execution with MapacheSPIM.
 #
 # Prerequisites:
 #   - RISC-V GNU toolchain (riscv64-unknown-elf-*)
-#   - Sail RISC-V emulator
+#   - MapacheSPIM (pip install -e . from repo root)
 #
 # Usage:
 #   make                 # Build all examples
@@ -35,10 +34,6 @@ ASFLAGS = -march=rv64g -mabi=lp64
 
 # Linker flags
 LDFLAGS = -T linker.ld
-
-# Sail emulator path
-# Adjust this path to your Sail RISC-V simulator location
-SAIL_SIM = ../sail-riscv/build/c_emulator/sail_riscv_sim
 
 # ============================================================================
 # Targets
@@ -109,29 +104,20 @@ guess_game/guess_game.o: guess_game/guess_game.s
 	$(AS) $(ASFLAGS) -o $@ $<
 
 # ============================================================================
-# Run targets - execute programs with trace enabled
+# Run targets - execute programs with MapacheSPIM
 # ============================================================================
 
 run-matrix: matrix_multiply/matrix_mult
 	@echo "=========================================="
 	@echo "Running Matrix Multiplication"
 	@echo "=========================================="
-	$(SAIL_SIM) --trace-instr $<
+	mapachespim -x $<
 
 run-fibonacci: fibonacci/fibonacci
 	@echo "=========================================="
 	@echo "Running Fibonacci Calculator"
 	@echo "=========================================="
-	$(SAIL_SIM) --trace-instr $<
-
-# Run with memory trace to see data accesses
-run-matrix-mem: matrix_multiply/matrix_mult
-	@echo "Running Matrix Multiplication with memory trace..."
-	$(SAIL_SIM) --trace-instr --trace-mem $<
-
-run-fibonacci-mem: fibonacci/fibonacci
-	@echo "Running Fibonacci with memory trace..."
-	$(SAIL_SIM) --trace-instr --trace-mem $<
+	mapachespim -x $<
 
 # ============================================================================
 # Utility targets
@@ -165,10 +151,6 @@ check-tools:
 	@which $(AS) > /dev/null || (echo "ERROR: $(AS) not found. Please install RISC-V toolchain."; exit 1)
 	@which $(LD) > /dev/null || (echo "ERROR: $(LD) not found. Please install RISC-V toolchain."; exit 1)
 	@echo "RISC-V toolchain found: $(shell $(AS) --version | head -1)"
-	@echo "Checking for Sail emulator..."
-	@test -f $(SAIL_SIM) || (echo "ERROR: Sail emulator not found at $(SAIL_SIM)"; exit 1)
-	@echo "Sail emulator found: $(SAIL_SIM)"
 	@echo "All tools ready!"
 
-.PHONY: all clean run-matrix run-fibonacci run-matrix-mem run-fibonacci-mem \
-        dis-matrix dis-fibonacci check-tools
+.PHONY: all clean run-matrix run-fibonacci dis-matrix dis-fibonacci check-tools
