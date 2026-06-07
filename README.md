@@ -45,7 +45,7 @@ pip install -e .
 
 Run the console by typing:
 
-```mapachespim
+```bash
 ```
 
 This will start the interactive console where you can load programs, set breakpoints, step through code, and 
