@@ -106,6 +106,11 @@ _DOT_RE = re.compile(r"(?<![\w.$])\.(?![\w.$])")
 # Prefix of internal labels that stand in for '.' (not emitted as symbols)
 DOT_LABEL_PREFIX = ".L.dot."
 
+# Prefix of internal names given to numeric local labels like "1:"
+LOCAL_LABEL_PREFIX = ".L.local."
+
+INTERNAL_LABEL_PREFIXES = (DOT_LABEL_PREFIX, LOCAL_LABEL_PREFIX)
+
 
 class DirectiveParser:
     """
@@ -123,15 +128,12 @@ class DirectiveParser:
     """
 
     # Regex patterns
-    LABEL_PATTERN = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*):(.*)$")
+    # A label: a symbol name (including GNU local labels like .L1 and names
+    # with $), or a numeric local label like "1:"
+    LABEL_PATTERN = re.compile(r"^([A-Za-z_.$][\w.$]*|\d+):(.*)$")
     DIRECTIVE_PATTERN = re.compile(r"^\s*\.(\w+)\s*(.*)$")
-    # Hash comment: # at start, or # preceded by space and NOT followed by digit/minus (ARM immediate)
-    # This handles both #42 and #-32 as ARM immediates, not comments
-    HASH_COMMENT = re.compile(r"(^|\s)#(?!-?\d).*$")
-    COMMENT_PATTERNS = [
-        re.compile(r"//.*$"),  # C++ style
-        re.compile(r";.*$"),  # Semicolon comments
-    ]
+    # References to numeric local labels: "1b" (backward) and "1f" (forward)
+    _LOCAL_REF = re.compile(r"(?<![\w.$])(\d+)([bf])(?![\w.$])")
 
     _ASSIGN_PATTERN = re.compile(r"^([A-Za-z_.$][\w.$]*)\s*=\s*(\S.*)$")
 
@@ -283,45 +285,213 @@ class DirectiveParser:
         Returns:
             Dictionary of section name -> SectionData.
         """
-        lines = source.splitlines()
+        statements = self._statements(source)
+        statements = self._rename_local_labels(statements)
 
-        for line_num, line in enumerate(lines, 1):
+        for line_num, text, original in statements:
             try:
-                parsed = self._parse_line(line_num, line)
-                if parsed.line_type not in (LineType.EMPTY, LineType.COMMENT):
-                    parsed.reorder = self.reorder
-                    section = self.sections[self.current_section]
-                    section.lines.append(parsed)
-
-                    # Handle labels
-                    if parsed.label:
-                        if parsed.label in self.constants:
-                            section.labels[parsed.label] = self.constants[parsed.label]
-                        else:
-                            section.labels[parsed.label] = section.current_offset
-                            section.pending_labels.append(parsed.label)
-
-                    # Process directive data
-                    if parsed.directive:
-                        self._process_directive(parsed, section)
-                    elif parsed.line_type == LineType.INSTRUCTION:
-                        section.pending_labels.clear()
-
+                for parsed in self._parse_statement(line_num, text, original):
+                    self._add_line(parsed)
             except Exception as e:
                 self.errors.append(f"Line {line_num}: {e}")
 
         return self.sections
 
+    def _add_line(self, parsed: ParsedLine) -> None:
+        """Record a parsed line in the current section."""
+        parsed.reorder = self.reorder
+        section = self.sections[self.current_section]
+        section.lines.append(parsed)
+
+        # Handle labels
+        if parsed.label:
+            if parsed.label in section.labels or any(
+                parsed.label in other.labels for other in self.sections.values()
+            ):
+                raise ValueError(f"symbol '{parsed.label}' is already defined")
+            if parsed.label in self.constants:
+                section.labels[parsed.label] = self.constants[parsed.label]
+            else:
+                section.labels[parsed.label] = section.current_offset
+                section.pending_labels.append(parsed.label)
+
+        # Process directive data
+        if parsed.directive:
+            self._process_directive(parsed, section)
+        elif parsed.line_type == LineType.INSTRUCTION:
+            section.pending_labels.clear()
+
+    # --- Splitting source into statements, as GNU as does ---
+
+    def _statements(self, source: str) -> List[Tuple[int, str, str]]:
+        """Split source into (line_number, statement_text, original_line).
+
+        Removes comments and splits lines on ';', following GNU as's rules
+        for the target ISA:
+
+        - '#' starts a comment (on ARM64 only at the start of a line, since
+          '#' marks immediates there)
+        - '//' starts a comment; '/* ... */' comments may span lines
+        - ';' separates statements on one line
+        - none of these count inside "strings" or 'c' character literals
+        """
+        result: List[Tuple[int, str, str]] = []
+        in_block = False
+        for line_num, original in enumerate(source.splitlines(), 1):
+            self._set_isa_from_line(original)
+            pieces, in_block = self._split_line(original, in_block)
+            for piece in pieces:
+                if piece.strip():
+                    result.append((line_num, piece.strip(), original))
+        return result
+
+    def _set_isa_from_line(self, line: str) -> None:
+        """Notice '.isa' early, since comment rules depend on the ISA."""
+        stripped = line.strip()
+        if stripped.lower().startswith(".isa") and len(stripped.split()) > 1:
+            value = stripped.split()[1].lower().replace("-", "_")
+            if value in self.VALID_ISAS:
+                self.isa = value
+
+    def _split_line(self, line: str, in_block: bool) -> Tuple[List[str], bool]:
+        arm = self._effective_isa == "arm64"
+        pieces: List[str] = []
+        current: List[str] = []
+        i = 0
+        n = len(line)
+        quote = False
+        while i < n:
+            ch = line[i]
+            if in_block:
+                if line.startswith("*/", i):
+                    in_block = False
+                    current.append(" ")
+                    i += 2
+                else:
+                    i += 1
+                continue
+            if quote:
+                current.append(ch)
+                if ch == "\\" and i + 1 < n:
+                    current.append(line[i + 1])
+                    i += 2
+                    continue
+                if ch == '"':
+                    quote = False
+                i += 1
+                continue
+            if ch == '"':
+                quote = True
+                current.append(ch)
+                i += 1
+                continue
+            if ch == "'":
+                # Character literal: 'c', '\\n', or GNU's unterminated 'c
+                j = i + 1
+                j += 2 if j < n and line[j] == "\\" else 1
+                if j < n and line[j] == "'":
+                    j += 1
+                current.append(line[i:j])
+                i = j
+                continue
+            if line.startswith("/*", i):
+                in_block = True
+                i += 2
+                continue
+            if line.startswith("//", i):
+                break
+            if ch == "#":
+                at_line_start = not pieces and not "".join(current).strip()
+                if not arm or at_line_start:
+                    break
+            if ch == ";":
+                pieces.append("".join(current))
+                current = []
+                i += 1
+                continue
+            current.append(ch)
+            i += 1
+        pieces.append("".join(current))
+        return pieces, in_block
+
+    def _rename_local_labels(
+        self, statements: List[Tuple[int, str, str]]
+    ) -> List[Tuple[int, str, str]]:
+        """Give GNU numeric local labels ("1:", used as "1b"/"1f") unique names."""
+        # Where each numeric label is defined, in order
+        definitions: Dict[str, List[int]] = {}
+        for index, (_, text, _) in enumerate(statements):
+            for label in self._leading_labels(text)[0]:
+                if label.isdigit():
+                    definitions.setdefault(label, []).append(index)
+        if not definitions and not any(self._LOCAL_REF.search(t) for _, t, _ in statements):
+            return statements
+
+        def name(label: str, occurrence: int) -> str:
+            return f"{LOCAL_LABEL_PREFIX}{label}${occurrence}"
+
+        result = []
+        seen: Dict[str, int] = {}
+        for index, (line_num, text, original) in enumerate(statements):
+            labels, rest = self._leading_labels(text)
+            new_labels = []
+            for label in labels:
+                if label.isdigit():
+                    seen[label] = seen.get(label, 0) + 1
+                    new_labels.append(name(label, seen[label]))
+                else:
+                    new_labels.append(label)
+
+            def reference(m: re.Match, index: int = index, line_num: int = line_num) -> str:
+                # "Nb": the nearest definition at or before this statement;
+                # "Nf": the nearest one after it
+                label, direction = m.group(1), m.group(2)
+                places = definitions.get(label, [])
+                if direction == "b":
+                    candidates = [i for i in places if i <= index]
+                    target = candidates[-1] if candidates else None
+                else:
+                    candidates = [i for i in places if i > index]
+                    target = candidates[0] if candidates else None
+                if target is None:
+                    where = "before" if direction == "b" else "after"
+                    self.errors.append(
+                        f"Line {line_num}: no local label '{label}:' {where} '{m.group(0)}'"
+                    )
+                    return m.group(0)
+                return name(label, places.index(target) + 1)
+
+            rest = self._LOCAL_REF.sub(reference, rest)
+            prefix = "".join(f"{lbl}: " for lbl in new_labels)
+            result.append((line_num, prefix + rest, original))
+        return result
+
+    def _leading_labels(self, text: str) -> Tuple[List[str], str]:
+        """Split 'a: b: rest' into (['a', 'b'], 'rest')."""
+        labels = []
+        rest = text
+        while True:
+            if self._ASSIGN_PATTERN.match(rest):
+                break
+            m = self.LABEL_PATTERN.match(rest)
+            if not m:
+                break
+            labels.append(m.group(1))
+            rest = m.group(2).strip()
+        return labels, rest
+
+    def _parse_statement(self, line_num: int, text: str, original: str) -> List[ParsedLine]:
+        """Parse one statement, which may start with several labels."""
+        labels, rest = self._leading_labels(text)
+        lines = [ParsedLine(line_num, LineType.LABEL, original, label=lbl) for lbl in labels[:-1]]
+        body = (f"{labels[-1]}: " if labels else "") + rest
+        lines.append(self._parse_line(line_num, body))
+        lines[-1].content = original
+        return lines
+
     def _parse_line(self, line_num: int, line: str) -> ParsedLine:
-        """Parse a single line of assembly."""
+        """Parse a single statement (comments already removed)."""
         original = line
-
-        # Strip hash comments (# at start or after space, but not ARM immediates like #42)
-        line = self.HASH_COMMENT.sub(r"\1", line)
-        # Strip other comment styles
-        for pattern in self.COMMENT_PATTERNS:
-            line = pattern.sub("", line)
-
         line = line.strip()
 
         # Empty line

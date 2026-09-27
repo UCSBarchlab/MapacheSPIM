@@ -47,7 +47,7 @@ class TestDirectiveParser:
 
     def test_arm_immediate_not_comment(self):
         """Test that ARM-style #immediate is not treated as comment."""
-        parser = DirectiveParser()
+        parser = DirectiveParser(isa="arm64")
         sections = parser.parse("mov x0, #42")
         lines = sections[".text"].lines
         assert len(lines) == 1

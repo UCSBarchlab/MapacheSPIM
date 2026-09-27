@@ -29,7 +29,13 @@ except Exception as e:
     keystone = None
 
 from . import mips, riscv
-from .directives import DOT_LABEL_PREFIX, DirectiveParser, LineType, ParsedLine, SectionData
+from .directives import (
+    INTERNAL_LABEL_PREFIXES,
+    DirectiveParser,
+    LineType,
+    ParsedLine,
+    SectionData,
+)
 from .dwarf import DWARFv2Builder
 from .elf_builder import STB_GLOBAL, STB_LOCAL, STT_FUNC, STT_NOTYPE, ELFBuilder, Section, Symbol
 from .expr import EncodeError, ExpressionError, UndefinedSymbol, evaluate
@@ -405,8 +411,10 @@ class Assembler:
         if result.errors:
             return result
 
-        # Internal labels standing in for '.' are not real symbols
-        all_labels = {k: v for k, v in all_labels.items() if not k.startswith(DOT_LABEL_PREFIX)}
+        # Internal labels (standing in for '.' or numeric labels) are not real symbols
+        all_labels = {
+            k: v for k, v in all_labels.items() if not k.startswith(INTERNAL_LABEL_PREFIXES)
+        }
 
         # Build ELF
         entry_addr = all_labels.get(entry_symbol, self._layout.text_base)

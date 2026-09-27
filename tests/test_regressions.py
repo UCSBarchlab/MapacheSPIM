@@ -283,3 +283,50 @@ class TestAssemblerDirectives(unittest.TestCase):
         )
         self.assertTrue(result.success, result.errors)
         self.assertEqual(len(self.section(result, ".text")), 8)  # no delay-slot nop added
+
+
+class TestSourceSyntax(unittest.TestCase):
+    """Comments, statement separators, and labels follow GNU as."""
+
+    def parse(self, source, isa="riscv64"):
+        from mapachespim.toolchain.directives import DirectiveParser
+
+        parser = DirectiveParser(isa=isa)
+        sections = parser.parse(source)
+        return parser, sections
+
+    def instructions(self, source, isa="riscv64"):
+        _, sections = self.parse(source, isa)
+        return [ln.instruction for ln in sections[".text"].lines if ln.instruction]
+
+    def test_semicolon_separates_statements(self):
+        """';' used to be treated as a comment, dropping the second instruction."""
+        self.assertEqual(self.instructions("li a0, 1; li a1, 2"), ["li a0, 1", "li a1, 2"])
+
+    def test_comment_characters_inside_strings(self):
+        parser, sections = self.parse('.data\ns: .asciz "a # b; c // d"  # real comment\n')
+        self.assertEqual(bytes(sections[".data"].data), b"a # b; c // d\x00")
+
+    def test_hash_is_immediate_on_arm(self):
+        self.assertEqual(self.instructions("mov x0, #1 // one", "arm64"), ["mov x0, #1"])
+        self.assertEqual(self.instructions("# a comment\nnop", "arm64"), ["nop"])
+
+    def test_block_comments(self):
+        self.assertEqual(self.instructions("nop /* one\ntwo */ nop\nnop"), ["nop", "nop", "nop"])
+
+    def test_several_labels_and_local_labels(self):
+        parser, sections = self.parse("a: b: nop\n.Lloop: nop\n")
+        self.assertEqual(sections[".text"].labels, {"a": 0, "b": 0, ".Lloop": 0})
+
+    def test_numeric_local_labels(self):
+        from mapachespim.toolchain import assemble
+
+        result = assemble("_start:\n1: addi a0, a0, 1\n bnez a0, 1b\n j 1f\n nop\n1: ret\n", "riscv64")
+        self.assertTrue(result.success, result.errors)
+
+    def test_duplicate_label_is_an_error(self):
+        from mapachespim.toolchain import assemble
+
+        result = assemble("_start: nop\n_start: nop\n", "riscv64")
+        self.assertFalse(result.success)
+        self.assertIn("already defined", result.errors[0])
