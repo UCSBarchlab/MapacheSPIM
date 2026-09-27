@@ -1,15 +1,17 @@
 """
 Python bindings for Unicorn Engine-based simulator
 
-Provides a Pythonic interface to the Unicorn CPU emulator for RISC-V and ARM.
-This replaces the SAIL-based backend with a more stable, battle-tested emulation engine.
+Provides a Pythonic interface to the Unicorn CPU emulator for RISC-V, ARM64,
+x86-64, and MIPS32.
 """
 
 from __future__ import annotations
 
+import ctypes
 import struct
+import sys
 from enum import IntEnum
-from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
+from typing import TYPE_CHECKING, Dict, List, Optional, TextIO, Tuple, Union
 
 if TYPE_CHECKING:
     from unicorn import Uc
@@ -22,6 +24,9 @@ try:
         UC_ARCH_X86,
         UC_HOOK_CODE,
         UC_HOOK_MEM_UNMAPPED,
+        UC_MEM_FETCH_UNMAPPED,
+        UC_MEM_READ_UNMAPPED,
+        UC_MEM_WRITE_UNMAPPED,
         UC_MODE_32,
         UC_MODE_64,
         UC_MODE_ARM,
@@ -29,8 +34,6 @@ try:
         UC_MODE_MIPS32,
         UC_MODE_RISCV64,
         UC_PROT_ALL,
-        UC_PROT_READ,
-        UC_PROT_WRITE,
         Uc,
         UcError,
     )
@@ -81,6 +84,7 @@ except ImportError as e:
 
 from .elf_loader import ISA as ELF_ISA
 from .elf_loader import ELFSegment, load_elf_file
+from .memory_map import MemoryLayout, get_layout
 
 
 class ISA(IntEnum):
@@ -103,11 +107,64 @@ class StepResult(IntEnum):
     ERROR = -1
 
 
-# Memory layout constants
-# Stack grows downward from 0x83F00000 (this is the TOP of the stack)
+# RISC-V memory layout constants (kept for backward compatibility; see memory_map)
 STACK_TOP = 0x83F00000
 STACK_SIZE = 0x100000  # 1MB stack
 STACK_ADDR = STACK_TOP - STACK_SIZE  # Bottom of stack
+
+PAGE_SIZE = 0x1000
+
+_UNMAPPED_ACCESS_KINDS = {
+    UC_MEM_READ_UNMAPPED: "Read from",
+    UC_MEM_WRITE_UNMAPPED: "Write to",
+    UC_MEM_FETCH_UNMAPPED: "Instruction fetch from",
+}
+
+# Size of the region mapped at the start of each ISA's text/data areas so that
+# small hand-written programs work without an ELF file.
+DEFAULT_REGION_SIZE = 0x400000
+
+_ISA_LAYOUT_NAMES = {
+    0: "riscv64",  # ISA.RISCV
+    1: "arm64",  # ISA.ARM
+    2: "x86_64",  # ISA.X86_64
+    3: "mips32",  # ISA.MIPS
+}
+
+# SPIM-compatible syscall numbers
+SYSCALL_PRINT_INT = 1
+SYSCALL_PRINT_STRING = 4
+SYSCALL_READ_INT = 5
+SYSCALL_EXIT = 10
+SYSCALL_PRINT_CHAR = 11
+SYSCALL_READ_CHAR = 12
+SYSCALL_EXIT2 = 17
+SYSCALL_EXIT_CODE = 93
+
+SUPPORTED_SYSCALLS = (
+    SYSCALL_PRINT_INT,
+    SYSCALL_PRINT_STRING,
+    SYSCALL_READ_INT,
+    SYSCALL_EXIT,
+    SYSCALL_PRINT_CHAR,
+    SYSCALL_READ_CHAR,
+    SYSCALL_EXIT2,
+    SYSCALL_EXIT_CODE,
+)
+
+
+def _describe_uc_error(e: UcError) -> str:
+    """Turn a Unicorn error into a message a student can act on"""
+    text = str(e)
+    if "INSN_INVALID" in text:
+        return "Invalid instruction"
+    if "FETCH_PROT" in text or "FETCH_UNALIGNED" in text:
+        return "Cannot execute code at this address"
+    if "UNALIGNED" in text:
+        return "Unaligned memory access"
+    if "EXCEPTION" in text:
+        return "CPU exception (unhandled trap)"
+    return text
 
 
 class ISAConfig:
@@ -409,21 +466,55 @@ class Disassembler:
             return f"{instr.mnemonic} {instr.op_str}".strip()
 
         # If disassembly failed, show raw bytes
-        if self._isa == ISA.X86_64:
-            # Show first 4 bytes for x86
-            word = int.from_bytes(code[:4], byteorder="little")
-        else:
-            word = int.from_bytes(code, byteorder="little")
+        byteorder = "big" if self._isa == ISA.MIPS else "little"
+        word = int.from_bytes(code[:4], byteorder=byteorder)
         return f".word 0x{word:08x}"
+
+    def disassemble_with_size(self, simulator: UnicornSimulator, addr: int) -> Tuple[str, int]:
+        """
+        Disassemble one instruction and report its length in bytes.
+
+        x86-64 instructions are variable length, so callers that walk a range
+        of instructions must use the returned size to find the next one.
+
+        Returns:
+            (text, size) - size is 4 for undecodable fixed-width instructions
+            and 1 for undecodable x86 bytes.
+        """
+        read_size = 15 if self._isa == ISA.X86_64 else 4
+        code = b""
+        # Near the end of a mapped region fewer than 15 bytes may be readable
+        while read_size > 0:
+            try:
+                code = simulator.read_mem(addr, read_size)
+                break
+            except Exception:
+                read_size -= 1
+        if not code:
+            return ("<invalid address>", 4)
+
+        for instr in self._cs.disasm(code, addr, count=1):
+            return (f"{instr.mnemonic} {instr.op_str}".strip(), instr.size)
+
+        if self._isa == ISA.X86_64:
+            return (f".byte 0x{code[0]:02x}", 1)
+        byteorder = "big" if self._isa == ISA.MIPS else "little"
+        return (f".word 0x{int.from_bytes(code[:4], byteorder=byteorder):08x}", 4)
 
 
 class UnicornSimulator:
     """
-    Unicorn Engine-based CPU emulator for RISC-V and ARM
+    Unicorn Engine-based CPU emulator for RISC-V, ARM64, x86-64, and MIPS32
 
-    Provides step-by-step execution, register/memory access, and state inspection
-    compatible with the original SAIL-based backend.
+    Provides step-by-step execution, register/memory access, and state inspection.
+
+    Program I/O from syscalls goes to ``stdout`` and comes from ``stdin``. Both
+    default to the process streams (looked up at call time, so pytest's capsys
+    and similar redirection work) and can be replaced, e.g. for autograding.
     """
+
+    stdout: Optional[TextIO]
+    stdin: Optional[TextIO]
 
     _isa: Optional[ISA]
     _config: Optional[ISAConfig]
@@ -434,17 +525,26 @@ class UnicornSimulator:
     _entry_point: Optional[int]
     _pending_syscall: bool
     _last_error: Optional[str]
+    _elf_path: Optional[str]
+    _explicit_isa: bool
+    _mem_buffers: List[ctypes.Array]
+    _exited: bool
+    _exit_code: Optional[int]
+    _output_needs_newline: bool
+    _input_buffer: str
+    _tohost_addr: Optional[int]
 
     def __init__(self, isa: Optional[ISA] = None, config_file: Optional[str] = None) -> None:
         """
         Initialize the simulator
 
         Args:
-            isa (ISA, optional): ISA to use (ISA.RISCV or ISA.ARM).
+            isa (ISA, optional): ISA to use (ISA.RISCV, ISA.ARM, ISA.X86_64, ISA.MIPS).
                                 If None, will be auto-detected from ELF file during load_elf()
             config_file (str, optional): Not used by Unicorn backend (for compatibility)
         """
         self._isa = isa
+        self._explicit_isa = isa is not None
         self._config = None
         self._uc = None
         self._symbols = {}
@@ -453,6 +553,15 @@ class UnicornSimulator:
         self._entry_point = None
         self._pending_syscall = False
         self._last_error = None
+        self._elf_path = None
+        self._mem_buffers = []
+        self._exited = False
+        self._exit_code = None
+        self._output_needs_newline = False
+        self._input_buffer = ""
+        self._tohost_addr = None
+        self.stdout = None
+        self.stdin = None
 
         # If ISA is specified, initialize Unicorn now
         if isa is not None:
@@ -476,6 +585,16 @@ class UnicornSimulator:
             self._uc = Uc(self._config.arch, self._config.mode)
         except UcError as e:
             raise RuntimeError(f"Failed to initialize Unicorn: {e}")
+        self._isa = isa
+        self._mem_buffers = []
+        self._exited = False
+        self._exit_code = None
+        self._last_error = None
+        self._input_buffer = ""
+        self._pending_syscall = False
+        self._symbols = {}
+        self._addr_to_symbol = {}
+        self._tohost_addr = None
 
         # Create disassembler
         self._disasm = Disassembler(isa)
@@ -507,138 +626,98 @@ class UnicornSimulator:
         def unmapped_handler(
             uc: Uc, access: int, address: int, size: int, value: int, user_data: Optional[object]
         ) -> bool:
-            self._last_error = f"Unmapped memory access at 0x{address:x}"
+            kind = _UNMAPPED_ACCESS_KINDS.get(access, "access")
+            self._last_error = f"{kind} unmapped address 0x{address:x}"
             return False  # Don't handle it, let it error
 
         self._uc.hook_add(UC_HOOK_MEM_UNMAPPED, unmapped_handler)
 
+    @property
+    def layout(self) -> MemoryLayout:
+        """Memory layout for the current ISA"""
+        if self._isa is None:
+            raise RuntimeError("Simulator ISA not set")
+        return get_layout(_ISA_LAYOUT_NAMES[int(self._isa)])
+
+    def _map_new(self, addr: int, size: int) -> None:
+        """Map a fresh, page-aligned region that does not overlap existing maps.
+
+        On RV64, ``lui`` sign-extends, so an address like 0x80100000 built with
+        lui+addi becomes 0xFFFFFFFF80100000. Real hardware with a 32-bit
+        physical address space treats these as the same location, so any
+        region in [0x80000000, 0x100000000) is also mapped at its sign-extended
+        alias, backed by the same host memory.
+        """
+        if self._isa == ISA.RISCV and 0x80000000 <= addr and addr + size <= 0x100000000:
+            buf = ctypes.create_string_buffer(size)
+            self._mem_buffers.append(buf)  # keep host memory alive
+            ptr = ctypes.addressof(buf)
+            self._uc.mem_map_ptr(addr, size, UC_PROT_ALL, ptr)
+            self._uc.mem_map_ptr(addr | 0xFFFFFFFF00000000, size, UC_PROT_ALL, ptr)
+        else:
+            self._uc.mem_map(addr, size, UC_PROT_ALL)
+
+    def _ensure_mapped(self, addr: int, size: int) -> None:
+        """Map every page in [addr, addr+size) that is not already mapped."""
+        start = addr & ~(PAGE_SIZE - 1)
+        end = (addr + size + PAGE_SIZE - 1) & ~(PAGE_SIZE - 1)
+        if end <= start:
+            return
+
+        cur = start
+        # mem_regions() yields (begin, end_inclusive, perms)
+        for begin, last, _perms in sorted(self._uc.mem_regions()):
+            region_end = last + 1
+            if region_end <= cur or begin >= end:
+                continue
+            if begin > cur:
+                self._map_new(cur, begin - cur)
+            cur = max(cur, region_end)
+            if cur >= end:
+                return
+        if cur < end:
+            self._map_new(cur, end - cur)
+
     def _map_default_memory(self) -> None:
-        """Map default memory regions for tests without ELF files"""
-        if self._config.arch == UC_ARCH_ARM64:
-            # Map 1MB at address 0 for ARM tests
-            try:
-                self._uc.mem_map(0x0, 0x100000, UC_PROT_ALL)
-            except UcError:
-                pass
-        elif self._config.arch == UC_ARCH_X86:
-            # Map main region (4MB from 0x400000) for x86-64 executables
-            try:
-                self._uc.mem_map(0x400000, 0x400000, UC_PROT_ALL)
-            except UcError:
-                pass
-            # Map stack region (2MB ending near 0x7FFFFFFFFFFF - typical Linux)
-            try:
-                self._uc.mem_map(0x7FFFFE00000, 0x200000, UC_PROT_ALL)
-            except UcError:
-                pass
-        elif self._config.arch == UC_ARCH_MIPS:
-            # Map main region (4MB from 0x00400000) for MIPS
-            # Note: 0x00400000 is the traditional MIPS user-space .text address
-            # 0x80000000 is kernel space (kseg0) and has special handling
-            try:
-                self._uc.mem_map(0x00400000, 0x400000, UC_PROT_ALL)
-            except UcError:
-                pass
-            # Map data region (4MB from 0x10000000) - traditional MIPS .data address
-            try:
-                self._uc.mem_map(0x10000000, 0x400000, UC_PROT_ALL)
-            except UcError:
-                pass
-            # Map stack region (near top of user space)
-            try:
-                self._uc.mem_map(0x7FE00000, 0x200000, UC_PROT_ALL)
-            except UcError:
-                pass
-        else:  # RISC-V
-            # Map main region (4MB from 0x80000000)
-            try:
-                self._uc.mem_map(0x80000000, 0x400000, UC_PROT_ALL)
-            except UcError:
-                pass
+        """Map the ISA's text/data area and stack so programs can run without an ELF.
 
-            # Also map sign-extended version for RV64 lui addresses
-            # When lui loads values like 0x80100, it sign-extends to 0xFFFFFFFF80100000
-            try:
-                self._uc.mem_map(0xFFFFFFFF80000000, 0x400000, UC_PROT_ALL)
-            except UcError:
-                pass
-
-            # Also map stack region for tests (include STACK_TOP itself)
-            try:
-                self._uc.mem_map(STACK_ADDR, STACK_SIZE + 0x100000, UC_PROT_ALL)
-            except UcError:
-                pass
+        Address 0 is deliberately left unmapped on every ISA so that null
+        pointer dereferences fault instead of silently succeeding.
+        """
+        layout = self.layout
+        self._ensure_mapped(layout.text_base, DEFAULT_REGION_SIZE)
+        if not layout.text_base <= layout.data_base < layout.text_base + DEFAULT_REGION_SIZE:
+            self._ensure_mapped(layout.data_base, DEFAULT_REGION_SIZE)
+        stack_bottom = layout.stack_top - layout.stack_size
+        stack_span = layout.stack_size
+        if self._isa == ISA.RISCV:
+            # RISC-V has historically mapped one page above stack_top too
+            stack_span += PAGE_SIZE
+        self._ensure_mapped(stack_bottom, stack_span)
+        # Start at the conventional code address rather than 0
+        self.set_pc(layout.text_base)
 
     def _map_memory_for_segments(self, segments: List[ELFSegment]) -> None:
-        """Map memory regions for ELF segments with page alignment"""
+        """Map memory regions for ELF segments and copy in their contents"""
         for segment in segments:
-            # Calculate page-aligned region
-            page_size = 0x1000  # 4KB pages
-            page_aligned_addr = segment.vaddr & ~(page_size - 1)
-            end_addr = segment.vaddr + segment.memsz
-            page_aligned_end = (end_addr + page_size - 1) & ~(page_size - 1)
-            size = page_aligned_end - page_aligned_addr
+            if segment.memsz == 0:
+                continue
+            self._ensure_mapped(segment.vaddr, segment.memsz)
 
-            # Map memory with RWX permissions
-            try:
-                self._uc.mem_map(page_aligned_addr, size, UC_PROT_ALL)
-            except UcError:
-                # Region might overlap with already-mapped memory
-                # This is OK - Unicorn will handle it
-                pass
-
-            # Write segment data
             if segment.data:
                 self._uc.mem_write(segment.vaddr, segment.data)
-                # For RISC-V 64-bit, also write to sign-extended address
-                # This handles lui sign-extension when accessing addresses >= 0x80000000
-                if self._isa == ISA.RISCV and segment.vaddr >= 0x80000000:
-                    sign_extended_addr = segment.vaddr | 0xFFFFFFFF00000000
-                    try:
-                        self._uc.mem_write(sign_extended_addr, segment.data)
-                    except UcError:
-                        pass  # Memory might not be mapped there
 
             # Zero-fill BSS (if memsz > filesz)
             if segment.memsz > segment.filesz:
                 bss_size = segment.memsz - segment.filesz
                 bss_addr = segment.vaddr + segment.filesz
                 self._uc.mem_write(bss_addr, b"\x00" * bss_size)
-                # Also zero-fill sign-extended BSS for RISC-V
-                if self._isa == ISA.RISCV and bss_addr >= 0x80000000:
-                    sign_extended_bss = bss_addr | 0xFFFFFFFF00000000
-                    try:
-                        self._uc.mem_write(sign_extended_bss, b"\x00" * bss_size)
-                    except UcError:
-                        pass
 
     def _setup_stack(self) -> None:
-        """Map and initialize stack memory"""
-        # MIPS requires stack in user segment (< 0x80000000)
-        # Addresses >= 0x80000000 are kernel-only in MIPS
-        if self._isa == ISA.MIPS:
-            mips_stack_top = 0x80000000  # Just below kernel space
-            mips_stack_size = 0x200000   # 2MB
-            mips_stack_addr = mips_stack_top - mips_stack_size
-            try:
-                self._uc.mem_map(mips_stack_addr, mips_stack_size, UC_PROT_READ | UC_PROT_WRITE)
-            except UcError:
-                pass  # Already mapped in _map_default_memory
-            sp_reg = self._config.get_sp_reg()
-            self._uc.reg_write(sp_reg, mips_stack_top - 8)
-            return
-
-        try:
-            self._uc.mem_map(STACK_ADDR, STACK_SIZE, UC_PROT_READ | UC_PROT_WRITE)
-        except UcError as e:
-            # Stack mapping can fail if already mapped - that's OK
-            if "already" not in str(e).lower() and "map" not in str(e).lower():
-                raise RuntimeError(f"Failed to setup stack: {e}")
-
-        # Set stack pointer to top of stack (grows downward)
-        # Note: Some programs set their own SP, which will override this
-        sp_reg = self._config.get_sp_reg()
-        self._uc.reg_write(sp_reg, STACK_TOP - 8)
+        """Map stack memory and point the stack pointer at its top"""
+        layout = self.layout
+        self._ensure_mapped(layout.stack_top - layout.stack_size, layout.stack_size)
+        self._uc.reg_write(self._config.get_sp_reg(), layout.stack_top - 8)
 
     def load_elf(self, elf_path: str) -> bool:
         """
@@ -665,14 +744,16 @@ class UnicornSimulator:
         else:
             raise RuntimeError(f"Unknown ISA in ELF file: {elf_path}")
 
-        # Initialize Unicorn if not already done
-        if self._isa is None:
-            self._isa = detected_isa
-            self._init_unicorn(detected_isa)
-        elif self._isa != detected_isa:
+        # A simulator created for a specific ISA only accepts that ISA; one
+        # created without an ISA adopts whatever each loaded ELF uses.
+        if self._explicit_isa and self._isa != detected_isa:
             raise RuntimeError(
                 f"ELF ISA ({detected_isa.name}) doesn't match simulator ISA ({self._isa.name})"
             )
+        # Start from a fresh machine so nothing from a previous program
+        # (memory, registers, exit state) leaks into this one.
+        self._init_unicorn(detected_isa)
+        self._elf_path = elf_path
 
         # Map memory for ELF segments
         self._map_memory_for_segments(elf_info.segments)
@@ -689,6 +770,7 @@ class UnicornSimulator:
 
         # Build reverse mapping (addr -> symbol)
         self._addr_to_symbol = {addr: name for name, addr in self._symbols.items()}
+        self._tohost_addr = self._symbols.get("tohost")
 
         return True
 
@@ -702,7 +784,12 @@ class UnicornSimulator:
         if self._uc is None:
             return StepResult.ERROR
 
+        # Once the program has exited there is nothing left to execute
+        if self._exited:
+            return StepResult.HALT
+
         self._pending_syscall = False
+        self._last_error = None
         pc = self.get_pc()
 
         try:
@@ -714,7 +801,13 @@ class UnicornSimulator:
             # The hook will stop execution if a syscall is detected
             self._uc.emu_start(pc, end_addr, count=1)
         except UcError as e:
-            self._last_error = f"Execution error at PC=0x{pc:x}: {e}"
+            # Prefer the specific description recorded by the unmapped-memory
+            # hook (it includes the faulting address) over Unicorn's message.
+            detail = self._last_error or _describe_uc_error(e)
+            self._last_error = f"{detail} (at PC=0x{pc:x})"
+            # Unicorn may leave PC anywhere after a fault; keep it on the
+            # faulting instruction so the user can inspect it.
+            self.set_pc(pc)
             return StepResult.ERROR
 
         # Check if we hit a syscall
@@ -864,6 +957,18 @@ class UnicornSimulator:
 
         return self._disasm.disassemble_one(self, addr)
 
+    def disasm_with_size(self, addr: int) -> Tuple[str, int]:
+        """
+        Disassemble instruction at address and return its size in bytes
+
+        Returns:
+            tuple: (instruction text, instruction length in bytes)
+        """
+        if self._disasm is None:
+            raise RuntimeError("Simulator not initialized")
+
+        return self._disasm.disassemble_with_size(self, addr)
+
     def get_symbols(self) -> Dict[str, int]:
         """
         Get all symbols from the symbol table
@@ -921,12 +1026,44 @@ class UnicornSimulator:
         return (None, None)
 
     def reset(self) -> None:
-        """Reset the simulator to initial state"""
-        # Unicorn doesn't have a native reset, so we reinitialize
-        if self._isa is not None:
+        """Reset the simulator to its initial state
+
+        If an ELF file was loaded it is reloaded from disk, restoring memory,
+        registers, and the entry point, so the program can be run again.
+        """
+        if self._elf_path is not None:
+            self.load_elf(self._elf_path)
+        elif self._isa is not None:
+            # Unicorn doesn't have a native reset, so we reinitialize
             self._init_unicorn(self._isa)
-            if self._entry_point is not None:
-                self.set_pc(self._entry_point)
+
+    @property
+    def last_error(self) -> Optional[str]:
+        """Description of the most recent execution error, if any"""
+        return self._last_error
+
+    @property
+    def exited(self) -> bool:
+        """True once the program has exited via an exit syscall"""
+        return self._exited
+
+    @property
+    def exit_code(self) -> Optional[int]:
+        """Exit code passed to the exit syscall (None if not exited)"""
+        return self._exit_code
+
+    @property
+    def output_needs_newline(self) -> bool:
+        """True if program output so far did not end with a newline
+
+        Consoles use this to avoid printing their own messages on the same
+        line as program output.
+        """
+        return self._output_needs_newline
+
+    @output_needs_newline.setter
+    def output_needs_newline(self, value: bool) -> None:
+        self._output_needs_newline = value
 
     def get_all_regs(self) -> List[int]:
         """
@@ -1002,104 +1139,166 @@ class UnicornSimulator:
             # RISC-V: a7=syscall# (x17), a0=arg0 (x10), return in a0
             return (17, 10, 10)
 
-    def _handle_syscall(self) -> bool:
+    def _write_output(self, text: str) -> None:
+        """Write program output (from a print syscall)"""
+        if not text:
+            return
+        stream = self.stdout if self.stdout is not None else sys.stdout
+        stream.write(text)
+        stream.flush()
+        self._output_needs_newline = not text.endswith("\n")
+
+    def _read_input_line(self) -> Optional[str]:
+        """Read one line of program input, without the newline (None on EOF)"""
+        # Make sure any prompt the program printed is visible first
+        out = self.stdout if self.stdout is not None else sys.stdout
+        out.flush()
+        # Pressing Enter echoes a newline, so the console is at a line start
+        self._output_needs_newline = False
+        if self.stdin is not None:
+            line = self.stdin.readline()
+            if line == "":
+                return None
+            return line.rstrip("\r\n")
+        try:
+            # input() gives line editing on interactive terminals
+            return input()
+        except EOFError:
+            return None
+
+    def _signed(self, value: int) -> int:
+        """Interpret a register value as a signed integer of the ISA's width"""
+        bits = 32 if self._isa == ISA.MIPS else 64
+        value &= (1 << bits) - 1
+        if value & (1 << (bits - 1)):
+            value -= 1 << bits
+        return value
+
+    def _read_c_string(self, addr: int, limit: int = 65536) -> str:
+        """Read a NUL-terminated string from simulated memory"""
+        data = bytearray()
+        while len(data) < limit:
+            # Read a chunk, shrinking near the end of a mapped region
+            chunk = b""
+            size = 256 - (addr % 256)
+            while size > 0:
+                try:
+                    chunk = self.read_mem(addr, size)
+                    break
+                except RuntimeError:
+                    size //= 2
+            if not chunk:
+                if not data:
+                    raise RuntimeError(f"print_string: address 0x{addr:x} is not mapped")
+                break
+            nul = chunk.find(0)
+            if nul >= 0:
+                data += chunk[:nul]
+                break
+            data += chunk
+            addr += len(chunk)
+        return data.decode("utf-8", errors="replace")
+
+    def _handle_syscall(self) -> Optional[str]:
         """
         Handle SPIM-compatible syscalls
 
         Returns:
-            bool: True if program should exit, False otherwise
+            None to continue, "syscall_exit" if the program exited, or "error"
+            (with ``last_error`` set) if the syscall could not be performed.
         """
         syscall_reg, arg_reg, result_reg = self._get_syscall_regs()
         syscall_num = self.get_reg(syscall_reg)
 
-        if syscall_num == 1:
-            # print_int - Print integer in arg0
-            value = self.get_reg(arg_reg)
-            # Convert to signed 64-bit for proper display
-            if value & (1 << 63):
-                value = value - (1 << 64)
-            print(value, end="")
+        if syscall_num == SYSCALL_PRINT_INT:
+            self._write_output(str(self._signed(self.get_reg(arg_reg))))
 
-        elif syscall_num == 4:
-            # print_string - Print null-terminated string at address in arg0
-            addr = self.get_reg(arg_reg)
-            chars = []
+        elif syscall_num == SYSCALL_PRINT_STRING:
             try:
-                while True:
-                    byte = self.read_mem(addr, 1)[0]
-                    if byte == 0:
-                        break
-                    chars.append(chr(byte))
-                    addr += 1
-                    if len(chars) > 4096:  # Safety limit
-                        break
-                print("".join(chars), end="")
-            except Exception:
-                pass
+                self._write_output(self._read_c_string(self.get_reg(arg_reg)))
+            except RuntimeError as e:
+                self._last_error = str(e)
+                return "error"
 
-        elif syscall_num == 5:
-            # read_int - Read integer from stdin, return in result reg
+        elif syscall_num == SYSCALL_READ_INT:
+            # A partially consumed line (from read_char) is used first
+            if self._input_buffer.strip():
+                line: Optional[str] = self._input_buffer
+            else:
+                line = self._read_input_line()
+            self._input_buffer = ""
             try:
-                value = int(input())
-                self.set_reg(result_reg, value & 0xFFFFFFFFFFFFFFFF)
-            except Exception:
-                self.set_reg(result_reg, 0)
+                value = int((line or "").strip(), 0)
+            except ValueError:
+                value = 0
+            self.set_reg(result_reg, value & 0xFFFFFFFFFFFFFFFF)
 
-        elif syscall_num == 10:
-            # exit - Terminate program
-            return True
+        elif syscall_num == SYSCALL_READ_CHAR:
+            # Characters come from a line buffer so "ab<Enter>" yields a, b, \n
+            if not self._input_buffer:
+                line = self._read_input_line()
+                self._input_buffer = "" if line is None else line + "\n"
+            if self._input_buffer:
+                char, self._input_buffer = self._input_buffer[0], self._input_buffer[1:]
+                self.set_reg(result_reg, ord(char) & 0xFF)
+            else:
+                self.set_reg(result_reg, 0)  # EOF
 
-        elif syscall_num == 11:
-            # print_char - Print character in arg0
-            char_code = self.get_reg(arg_reg) & 0xFF
-            print(chr(char_code), end="")
+        elif syscall_num == SYSCALL_PRINT_CHAR:
+            self._write_output(chr(self.get_reg(arg_reg) & 0xFF))
 
-        elif syscall_num == 12:
-            # read_char - Read character from stdin, return in result reg
-            try:
-                char = input()[0] if input() else "\0"
-                self.set_reg(result_reg, ord(char))
-            except Exception:
-                self.set_reg(result_reg, 0)
+        elif syscall_num == SYSCALL_EXIT:
+            self._exited = True
+            self._exit_code = 0
+            return "syscall_exit"
 
-        elif syscall_num == 93:
-            # exit_code - Exit with code in a0
-            return True
+        elif syscall_num in (SYSCALL_EXIT2, SYSCALL_EXIT_CODE):
+            self._exited = True
+            self._exit_code = self._signed(self.get_reg(arg_reg)) & 0xFF
+            return "syscall_exit"
 
-        return False
+        else:
+            reg_name = self.get_reg_name(syscall_reg)
+            supported = ", ".join(str(n) for n in SUPPORTED_SYSCALLS)
+            self._last_error = (
+                f"Unknown syscall number {self._signed(syscall_num)} in {reg_name} "
+                f"(supported: {supported})"
+            )
+            return "error"
+
+        return None
 
     def check_termination(self, step_result: StepResult) -> Tuple[bool, Optional[str]]:
         """
         Check if program should terminate based on step result
 
+        Performs the syscall if ``step_result`` is SYSCALL.
+
         Args:
             step_result: Result from step()
 
         Returns:
-            tuple: (should_terminate: bool, reason: str or None)
+            tuple: (should_terminate, reason) where reason is one of
+            "syscall_exit", "halt", "error", "tohost", or None
         """
-        # Handle syscall - perform I/O and check for exit
         if step_result == StepResult.SYSCALL:
-            if self._handle_syscall():
-                return (True, "syscall_exit")
+            reason = self._handle_syscall()
+            if reason is not None:
+                return (True, reason)
 
-        # Check for HALT
         if step_result == StepResult.HALT:
             return (True, "halt")
 
-        # Check for ERROR
         if step_result == StepResult.ERROR:
             return (True, "error")
 
         # Check for tohost write (HTIF mechanism)
-        tohost_addr = self.lookup_symbol("tohost")
-        if tohost_addr is not None:
+        if self._tohost_addr is not None:
             try:
-                tohost_bytes = self.read_mem(tohost_addr, 8)
-                tohost_value = int.from_bytes(tohost_bytes, byteorder="little", signed=False)
-                if tohost_value != 0:
+                tohost_bytes = self.read_mem(self._tohost_addr, 8)
+                if int.from_bytes(tohost_bytes, byteorder="little") != 0:
                     return (True, "tohost")
-            except Exception:
+            except RuntimeError:
                 pass
 
         return (False, None)
