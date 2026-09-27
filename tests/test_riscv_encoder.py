@@ -76,6 +76,8 @@ class TestInstructionForms(unittest.TestCase):
         ("sraiw a0, a1, 2", "sraiw a0, a1, 2"),
         ("addi a0, a0, CONST", "addi a0, a0, 0x2a"),
         ("addi a0, a0, 'A'", "addi a0, a0, 0x41"),
+        ("add a0, a1, 5", "addi a0, a1, 5"),
+        ("sll a0, a1, 3", "slli a0, a1, 3"),
         # Loads / stores
         ("lb a0, 0(sp)", "lb a0, 0(sp)"),
         ("lh a0, -2(sp)", "lh a0, -2(sp)"),

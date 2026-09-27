@@ -25,8 +25,9 @@ except Exception as e:
     KEYSTONE_ERROR = f"Keystone native library failed: {e}"
     keystone = None
 
-from . import riscv
+from . import mips, riscv
 from .directives import DirectiveParser, LineType, SectionData
+from .expr import EncodeError
 from .dwarf import DWARFv2Builder
 from .elf_builder import ELFBuilder, Section, Symbol, STT_FUNC, STT_NOTYPE, STB_GLOBAL, STB_LOCAL
 from .memory_map import get_layout, MemoryLayout
@@ -67,14 +68,11 @@ class AssemblyResult:
 
 # Keystone architecture/mode constants
 KS_ARCH_ARM64 = 2
-KS_ARCH_MIPS = 3
 KS_ARCH_X86 = 4
 
 KS_MODE_LITTLE_ENDIAN = 0
-KS_MODE_BIG_ENDIAN = 0x40000000
 KS_MODE_64 = 0x8
 KS_MODE_32 = 0x4
-KS_MODE_MIPS32 = 0x4
 
 
 class Assembler:
@@ -136,14 +134,15 @@ class Assembler:
             "mode": KS_MODE_64,
             "instr_size": None,
         },
+        # MIPS is encoded by the built-in pure-Python encoder (mips.py)
         "mips32": {
-            "arch": KS_ARCH_MIPS,
-            "mode": KS_MODE_MIPS32 | KS_MODE_BIG_ENDIAN,
+            "arch": None,
+            "mode": None,
             "instr_size": 4,
         },
         "mips": {
-            "arch": KS_ARCH_MIPS,
-            "mode": KS_MODE_MIPS32 | KS_MODE_BIG_ENDIAN,
+            "arch": None,
+            "mode": None,
             "instr_size": 4,
         },
     }
@@ -169,7 +168,7 @@ class Assembler:
         self._layout = get_layout(isa_lower)
         self._ks = None
 
-        # RISC-V uses the built-in encoder; other ISAs need Keystone
+        # RISC-V and MIPS use built-in encoders; ARM64 and x86-64 need Keystone
         if self._config["arch"] is None:
             return
 
@@ -178,7 +177,7 @@ class Assembler:
             if KEYSTONE_ERROR:
                 msg += f"Error: {KEYSTONE_ERROR}\n\n"
             msg += "Install it with:  pip install 'mapachespim[keystone]'\n\n"
-            msg += "RISC-V programs can be assembled without Keystone."
+            msg += "RISC-V and MIPS programs can be assembled without Keystone."
             raise ImportError(msg)
 
         try:
@@ -189,6 +188,15 @@ class Assembler:
     @property
     def _is_riscv(self) -> bool:
         return self.isa in ("riscv64", "riscv")
+
+    @property
+    def _builtin_encoder(self):  # type: ignore[no-untyped-def]
+        """The pure-Python encoder module for this ISA, or None for Keystone ISAs."""
+        if self._is_riscv:
+            return riscv
+        if self.isa in ("mips32", "mips"):
+            return mips
+        return None
 
     def assemble(
         self,
@@ -381,8 +389,8 @@ class Assembler:
         if instr_size is None:
             return self._calculate_x86_text_labels_iterative(section, base_addr)
 
-        if self._is_riscv:
-            return self._calculate_riscv_text_labels(section, base_addr, data_labels or {})
+        if self._builtin_encoder is not None:
+            return self._calculate_builtin_text_labels(section, base_addr, data_labels or {})
 
         # Fixed-size ISA: single pass with size estimation
         labels: Dict[str, int] = {}
@@ -403,17 +411,18 @@ class Assembler:
 
         return labels
 
-    def _calculate_riscv_text_labels(
+    def _calculate_builtin_text_labels(
         self,
         section: SectionData,
         base_addr: int,
         data_labels: Dict[str, int],
     ) -> Dict[str, int]:
         """
-        Calculate RISC-V label addresses using the encoder's own sizing.
+        Calculate label addresses using the built-in encoder's own sizing.
 
-        Only li's size depends on a value, so this converges in a pass or two;
-        the loop re-sizes with the labels found so far until they are stable.
+        Only a few pseudo-instructions (li, la, constant operands) have
+        value-dependent sizes, so this converges in a pass or two; the loop
+        re-sizes with the labels found so far until they are stable.
         """
         labels: Dict[str, int] = {}
         for _ in range(8):
@@ -424,7 +433,7 @@ class Assembler:
                 if line.label:
                     new_labels[line.label] = addr
                 if line.line_type == LineType.INSTRUCTION and line.instruction:
-                    addr += riscv.instruction_size(line.instruction, known)
+                    addr += self._builtin_encoder.instruction_size(line.instruction, known, addr)
             if new_labels == labels:
                 break
             labels = new_labels
@@ -553,49 +562,8 @@ class Assembler:
 
         mnemonic = parts[0].lower()
 
-        # MIPS pseudo-instructions and branch delay slots
-        if self.isa in ("mips32", "mips"):
-            # Pseudo-branches expand to 3 instructions: slt + bne + nop (delay slot)
-            if mnemonic in ("blt", "bge", "ble", "bgt"):
-                return base_size * 3
-            # Regular branches/jumps include delay slot nop: 2 instructions
-            if mnemonic in ("j", "jal", "jr", "jalr", "beq", "bne", "beqz", "bnez",
-                            "bgtz", "bgez", "bltz", "blez", "bgezal", "bltzal"):
-                return base_size * 2  # Branch + delay slot nop
-            # li with large immediate expands to lui + ori
-            if mnemonic == "li":
-                operands = parts[1] if len(parts) > 1 else ""
-                ops = [o.strip() for o in operands.split(',')]
-                if len(ops) == 2:
-                    try:
-                        imm_str = ops[1].strip()
-                        if imm_str.startswith('0x'):
-                            imm = int(imm_str, 16)
-                        else:
-                            imm = int(imm_str)
-                        # MIPS immediate is 16-bit signed
-                        if not (-32768 <= imm <= 65535):
-                            return base_size * 2  # lui + ori
-                    except ValueError:
-                        pass
-            # la (load address) - size depends on target address lower 16 bits
-            if mnemonic == "la":
-                operands = parts[1] if len(parts) > 1 else ""
-                ops = [o.strip() for o in operands.split(',')]
-                if len(ops) == 2 and data_labels:
-                    symbol = ops[1].strip()
-                    if symbol in data_labels:
-                        target = data_labels[symbol]
-                        # If lower 16 bits are 0, only lui is needed (4 bytes)
-                        # Otherwise lui + ori (8 bytes)
-                        if (target & 0xFFFF) == 0:
-                            return base_size  # lui only
-                        return base_size * 2  # lui + ori
-                # Unknown symbol - conservatively estimate as lui + ori
-                return base_size * 2
-
-        if self._is_riscv:
-            return riscv.instruction_size(instr, data_labels or {})
+        if self._builtin_encoder is not None:
+            return self._builtin_encoder.instruction_size(instr, data_labels or {})
 
         # ARM64 pseudo-instructions that expand to multiple instructions
         if self.isa in ("arm64", "aarch64"):
@@ -726,21 +694,18 @@ class Assembler:
 
             instr = line.instruction
 
-            # RISC-V: built-in encoder handles instructions and pseudo-instructions
-            if self._is_riscv:
+            # RISC-V and MIPS: built-in encoders handle instructions and
+            # pseudo-instructions directly
+            encoder = self._builtin_encoder
+            if encoder is not None:
                 try:
-                    encoding = riscv.encode(instr, current_addr, labels)
-                except riscv.RISCVEncodeError as e:
+                    encoding = encoder.encode(instr, current_addr, labels)
+                except EncodeError as e:
                     errors.append(f"Line {line.line_number}: {e} - {line.instruction}")
                     continue
                 code.extend(encoding)
                 current_addr += len(encoding)
                 continue
-
-            # Expand pseudo-instructions for MIPS and normalize syntax
-            if self.isa in ("mips32", "mips"):
-                instr = self._normalize_mips_syntax(instr)
-                instr = self._expand_mips_pseudo(instr, current_addr, labels)
 
             # Expand pseudo-instructions for ARM64 and normalize syntax
             if self.isa in ("arm64", "aarch64"):
@@ -775,150 +740,6 @@ class Assembler:
                     )
 
         return bytes(code), label_addrs, errors, debug_lines
-
-    def _normalize_mips_syntax(self, instr: str) -> str:
-        """
-        Normalize MIPS syntax for Keystone compatibility.
-
-        Keystone doesn't recognize $zero - convert to $0.
-        """
-        # Replace $zero with $0
-        return instr.replace("$zero", "$0")
-
-    def _expand_mips_pseudo(
-        self,
-        instr: str,
-        addr: int,
-        labels: Dict[str, int],
-    ) -> str:
-        """
-        Expand MIPS pseudo-instructions.
-
-        Handles la (load address) and li (load immediate).
-        """
-        parts = instr.split(None, 1)
-        if not parts:
-            return instr
-
-        mnemonic = parts[0].lower()
-        operands = parts[1] if len(parts) > 1 else ""
-
-        # Handle 'li' (load immediate)
-        if mnemonic == "li":
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 2:
-                reg = ops[0]
-                try:
-                    imm_str = ops[1].strip()
-                    if imm_str in labels:
-                        imm = labels[imm_str]
-                    elif imm_str.startswith('0x'):
-                        imm = int(imm_str, 16)
-                    else:
-                        imm = int(imm_str)
-
-                    # Small immediate: use addiu with $0
-                    if -32768 <= imm <= 32767:
-                        return f"addiu {reg}, $0, {imm}"
-
-                    # Large immediate: use lui + ori
-                    upper = (imm >> 16) & 0xFFFF
-                    lower = imm & 0xFFFF
-                    if lower == 0:
-                        return f"lui {reg}, {upper}"
-                    return f"lui {reg}, {upper}; ori {reg}, {reg}, {lower}"
-
-                except (ValueError, KeyError):
-                    pass
-
-        # Handle 'la' (load address)
-        if mnemonic == "la":
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 2:
-                reg = ops[0]
-                symbol = ops[1].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    return self._expand_mips_pseudo(f"li {reg}, {target}", addr, labels)
-
-        # Handle 'j' (unconditional jump) - Keystone expects byte address
-        if mnemonic == "j":
-            symbol = operands.strip()
-            if symbol in labels:
-                target = labels[symbol]
-                return f"j {target}"
-
-        # Handle 'jal' (jump and link) - Keystone expects byte address
-        if mnemonic == "jal":
-            symbol = operands.strip()
-            if symbol in labels:
-                target = labels[symbol]
-                return f"jal {target}"
-
-        # Handle branch instructions with symbols
-        mips_branches = ["beq", "bne", "blez", "bgtz", "bltz", "bgez"]
-        if mnemonic in mips_branches:
-            ops = [o.strip() for o in operands.split(',')]
-            # beq/bne: rs, rt, offset
-            if mnemonic in ("beq", "bne") and len(ops) == 3:
-                rs, rt, symbol = ops[0], ops[1], ops[2].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    # Keystone expects offset from text_base, not from current instruction
-                    offset = target - self._layout.text_base
-                    # Convert $zero to $0 for Keystone
-                    rs = "$0" if rs == "$zero" else rs
-                    rt = "$0" if rt == "$zero" else rt
-                    return f"{mnemonic} {rs}, {rt}, {offset}"
-            # blez/bgtz/bltz/bgez: rs, offset
-            elif len(ops) == 2:
-                rs, symbol = ops[0], ops[1].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    # Keystone expects offset from text_base, not from current instruction
-                    offset = target - self._layout.text_base
-                    rs = "$0" if rs == "$zero" else rs
-                    return f"{mnemonic} {rs}, {offset}"
-
-        # Handle pseudo-branch instructions (blt, bge, ble, bgt)
-        # These expand to: slt $at, rs, rt; beq/bne $at, $0, offset
-        pseudo_branches = {
-            "blt": ("slt", "bne"),   # blt rs, rt → slt $at, rs, rt; bne $at, $0
-            "bge": ("slt", "beq"),   # bge rs, rt → slt $at, rs, rt; beq $at, $0
-            "ble": ("slt", "beq", True),  # ble rs, rt → slt $at, rt, rs; beq $at, $0 (swap)
-            "bgt": ("slt", "bne", True),  # bgt rs, rt → slt $at, rt, rs; bne $at, $0 (swap)
-        }
-        if mnemonic in pseudo_branches:
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 3:
-                rs, rt, symbol = ops[0], ops[1], ops[2].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    config = pseudo_branches[mnemonic]
-                    slt_op = config[0]
-                    branch_op = config[1]
-                    swap = len(config) > 2 and config[2]
-
-                    # Normalize register names
-                    rs = "$0" if rs == "$zero" else rs
-                    rt = "$0" if rt == "$zero" else rt
-
-                    # Build the slt instruction
-                    if swap:
-                        slt_instr = f"{slt_op} $1, {rt}, {rs}"  # $1 is $at
-                    else:
-                        slt_instr = f"{slt_op} $1, {rs}, {rt}"
-
-                    # Keystone expects offset from text_base, not from current instruction.
-                    # When we return "slt; beq", Keystone assembles both at `addr`, but
-                    # the beq is actually 4 bytes after the slt. Keystone miscalculates
-                    # the branch offset by 4 bytes, so we compensate by subtracting 4.
-                    offset = target - self._layout.text_base - 4
-                    branch_instr = f"{branch_op} $1, $0, {offset}"
-
-                    return f"{slt_instr}; {branch_instr}"
-
-        return instr
 
     def _normalize_arm64_syntax(self, instr: str) -> str:
         """
@@ -1194,10 +1015,10 @@ class Assembler:
         Raises:
             ValueError: If assembly fails.
         """
-        if self._is_riscv:
+        if self._builtin_encoder is not None:
             try:
-                return riscv.encode(instr, address, {})
-            except riscv.RISCVEncodeError as e:
+                return self._builtin_encoder.encode(instr, address, {})
+            except EncodeError as e:
                 raise ValueError(f"Assembly error: {e}")
         try:
             encoding, count = self._ks.asm(instr, address)

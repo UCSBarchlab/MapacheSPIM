@@ -24,13 +24,15 @@ instruction is 4 bytes, matching what the simulator's disassembler shows.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
+
+from .expr import Context, EncodeError, parse_int, sign_extend, split_operands
 
 INSTR_SIZE = 4
 
 
-class RISCVEncodeError(ValueError):
-    """Raised when an instruction cannot be encoded."""
+class RISCVEncodeError(EncodeError):
+    """Raised when a RISC-V instruction cannot be encoded."""
 
 
 # ---------------------------------------------------------------------------
@@ -67,101 +69,6 @@ CSR_NAMES: Dict[str, int] = {
     "mscratch": 0x340, "mepc": 0x341, "mcause": 0x342, "mtval": 0x343, "mip": 0x344,
     "mhartid": 0xF14,
 }  # fmt: skip
-
-
-# ---------------------------------------------------------------------------
-# Expressions
-# ---------------------------------------------------------------------------
-
-_RELOC_RE = re.compile(r"^%(hi|lo|pcrel_hi|pcrel_lo)\((.*)\)$", re.IGNORECASE)
-_TERM_RE = re.compile(r"\s*([+-]?)\s*([^+\-\s][^+\-]*)")
-
-
-def _parse_int(text: str) -> Optional[int]:
-    """Parse an integer or character literal, or return None."""
-    t = text.strip()
-    if len(t) >= 3 and t[0] == "'" and t[-1] == "'":
-        body = t[1:-1]
-        escapes = {"\\n": 10, "\\t": 9, "\\r": 13, "\\0": 0, "\\\\": 92, "\\'": 39}
-        if body in escapes:
-            return escapes[body]
-        if len(body) == 1:
-            return ord(body)
-        return None
-    try:
-        return int(t, 0)
-    except ValueError:
-        pass
-    # int(..., 0) rejects leading zeros like "010"; accept them as decimal
-    if re.fullmatch(r"[+-]?\d+", t):
-        return int(t, 10)
-    return None
-
-
-class Context:
-    """Address and symbol information needed to encode one instruction."""
-
-    def __init__(self, address: int, labels: Dict[str, int], strict: bool = True):
-        self.address = address
-        self.labels = labels
-        # When not strict (the sizing pass), unknown symbols evaluate to 0
-        self.strict = strict
-
-    def symbol(self, name: str) -> int:
-        if name in self.labels:
-            return self.labels[name]
-        if self.strict:
-            raise RISCVEncodeError(f"undefined symbol '{name}'")
-        return 0
-
-    def eval(self, text: str) -> int:
-        """Evaluate an operand expression such as 'label+8' or '%lo(msg)'."""
-        text = text.strip()
-        if not text:
-            raise RISCVEncodeError("missing operand")
-
-        m = _RELOC_RE.match(text)
-        if m:
-            kind, inner = m.group(1).lower(), m.group(2)
-            value = self.eval(inner)
-            if kind == "hi":
-                return ((value + 0x800) >> 12) & 0xFFFFF
-            if kind == "lo":
-                return _sign_extend(value & 0xFFF, 12)
-            if kind == "pcrel_hi":
-                offset = value - self.address
-                return ((offset + 0x800) >> 12) & 0xFFFFF
-            # %pcrel_lo(label) names the auipc instruction; the low part is
-            # relative to that instruction's pc and the auipc's target.
-            raise RISCVEncodeError("%pcrel_lo is not supported; use la or lla instead")
-
-        value = _parse_int(text)
-        if value is not None:
-            return value
-
-        total = 0
-        pos = 0
-        matched = False
-        for m2 in _TERM_RE.finditer(text):
-            if m2.start() != pos and text[pos : m2.start()].strip():
-                break
-            sign, term = m2.group(1), m2.group(2).strip()
-            v = _parse_int(term)
-            if v is None:
-                if not re.fullmatch(r"[A-Za-z_.$][\w.$]*", term):
-                    raise RISCVEncodeError(f"cannot parse expression '{text}'")
-                v = self.symbol(term)
-            total += -v if sign == "-" else v
-            pos = m2.end()
-            matched = True
-        if not matched or text[pos:].strip():
-            raise RISCVEncodeError(f"cannot parse expression '{text}'")
-        return total
-
-
-def _sign_extend(value: int, bits: int) -> int:
-    value &= (1 << bits) - 1
-    return value - (1 << bits) if value & (1 << (bits - 1)) else value
 
 
 def _check_signed(value: int, bits: int, what: str) -> int:
@@ -265,6 +172,13 @@ SHIFT_IMM: Dict[str, Tuple[int, int, int, int]] = {
     "slliw": (0x1B, 1, 0x00, 5), "srliw": (0x1B, 5, 0x00, 5), "sraiw": (0x1B, 5, 0x20, 5),
 }  # fmt: skip
 
+# Register-form mnemonics that accept an immediate third operand
+IMM_FORMS: Dict[str, str] = {
+    "add": "addi", "and": "andi", "or": "ori", "xor": "xori", "slt": "slti",
+    "sltu": "sltiu", "sll": "slli", "srl": "srli", "sra": "srai",
+    "addw": "addiw", "sllw": "slliw", "srlw": "srliw", "sraw": "sraiw",
+}  # fmt: skip
+
 LOADS: Dict[str, int] = {"lb": 0, "lh": 1, "lw": 2, "ld": 3, "lbu": 4, "lhu": 5, "lwu": 6}
 STORES: Dict[str, int] = {"sb": 0, "sh": 1, "sw": 2, "sd": 3}
 BRANCHES: Dict[str, int] = {"beq": 0, "bne": 1, "blt": 4, "bge": 5, "bltu": 6, "bgeu": 7}
@@ -285,30 +199,6 @@ SWAP_BRANCHES: Dict[str, str] = {"bgt": "blt", "ble": "bge", "bgtu": "bltu", "bl
 # ---------------------------------------------------------------------------
 # Operand helpers
 # ---------------------------------------------------------------------------
-
-
-def split_operands(text: str) -> List[str]:
-    """Split operands on commas that are not inside parentheses or quotes."""
-    ops: List[str] = []
-    depth = 0
-    quote = False
-    cur = ""
-    for ch in text:
-        if ch == "'" and depth == 0:
-            quote = not quote
-        if not quote:
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-            elif ch == "," and depth == 0:
-                ops.append(cur.strip())
-                cur = ""
-                continue
-        cur += ch
-    if cur.strip() or ops:
-        ops.append(cur.strip())
-    return ops
 
 
 _MEM_RE = re.compile(r"^(.*)\(\s*([A-Za-z0-9]+)\s*\)$")
@@ -348,25 +238,25 @@ def _parse_csr(text: str, ctx: Context) -> int:
 
 def _li_sequence(rd: int, value: int) -> List[int]:
     """Instruction words that load a 64-bit constant into rd."""
-    value = _sign_extend(value, 64)
+    value = sign_extend(value, 64)
     if -2048 <= value <= 2047:
         return [_i(0x13, 0, rd, 0, value)]  # addi rd, x0, value
     if -(1 << 31) <= value < (1 << 31):
-        lo = _sign_extend(value & 0xFFF, 12)
+        lo = sign_extend(value & 0xFFF, 12)
         hi = ((value - lo) >> 12) & 0xFFFFF
         words = [_u(0x37, rd, hi)]  # lui
         if lo:
             words.append(_i(0x1B, 0, rd, rd, lo))  # addiw keeps it 32-bit sign-extended
         return words
     # 64-bit: build the upper bits recursively, then shift in 12 bits at a time
-    lo = _sign_extend(value & 0xFFF, 12)
+    lo = sign_extend(value & 0xFFF, 12)
     upper = (value - lo) >> 12
     shift = 12
     while upper and not upper & 1 and shift < 60:
         upper >>= 1
         shift += 1
     words = _li_sequence(rd, upper)
-    words.append((((shift & 0x3F) << 20) | (rd << 15) | (1 << 12) | (rd << 7) | 0x13))  # slli
+    words.append(((shift & 0x3F) << 20) | (rd << 15) | (1 << 12) | (rd << 7) | 0x13)  # slli
     if lo:
         words.append(_i(0x13, 0, rd, rd, lo))
     return words
@@ -375,7 +265,7 @@ def _li_sequence(rd: int, value: int) -> List[int]:
 def _pcrel_pair(target: int, pc: int) -> Tuple[int, int]:
     """Split a pc-relative offset into auipc (hi20) and addi/jalr (lo12) parts."""
     offset = target - pc
-    lo = _sign_extend(offset & 0xFFF, 12)
+    lo = sign_extend(offset & 0xFFF, 12)
     hi = ((offset - lo) >> 12) & 0xFFFFF
     return hi, lo
 
@@ -391,13 +281,25 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
 
     def target_offset(text: str) -> int:
         """Branch/jump operand: a label (pc-relative) or a literal offset."""
-        value = _parse_int(text)
+        value = parse_int(text)
         if value is not None:
             return value
+        if not ctx.strict:
+            ctx.eval(text)  # still validate the expression's syntax
+            return 0  # sizing pass: labels may not be resolved yet
         return ctx.eval(text) - pc
 
     if m in R_TYPE:
         _expect(ops, 3, f"{m} rd, rs1, rs2")
+        if m in IMM_FORMS and ops[2].strip().lower() not in REGISTERS:
+            # Like GNU as, 'add a0, a1, 5' means 'addi a0, a1, 5'
+            try:
+                return _encode(IMM_FORMS[m], ops, ctx)
+            except RISCVEncodeError as e:
+                # 'add a0, a1, q9' is far more likely a mistyped register
+                if str(e).startswith("undefined symbol"):
+                    raise RISCVEncodeError(f"unknown register '{ops[2].strip()}'")
+                raise
         opcode, f3, f7 = R_TYPE[m]
         return [_r(opcode, f3, f7, parse_register(ops[0]), parse_register(ops[1]), parse_register(ops[2]))]
 
@@ -601,11 +503,11 @@ def encode(text: str, address: int, labels: Dict[str, int]) -> bytes:
         RISCVEncodeError: If the instruction is invalid.
     """
     mnemonic, ops = _split_instruction(text)
-    words = _encode(mnemonic, ops, Context(address, labels, strict=True))
+    words = _encode(mnemonic, ops, Context(address, labels, strict=True, error=RISCVEncodeError))
     return b"".join(w.to_bytes(4, "little") for w in words)
 
 
-def instruction_size(text: str, labels: Dict[str, int]) -> int:
+def instruction_size(text: str, labels: Dict[str, int], address: int = 0) -> int:
     """
     Size in bytes that ``encode`` will produce, for the label-layout pass.
 
@@ -623,7 +525,9 @@ def instruction_size(text: str, labels: Dict[str, int]) -> int:
     if mnemonic == "tail":
         return 2 * INSTR_SIZE
     try:
-        words = _encode(mnemonic, ops, Context(0, labels, strict=False))
+        words = _encode(
+            mnemonic, ops, Context(address, labels, strict=False, error=RISCVEncodeError)
+        )
     except RISCVEncodeError:
         return INSTR_SIZE  # the real error is reported by encode()
     return len(words) * INSTR_SIZE
