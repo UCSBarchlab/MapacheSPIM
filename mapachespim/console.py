@@ -16,7 +16,7 @@ from pathlib import Path
 from types import FrameType
 from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 
-from . import Simulator, StepResult
+from . import Simulator
 
 try:
     from elftools.elf.elffile import ELFFile
@@ -1149,6 +1149,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
             # Look up section
             try:
+                assert self._elf_path is not None  # set whenever loaded_file is
                 with open(self._elf_path, "rb") as f:
                     elf = ELFFile(f)
                     section = elf.get_section_by_name(addr_or_section)
@@ -1557,6 +1558,7 @@ class MapacheSPIMConsole(cmd.Cmd):
                 return
 
             try:
+                assert self._elf_path is not None  # set whenever loaded_file is
                 with open(self._elf_path, "rb") as f:
                     elf = ELFFile(f)
 

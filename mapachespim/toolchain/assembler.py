@@ -7,7 +7,8 @@ Assembles source code into machine code for RISC-V, ARM64, x86-64, and MIPS32.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from types import ModuleType
+from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import keystone
@@ -28,10 +29,10 @@ except Exception as e:
 
 from . import mips, riscv
 from .directives import DirectiveParser, LineType, SectionData
-from .expr import EncodeError
 from .dwarf import DWARFv2Builder
-from .elf_builder import ELFBuilder, Section, Symbol, STT_FUNC, STT_NOTYPE, STB_GLOBAL, STB_LOCAL
-from .memory_map import get_layout, MemoryLayout
+from .elf_builder import STB_GLOBAL, STB_LOCAL, STT_FUNC, STT_NOTYPE, ELFBuilder, Section, Symbol
+from .expr import EncodeError
+from .memory_map import get_layout
 
 
 @dataclass
@@ -98,7 +99,7 @@ class Assembler:
     """
 
     # ISA configuration mapping
-    ISA_CONFIG = {
+    ISA_CONFIG: Dict[str, Dict[str, Any]] = {
         # RISC-V is encoded by the built-in pure-Python encoder (riscv.py)
         "riscv64": {
             "arch": None,
@@ -193,7 +194,7 @@ class Assembler:
         return self.isa in ("riscv64", "riscv")
 
     @property
-    def _builtin_encoder(self):  # type: ignore[no-untyped-def]
+    def _builtin_encoder(self) -> Optional[ModuleType]:
         """The pure-Python encoder module for this ISA, or None for Keystone ISAs."""
         if self._is_riscv:
             return riscv
@@ -469,7 +470,7 @@ class Assembler:
 
         labels: Dict[str, int] = {}
 
-        for iteration in range(max_iterations):
+        for _ in range(max_iterations):
             new_labels: Dict[str, int] = {}
             current_addr = base_addr
 
@@ -520,7 +521,7 @@ class Assembler:
             encoding, count = self._ks.asm(converted, addr)
             if encoding is not None and count > 0:
                 return len(encoding)
-        except:
+        except keystone.KsError:
             pass
 
         # Assembly failed - likely unresolved forward reference
@@ -539,7 +540,7 @@ class Assembler:
                 encoding, count = self._ks.asm(placeholder_instr, addr)
                 if encoding is not None and count > 0:
                     return len(encoding)
-            except:
+            except keystone.KsError:
                 pass
 
         # Final fallback: use existing estimation

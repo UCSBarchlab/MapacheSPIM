@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from enum import Enum, auto
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple
 
 
 class LineType(Enum):
@@ -114,7 +114,7 @@ class DirectiveParser:
         for name in [".text", ".data", ".rodata", ".bss"]:
             self.sections[name] = SectionData(name=name)
 
-    def _get_endianness(self) -> str:
+    def _get_endianness(self) -> Literal["little", "big"]:
         """Return byte order for data directives based on ISA."""
         if self.isa in self.BIG_ENDIAN_ISAS:
             return 'big'

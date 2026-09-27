@@ -12,7 +12,6 @@ from __future__ import annotations
 import struct
 from typing import List, Tuple
 
-
 # DWARF constants
 DW_TAG_compile_unit = 0x11
 

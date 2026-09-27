@@ -93,9 +93,9 @@ class Context:
             # relative to that instruction's pc and the auipc's target.
             raise self.error("%pcrel_lo is not supported; use la or lla instead")
 
-        value = parse_int(text)
-        if value is not None:
-            return value
+        literal = parse_int(text)
+        if literal is not None:
+            return literal
 
         total = 0
         pos = 0

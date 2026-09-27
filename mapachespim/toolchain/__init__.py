@@ -131,8 +131,6 @@ def assemble_file(
         >>> if result.success:
         ...     print(f"Assembled to {result.entry_point:#x}")
     """
-    from .directives import DirectiveParser
-
     source_path = Path(source_path)
 
     if not source_path.exists():

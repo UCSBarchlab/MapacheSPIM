@@ -27,7 +27,6 @@ try:
         UC_MEM_FETCH_UNMAPPED,
         UC_MEM_READ_UNMAPPED,
         UC_MEM_WRITE_UNMAPPED,
-        UC_MODE_32,
         UC_MODE_64,
         UC_MODE_ARM,
         UC_MODE_BIG_ENDIAN,
@@ -466,8 +465,7 @@ class Disassembler:
             return f"{instr.mnemonic} {instr.op_str}".strip()
 
         # If disassembly failed, show raw bytes
-        byteorder = "big" if self._isa == ISA.MIPS else "little"
-        word = int.from_bytes(code[:4], byteorder=byteorder)
+        word = int.from_bytes(code[:4], byteorder="big" if self._isa == ISA.MIPS else "little")
         return f".word 0x{word:08x}"
 
     def disassemble_with_size(self, simulator: UnicornSimulator, addr: int) -> Tuple[str, int]:
@@ -498,8 +496,8 @@ class Disassembler:
 
         if self._isa == ISA.X86_64:
             return (f".byte 0x{code[0]:02x}", 1)
-        byteorder = "big" if self._isa == ISA.MIPS else "little"
-        return (f".word 0x{int.from_bytes(code[:4], byteorder=byteorder):08x}", 4)
+        word = int.from_bytes(code[:4], byteorder="big" if self._isa == ISA.MIPS else "little")
+        return (f".word 0x{word:08x}", 4)
 
 
 class UnicornSimulator:
@@ -648,7 +646,7 @@ class UnicornSimulator:
         region in [0x80000000, 0x100000000) is also mapped at its sign-extended
         alias, backed by the same host memory.
         """
-        if self._isa == ISA.RISCV and 0x80000000 <= addr and addr + size <= 0x100000000:
+        if self._isa == ISA.RISCV and addr >= 0x80000000 and addr + size <= 0x100000000:
             buf = ctypes.create_string_buffer(size)
             self._mem_buffers.append(buf)  # keep host memory alive
             ptr = ctypes.addressof(buf)

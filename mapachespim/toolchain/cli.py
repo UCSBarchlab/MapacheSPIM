@@ -128,13 +128,12 @@ Supported ISAs:
         return 1
 
     # Success
-    if parsed.verbose or True:  # Always show success message
-        isa_name = result.isa.upper() if result.isa else "Unknown"
-        size = len(result.elf_bytes)
-        symbols = len(result.symbols)
-        debug_str = ", debug" if parsed.debug else ""
-        print(f"Assembled: {output_path} ({isa_name}, {size} bytes, {symbols} symbols{debug_str})")
-        print(f"Entry point: 0x{result.entry_point:08x}")
+    isa_name = result.isa.upper() if result.isa else "Unknown"
+    size = len(result.elf_bytes)
+    symbols = len(result.symbols)
+    debug_str = ", debug" if parsed.debug else ""
+    print(f"Assembled: {output_path} ({isa_name}, {size} bytes, {symbols} symbols{debug_str})")
+    print(f"Entry point: 0x{result.entry_point:08x}")
 
     return 0
 

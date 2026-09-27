@@ -345,7 +345,7 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         _expect(ops, 3, f"{m} $rs, $rt, label")
         slt, swap, if_set = COMPARE_BRANCHES[m]
         rs = parse_register(ops[0])
-        words: List[int] = []
+        words = []
         if _is_register(ops[1]):
             rt = parse_register(ops[1])
         else:
@@ -375,7 +375,7 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
 
     # --- loads and stores ---
     if m in LOADS or m in STORES:
-        opcode = LOADS.get(m, STORES.get(m))
+        opcode = LOADS[m] if m in LOADS else STORES[m]
         _expect(ops, 2, f"{m} $rt, offset($rs)")
         rt = parse_register(ops[0])
         if _MEM_RE.match(ops[1].strip()):

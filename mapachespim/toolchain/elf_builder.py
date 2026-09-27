@@ -360,7 +360,7 @@ class ELFBuilder:
 
         # Build program headers
         phdrs = b""
-        for i, section in enumerate(loadable_sections):
+        for section in loadable_sections:
             idx = self.sections.index(section)
             file_offset = section_file_offsets[idx]
             file_size = 0 if section.sh_type == SHT_NOBITS else len(section.data)
