@@ -149,24 +149,15 @@ SET_REGISTER = {
 SPECS = pytest.mark.parametrize("spec", ISA_SPECS, ids=lambda spec: spec.name)
 
 
-def _load(spec, source):
+def _load(spec, source, tmp_path):
     result = assemble(source, isa=spec.name)
     assert result.success, result.errors
+    elf = tmp_path / f"{spec.name}.elf"
+    elf.write_bytes(result.elf_bytes)
     sim = Simulator()
-    elf = _write_temp(result.elf_bytes)
-    sim.load_elf(elf)
+    sim.load_elf(str(elf))
     assert sim.spec is spec
     return sim
-
-
-def _write_temp(data):
-    import os
-    import tempfile
-
-    fd, path = tempfile.mkstemp(suffix=".elf")
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
-    return path
 
 
 def test_every_isa_has_conformance_programs():
@@ -176,8 +167,8 @@ def test_every_isa_has_conformance_programs():
 
 
 @SPECS
-def test_syscalls(spec):
-    sim = _load(spec, SYSCALL_PROGRAMS[spec.name])
+def test_syscalls(spec, tmp_path):
+    sim = _load(spec, SYSCALL_PROGRAMS[spec.name], tmp_path)
     sim.stdin = StringIO("41\nZ\n")
     sim.stdout = StringIO()
     result = sim.run_until(1000)
@@ -187,7 +178,7 @@ def test_syscalls(spec):
 
 
 @SPECS
-def test_every_register_is_mapped(spec):
+def test_every_register_is_mapped(spec, tmp_path):
     """Each register number reads the architectural register of that name."""
     regs = spec.registers
     lines = [f".isa {spec.name}", ".text", ".globl _start", "_start:"]
@@ -198,7 +189,7 @@ def test_every_register_is_mapped(spec):
         value = 100 + 8 * n  # small, positive, and 8-byte aligned for sp
         lines.append(SET_REGISTER[spec.name](n, name, value))
         expected[n] = value
-    sim = _load(spec, "\n".join(lines))
+    sim = _load(spec, "\n".join(lines), tmp_path)
     before = sim.get_all_regs()
     result = sim.run_until(len(expected))
     assert result.reason is None, sim.last_error
@@ -241,9 +232,9 @@ def test_default_machine(spec):
 
 
 @SPECS
-def test_unknown_syscall_is_an_error(spec):
+def test_unknown_syscall_is_an_error(spec, tmp_path):
     program = SYSCALL_PROGRAMS[spec.name]
-    sim = _load(spec, program)
+    sim = _load(spec, program, tmp_path)
     sim.set_reg(spec.syscall_abi.number, 999)
     # Jump straight to the first syscall instruction
     pattern = spec.syscall_instruction
