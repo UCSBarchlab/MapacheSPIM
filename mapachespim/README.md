@@ -60,8 +60,14 @@ print(f"Executed {steps} instructions, exit code {sim.exit_code}")
   - After the program exits, returns `HALT` without executing anything
 
 - `check_termination(result)` - Perform a pending syscall and decide whether to stop
-  - Returns: `(stop, reason)`, where reason is `"syscall_exit"`, `"halt"`, `"error"`,
-    `"tohost"`, or `None`
+  - Returns: `(stop, reason)`, where reason is a `StopReason` (`EXIT`, `HALT`, `ERROR`, or
+    `TOHOST`) or `None`. `StopReason` values compare equal to the strings `"syscall_exit"`,
+    `"halt"`, `"error"`, and `"tohost"`.
+
+- `run_until(max_steps=None, stop_before=None)` - Run until the program stops
+  - `stop_before(pc)` is called before each instruction except the first and can return a
+    `StopReason` (e.g. `StopReason.BREAKPOINT`) to stop there
+  - Returns: `RunResult(steps, reason, pc)`; `reason` is `None` if `max_steps` was reached
 
 - `run(max_steps=None)` - Run until the program stops or `max_steps` instructions
   - `max_steps`: Maximum instructions (`None` = unlimited)
@@ -84,8 +90,9 @@ print(f"Executed {steps} instructions, exit code {sim.exit_code}")
 - `get_all_regs()` - Get all GPRs as list
 - `get_isa()` - Get current ISA enum
 - `get_isa_name()` - Get ISA name as string
-- `get_register_count()` - Get number of GPRs (32 for RISC-V/ARM, 16 for x86-64)
+- `get_register_count()` - Get number of GPRs (32 for RISC-V/MIPS/ARM, 16 for x86-64)
 - `get_reg_name(n)` - Get ABI name for register n
+- `spec` - The current ISA's `ISASpec` (register names, syscall ABI, memory layout, ...)
 
 #### Memory Access
 - `read_mem(addr, length)` - Read memory, returns `bytes`
@@ -95,6 +102,8 @@ print(f"Executed {steps} instructions, exit code {sim.exit_code}")
 - `get_symbols()` - Get all symbols as `{name: address}` dict
 - `lookup_symbol(name)` - Look up symbol address by name
 - `addr_to_symbol(addr)` - Convert address to `(name, offset)` tuple
+- `symbols` - The `SymbolTable`; `symbols.describe(addr)` gives e.g. `"<main+8>"`
+- `get_sections()` / `find_section(name)` - The loaded ELF's sections (name, address, size, flags)
 
 #### Disassembly
 - `disasm(addr)` - Disassemble instruction at address
@@ -106,6 +115,9 @@ print(f"Executed {steps} instructions, exit code {sim.exit_code}")
 - `ISA.ARM` - ARM64 (AArch64)
 - `ISA.X86_64` - x86-64
 - `ISA.MIPS` - MIPS32 (big-endian)
+
+Everything MapacheSPIM knows about each ISA is in its `ISASpec` (`mapachespim.ISA_SPECS`, or
+`mapachespim.get_spec("mips32")`). See [the architecture guide](../docs/dev/architecture.md).
 
 ### Helper Functions
 - `create_simulator(elf_path)` - Create simulator and load ELF in one call

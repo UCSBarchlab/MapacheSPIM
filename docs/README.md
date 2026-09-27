@@ -12,6 +12,7 @@ This directory contains all project documentation organized by audience and purp
 
 ### For Developers and Maintainers
 - [Python API](../mapachespim/README.md) - Using the simulator and assembler from Python
+- [Architecture](dev/architecture.md) - How the code is organized, and how to add an ISA
 - [Tests](../tests/README.md) - The test suite
 - [Releasing](RELEASING.md) - Publishing a new version to PyPI
 - [Changelog](../CHANGELOG.md)

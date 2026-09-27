@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Code structure
+- Each ISA is described once, in `mapachespim/isa.py`; the simulator, disassembler, ELF loader and
+  writer, assembler, console, and command-line tools all read their ISA-specific facts from it.
+  Emulator constants are in `engines.py` and each ISA's assembler hooks in `toolchain/targets.py`.
+  See `docs/dev/architecture.md`, which also explains how to add an ISA.
+- New `Simulator.run_until()` with `StopReason` and `RunResult`; the console uses it for `run`
+  and `-e`. New `Simulator.spec`, `symbols`, `get_sections()`, and `find_section()`.
+- Removed: `mapachespim.toolchain.memory_map` (use `mapachespim.memory_map`), the `SailSimulator`
+  alias, the per-ISA `*Config` classes, `STACK_TOP`/`STACK_SIZE`/`STACK_ADDR`, and
+  `mapachespim.elf_loader.Architecture`.
+- Tests that every registered ISA must pass: syscalls, register mapping, ELF output, and more.
+
+### Fixed
+- ARM64 registers x29 (fp) and x30 (lr) showed and changed the wrong (vector) registers.
+- ARM64 programs crashed on `read_int` and `read_char`: x0 was treated as a read-only register.
+- 32-bit ARM and RISC-V ELF files were run as if they were 64-bit programs; they are now refused.
+- ELF symbol tables written by the assembler listed local symbols after global ones and put every
+  symbol in `.text`. The example binaries are rebuilt.
+
 ### Installation
 - All four ISAs are assembled by new built-in pure-Python assemblers, so every ISA assembles on
   every platform. The Keystone dependency is gone: it had no prebuilt packages for ARM machines

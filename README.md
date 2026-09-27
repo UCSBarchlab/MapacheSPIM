@@ -300,10 +300,11 @@ python -m pytest tests/          # run the test suite
 ruff check mapachespim/          # lint
 ruff format mapachespim/         # format
 mypy mapachespim/                # type check
-make -C examples DEBUG=1         # rebuild the example binaries
+make -B -C examples DEBUG=1      # rebuild the example binaries
 ```
 
-See [docs/RELEASING.md](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/RELEASING.md) for how to publish a release.
+See [docs/dev/architecture.md](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/dev/architecture.md)
+for how the code is organized and how to add an ISA, and [docs/RELEASING.md](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/RELEASING.md) for how to publish a release.
 
 ## License
 

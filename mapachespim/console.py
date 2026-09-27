@@ -312,9 +312,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             run                     # Find a bug, edit myprog.s...
             reload                  # Re-assemble and load the fixed version
         """
-        if not self.loaded_file:
-            self.print_error('Error: No program loaded. Use "load <file>" first.')
+        if not self._require_program():
             return
+        assert self.loaded_file is not None
 
         # Remember which label each breakpoint was on so it can follow the label
         old_symbols = {addr: name for name, addr in self.sim.get_symbols().items()}
@@ -423,20 +423,12 @@ class MapacheSPIMConsole(cmd.Cmd):
             - After stepping, use 'regs' to see register changes
             - Set breakpoints before stepping to stop at key locations
         """
-        if not self.loaded_file:
-            self.print_error('Error: No program loaded. Use "load <file>" first.')
+        if not self._require_program():
             return
 
-        n_steps = 1
-        if arg:
-            try:
-                n_steps = int(arg)
-                if n_steps <= 0:
-                    self.print_error("Error: Number of steps must be positive.")
-                    return
-            except ValueError:
-                self.print_error(f'Error: Invalid number "{arg}".')
-                return
+        n_steps = self._parse_positive(arg, "Number of steps", "number", base=10) if arg else 1
+        if n_steps is None:
+            return
 
         if self._report_if_exited():
             return
@@ -523,19 +515,13 @@ class MapacheSPIMConsole(cmd.Cmd):
             - After running, use 'pc' and 'regs' to inspect state
             - Use 'continue' to resume after hitting a breakpoint
         """
-        if not self.loaded_file:
-            self.print_error('Error: No program loaded. Use "load <file>" first.')
+        if not self._require_program():
             return
 
-        max_steps = 0  # 0 means unlimited
+        max_steps: Optional[int] = None  # no limit
         if arg:
-            try:
-                max_steps = int(arg)
-                if max_steps <= 0:
-                    self.print_error("Error: Max steps must be positive.")
-                    return
-            except ValueError:
-                self.print_error(f'Error: Invalid number "{arg}".')
+            max_steps = self._parse_positive(arg, "Max steps", "number", base=10)
+            if max_steps is None:
                 return
 
         if self._report_if_exited():
@@ -545,7 +531,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         self._running = True
         self._interrupted = False
         try:
-            result = self.sim.run_until(max_steps or None, stop_before=self._stop_before)
+            result = self.sim.run_until(max_steps, stop_before=self._stop_before)
         finally:
             self._running = False
 
@@ -623,8 +609,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             - 'reset' restarts the version that was loaded; after editing
               a .s file, use 'reload' to re-assemble it
         """
-        if not self.loaded_file:
-            self.print_error('Error: No program loaded. Use "load <file>" first.')
+        if not self._require_program():
             return
         try:
             self.sim.reset()
@@ -657,6 +642,25 @@ class MapacheSPIMConsole(cmd.Cmd):
         if self.sim is not None and self.sim.output_needs_newline:
             print(file=self.stdout)
             self.sim.output_needs_newline = False
+
+    def _require_program(self) -> bool:
+        """True if a program is loaded; otherwise say how to load one"""
+        if self.loaded_file:
+            return True
+        self.print_error('Error: No program loaded. Use "load <file>" first.')
+        return False
+
+    def _parse_positive(self, text: str, name: str, noun: str, base: int = 0) -> Optional[int]:
+        """Parse a positive integer argument, printing an error (and returning None) if invalid"""
+        try:
+            value = int(text, base)
+        except ValueError:
+            self.print_error(f'Error: Invalid {noun} "{text}".')
+            return None
+        if value <= 0:
+            self.print_error(f"Error: {name} must be positive.")
+            return None
+        return value
 
     def _report_if_exited(self) -> bool:
         """If the program already exited, say so and return True"""
@@ -936,14 +940,10 @@ class MapacheSPIMConsole(cmd.Cmd):
         # Parse length (default 256 bytes)
         length = 256
         if len(parts) > 1:
-            try:
-                length = int(parts[1], 0)
-                if length <= 0:
-                    self.print_error("Error: Length must be positive.")
-                    return
-            except ValueError:
-                self.print_error(f'Error: Invalid length "{parts[1]}".')
+            parsed_length = self._parse_positive(parts[1], "Length", "length")
+            if parsed_length is None:
                 return
+            length = parsed_length
 
         # Check if it's a section name (starts with .)
         if addr_or_section.startswith("."):
@@ -1039,44 +1039,19 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Instruction sizes: RISC-V/ARM64/MIPS = 4 bytes, x86-64 = variable
             - Use 'mem <addr>' to see raw instruction bytes
         """
-        parts = arg.split() if arg else []
-
-        # Default to current PC if no args
-        if not parts:
-            addr = self.sim.get_pc()
-            count = 10
-        elif parts[0].lower() in ("pc", "$"):
-            # "pc" or "$" means current PC
-            addr = self.sim.get_pc()
-            count = 10
-            if len(parts) > 1:
-                try:
-                    count = int(parts[1], 0)
-                    if count <= 0:
-                        self.print_error("Error: Count must be positive.")
-                        return
-                except ValueError:
-                    self.print_error(f'Error: Invalid count "{parts[1]}".')
-                    return
-        else:
-            # Parse address or symbol name
-            parsed = self._parse_address(parts[0])
-            if parsed is None:
-                self.print_error(f'Error: "{parts[0]}" is not a valid address or known symbol.')
+        parts = arg.split()
+        where = parts[0] if parts else "pc"
+        # "pc" or "$" means the current PC
+        addr = self.sim.get_pc() if where.lower() in ("pc", "$") else self._parse_address(where)
+        if addr is None:
+            self.print_error(f'Error: "{where}" is not a valid address or known symbol.')
+            return
+        count = 10
+        if len(parts) > 1:
+            parsed_count = self._parse_positive(parts[1], "Count", "count")
+            if parsed_count is None:
                 return
-            addr = parsed
-
-            # Parse count (default 10)
-            count = 10
-            if len(parts) > 1:
-                try:
-                    count = int(parts[1], 0)
-                    if count <= 0:
-                        self.print_error("Error: Count must be positive.")
-                        return
-                except ValueError:
-                    self.print_error(f'Error: Invalid count "{parts[1]}".')
-                    return
+            count = parsed_count
 
         # Disassemble instructions (x86-64 instructions vary in length, so
         # advance by each instruction's actual size)
@@ -1122,8 +1097,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Shows 10 lines by default
             - Current PC is marked with '# <-- PC: 0xXXXXXXXX'
         """
-        if not self.loaded_file:
-            self.print_error('Error: No program loaded. Use "load <file>" first.')
+        if not self._require_program():
             return
 
         if not self.source_info.has_debug_info:
