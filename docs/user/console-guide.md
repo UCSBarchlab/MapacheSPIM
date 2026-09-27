@@ -39,7 +39,11 @@ mapachespim riscv/fibonacci
   MIPS32:
     mips/array_stats         Array Processing with Loops
     mips/fibonacci           Recursive Fibonacci Calculator
-    ...
+    mips/guess_game          Number Guessing Game
+    mips/hello_asm           Your First MIPS Assembly Program
+    mips/matrix_multiply     3x3 Matrix Multiplication
+
+  Load one with, e.g.:  load mips/array_stats
   ```
 
 ### Execution
@@ -55,11 +59,26 @@ mapachespim riscv/fibonacci
   (mapachespim) run 1000   # Run max 1000 instructions
   ```
 
-  If the program crashes, you see why and where:
+  If the program crashes, you see why and where. For example, with this `prog.s`:
+  ```asm
+  .isa riscv64
+  .text
+  .globl _start
+  _start: li   a0, 0          # a null pointer
+          ld   a0, 0(a0)      # load through it
   ```
+  ```
+  (mapachespim) load prog.s
+  Assembled prog.s (896 bytes)
+  Loaded prog.s (RISCV)
+  Entry point: 0x0000000080000000
+  Source info: prog.s (2 address mappings)
+
+  (mapachespim) run
   Error: Read from unmapped address 0x0 (at PC=0x80000004)
     [0x80000004] 0x03350500  ld a0, 0(a0)  <_start+4>
-    prog.s:5: ld a0, 0(a0)
+    prog.s:5: ld   a0, 0(a0)      # load through it
+  PC = 0x0000000080000004
   ```
 
 - `continue` - Continue after breakpoint (alias: `c`)
@@ -67,12 +86,27 @@ mapachespim riscv/fibonacci
 ### State Inspection
 - `regs [hex|decimal|binary]` - Display all registers + PC with ABI names. A ★ marks registers
   that changed since you last displayed them (`regs peek` shows them without resetting that).
+  Here, after loading `riscv/fibonacci` and stepping one instruction:
   ```
   (mapachespim) regs
 
-  x0  (zero) = 0x0000000000000000  x1  (  ra) = 0x0000000080000018  ...
-  x2  (  sp) = 0x0000000080181000  x3  (  gp) = 0x0000000000000000  ...
-  ...
+  x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000000000000
+  x2  (  sp) = 0x0000000080181000 ★  x3  (  gp) = 0x0000000000000000
+  x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000000000000
+  x6  (  t1) = 0x0000000000000000    x7  (  t2) = 0x0000000000000000
+  x8  (  s0) = 0x0000000000000000    x9  (  s1) = 0x0000000000000000
+  x10 (  a0) = 0x0000000000000000    x11 (  a1) = 0x0000000000000000
+  x12 (  a2) = 0x0000000000000000    x13 (  a3) = 0x0000000000000000
+  x14 (  a4) = 0x0000000000000000    x15 (  a5) = 0x0000000000000000
+  x16 (  a6) = 0x0000000000000000    x17 (  a7) = 0x0000000000000000
+  x18 (  s2) = 0x0000000000000000    x19 (  s3) = 0x0000000000000000
+  x20 (  s4) = 0x0000000000000000    x21 (  s5) = 0x0000000000000000
+  x22 (  s6) = 0x0000000000000000    x23 (  s7) = 0x0000000000000000
+  x24 (  s8) = 0x0000000000000000    x25 (  s9) = 0x0000000000000000
+  x26 ( s10) = 0x0000000000000000    x27 ( s11) = 0x0000000000000000
+  x28 (  t3) = 0x0000000000000000    x29 (  t4) = 0x0000000000000000
+  x30 (  t5) = 0x0000000000000000    x31 (  t6) = 0x0000000000000000
+
   pc = 0x0000000080000004
   ```
 
@@ -89,10 +123,16 @@ mapachespim riscv/fibonacci
   (mapachespim) mem 0x80000000 64        # Show 64 bytes
   (mapachespim) mem .text                # By section name
   (mapachespim) mem .data 128            # Section with length
+  ```
 
-  0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08  |................|
-  0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07  |......@.........|
-  ...
+  For example, with `riscv/fibonacci` loaded:
+  ```
+  (mapachespim) mem 0x80000000 64
+
+  0x80000000:  17 11 18 00  13 01 01 00  97 02 10 00  93 82 82 ff  |................|
+  0x80000010:  03 a5 02 00  ef 00 40 02  97 02 10 00  93 82 c2 fe  |......@.........|
+  0x80000020:  23 a0 a2 00  93 02 10 00  17 03 19 00  13 03 83 fd  |#...............|
+  0x80000030:  23 30 53 00  6f 00 00 00  63 04 05 04  93 02 10 00  |#0S.o...c.......|
   ```
 
 - `list [location]` - Display source code (requires debug symbols) (alias: `l`)
@@ -100,21 +140,26 @@ mapachespim riscv/fibonacci
   (mapachespim) list             # Show source around current PC
   (mapachespim) list fibonacci   # Show source around function
   (mapachespim) list 40          # Show source around line 40
+  ```
+
+  For example, with `riscv/fibonacci` loaded:
+  ```
+  (mapachespim) list fibonacci
 
   fibonacci.s:
-     41:     blt  a0, t0, base_case
-     42:     # Recursive case: fib(n) = fib(n-1) + fib(n-2)
-     43:     addi sp, sp, -16
-     44:     sd   ra, 8(sp)         # <-- PC: 0x80000048
-     45:     sd   s0, 0(sp)
-     46:     mv   s0, a0
-     47:     addi a0, a0, -1
-     48:     call fibonacci
-     49:     mv   t0, a0
-     50:     addi a0, s0, -2
-
-  Tip: Programs loaded from .s files always have source info
+     81: #   sp+16: saved a0 (original n value)
+     82: #   Total: 24 bytes
+     83: # ============================================================================
+     84: fibonacci:
+     85:     # Base case 1: if n == 0, return 0
+     86:     beqz    a0, base_case_zero
+     87:
+     88:     # Base case 2: if n == 1, return 1
+     89:     li      t0, 1
+     90:     beq     a0, t0, base_case_one
   ```
+
+  Programs loaded from `.s` files always have source info.
 
 ### Breakpoints
 - `break <addr|label>` - Set breakpoint at an address or label (alias: `b`)
@@ -130,8 +175,8 @@ mapachespim riscv/fibonacci
   (mapachespim) info break
 
   Breakpoints:
-    1. 0x0000000080000010
-    2. 0x0000000080000100
+    1. 0x80000010  <_start+16>
+    2. 0x80000038  <fibonacci>
   ```
 
 - `info symbols` - List all symbols from symbol table (alias: `info sym`)
@@ -142,7 +187,14 @@ mapachespim riscv/fibonacci
     0x80000000  _start
     0x80000034  exit_loop
     0x80000038  fibonacci
-    ...
+    0x80000080  base_case_zero
+    0x80000088  base_case_one
+    0x80100000  fib_input
+    0x80100004  fib_result
+    0x80180000  _stack_bottom
+    0x80181000  _stack_start
+    0x80190000  tohost
+    0x80190040  fromhost
   ```
 
 - `info sections` - List all ELF sections (alias: `info sec`)
@@ -152,9 +204,10 @@ mapachespim riscv/fibonacci
   ELF Sections:
   Name                            Address         Size  Flags
   ----------------------------------------------------------------------
-  .text                        0x80000000         2048  AX
-  .data                        0x80001000          256  WA
-  .rodata                      0x80001100          128  A
+  .text                        0x80000000          144  AX
+  .data                        0x80100000            8  WA
+  .bss                         0x80180000         4096  WA
+  .tohost                      0x80190000           72  A
 
   Flags: W=Write, A=Alloc, X=Execute
   Use 'mem <section>' to view section contents (e.g., mem .data)
@@ -196,8 +249,24 @@ PC = 0x0000000080000038
 [0x80000038] 0x63040504  beqz a0, 0x48  <fibonacci>
 
 (mapachespim) regs
+
 x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000080000018 ★
-...
+x2  (  sp) = 0x0000000080181000 ★  x3  (  gp) = 0x0000000000000000
+x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000080100000 ★
+x6  (  t1) = 0x0000000000000000    x7  (  t2) = 0x0000000000000000
+x8  (  s0) = 0x0000000000000000    x9  (  s1) = 0x0000000000000000
+x10 (  a0) = 0x0000000000000007 ★  x11 (  a1) = 0x0000000000000000
+x12 (  a2) = 0x0000000000000000    x13 (  a3) = 0x0000000000000000
+x14 (  a4) = 0x0000000000000000    x15 (  a5) = 0x0000000000000000
+x16 (  a6) = 0x0000000000000000    x17 (  a7) = 0x0000000000000000
+x18 (  s2) = 0x0000000000000000    x19 (  s3) = 0x0000000000000000
+x20 (  s4) = 0x0000000000000000    x21 (  s5) = 0x0000000000000000
+x22 (  s6) = 0x0000000000000000    x23 (  s7) = 0x0000000000000000
+x24 (  s8) = 0x0000000000000000    x25 (  s9) = 0x0000000000000000
+x26 ( s10) = 0x0000000000000000    x27 ( s11) = 0x0000000000000000
+x28 (  t3) = 0x0000000000000000    x29 (  t4) = 0x0000000000000000
+x30 (  t5) = 0x0000000000000000    x31 (  t6) = 0x0000000000000000
+
 pc = 0x000000008000003c
 
 (mapachespim) delete fibonacci

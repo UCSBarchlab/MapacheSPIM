@@ -45,6 +45,8 @@ RISC-V 64-bit:
   riscv/guess_game         Number Guessing Game
   riscv/hello_asm          Your First RISC-V Assembly Program
   riscv/matrix_multiply    3x3 Matrix Multiplication
+
+Load one with, e.g.:  load riscv/array_stats
 ```
 
 Load one and look at its source code:
@@ -56,11 +58,18 @@ Entry point: 0x0000000080000000
 Source info: hello_asm.s (19 address mappings)
 
 (mapachespim) list
+
 hello_asm.s:
-   ...
+   56:     # We need to:
+   57:     #   1. Put the string's address in register a0
+   58:     #   2. Put the syscall number (4) in register a7
+   59:     #   3. Execute the ecall instruction
+   60:
    61>     la      a0, hello_msg   # la = "Load Address" - puts address of hello_msg into a0  # <-- PC: 0x80000000
    62:     li      a7, 4           # li = "Load Immediate" - puts the value 4 into a7
    63:     ecall                   # Make the syscall - this prints the string!
+   64:
+   65:     # ========================================================================
 ```
 
 The `>` marks the line the program counter (PC) is on. Step through a few instructions:
@@ -141,11 +150,30 @@ Breakpoint hit at 0x000000008000000c after 3 instructions
 PC = 0x000000008000000c
 
 (mapachespim) regs decimal
+
+x0  (zero) = ...................0    x1  (  ra) = ...................0
+x2  (  sp) = ..........2213543928    x3  (  gp) = ...................0
+x4  (  tp) = ...................0    x5  (  t0) = ...................1 ★
+x6  (  t1) = ...................2 ★  x7  (  t2) = ..................10 ★
+x8  (  s0) = ...................0    x9  (  s1) = ...................0
+x10 (  a0) = ...................0    x11 (  a1) = ...................0
+x12 (  a2) = ...................0    x13 (  a3) = ...................0
+x14 (  a4) = ...................0    x15 (  a5) = ...................0
+x16 (  a6) = ...................0    x17 (  a7) = ...................0
+x18 (  s2) = ...................0    x19 (  s3) = ...................0
+x20 (  s4) = ...................0    x21 (  s5) = ...................0
+x22 (  s6) = ...................0    x23 (  s7) = ...................0
+x24 (  s8) = ...................0    x25 (  s9) = ...................0
+x26 ( s10) = ...................0    x27 ( s11) = ...................0
+x28 (  t3) = ...................0    x29 (  t4) = ...................0
+x30 (  t5) = ...................0    x31 (  t6) = ...................0
+
+pc = ..........2147483660
 ```
 
 `regs` shows every register; a ★ marks the ones that changed since you last looked, so you can see
 `t0` (the sum) and `t1` (the counter) changing each time around the loop. `regs decimal` shows the
-values in decimal.
+values in decimal, with dots in place of leading zeros (`set regs-leading-zeros cut` drops them).
 
 When you find a bug, edit `sum.s` and type `reload` to re-assemble it. Your breakpoints stay on
 their labels. If there's a mistake in the program, the error tells you the line:
