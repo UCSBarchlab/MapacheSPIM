@@ -398,7 +398,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         self.loaded_file = display_name
         self.loaded_source = source
         self._elf_path = elf_path
-        self.prev_regs = None
+        # Registers at the entry point are the baseline for ★ change markers
+        self.prev_regs = self.sim.get_all_regs()
         pc = self.sim.get_pc()
         isa_name = self.sim.get_isa_name()
         print(f"Loaded {display_name} ({isa_name})", file=self.stdout)
@@ -804,8 +805,8 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         Tips:
             - Use 'clear' to remove breakpoints
-            - If you edited and re-assembled the program, 'reset' picks up
-              the new version
+            - 'reset' restarts the version that was loaded; after editing
+              a .s file, use 'reload' to re-assemble it
         """
         if not self.loaded_file:
             self.print_error('Error: No program loaded. Use "load <file>" first.')
@@ -815,7 +816,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         except Exception as e:
             self.print_error(f"Error reloading {self.loaded_file}: {e}")
             return
-        self.prev_regs = None
+        self.prev_regs = self.sim.get_all_regs()
         print(
             f"Reset {self.loaded_file}. PC = {self.sim.get_pc():#018x}",
             file=self.stdout,
@@ -924,6 +925,15 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         return sign + prefix + formatted
 
+    def _change_marker(self) -> str:
+        """Marker for changed registers; '*' where the terminal can't show ★"""
+        encoding = getattr(self.stdout, "encoding", None) or "utf-8"
+        try:
+            "★".encode(encoding)
+        except (UnicodeEncodeError, LookupError):
+            return "*"
+        return "★"
+
     def _is_32bit(self) -> bool:
         """True if the loaded ISA has 32-bit registers"""
         from . import ISA
@@ -1028,7 +1038,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
                     # Check if this register changed with the last instruction
                     star = (
-                        " ★ "
+                        f" {self._change_marker()} "
                         if (
                             self.show_reg_changes
                             and self.prev_regs is not None
@@ -2192,6 +2202,13 @@ def main() -> None:
         metavar="N",
         help=f"With -e, stop after N instructions (default {DEFAULT_MAX_STEPS:,})",
     )
+
+    # Some terminals (e.g. legacy Windows code pages) can't show every
+    # character we print; substitute rather than crash
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(errors="replace")
 
     args = parser.parse_args()
     if args.max_steps < 1:

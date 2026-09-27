@@ -4,16 +4,25 @@ Comprehensive unit tests for the MapacheSPIM simulator.
 
 ## Running Tests
 
-**Run all main test suites:**
+**Run the whole suite** (from the repository root):
 
 ```bash
-# Run each test suite individually (137 tests total)
-python3 tests/test_simulator.py              # API tests (31 tests)
-python3 tests/test_console_working.py        # Console tests (38 tests)
-python3 tests/test_disasm_comprehensive.py   # Disassembly tests (30 tests)
-python3 tests/test_symbols.py                # Symbol tests (24 tests)
-python3 tests/test_program_correctness.py    # Correctness tests (10 tests)
-python3 tests/test_io_syscalls.py            # I/O syscall tests (4 tests)
+python -m pytest tests/
+```
+
+Tests that assemble ARM64 or x86-64 code need the optional Keystone library; where it is not
+installed (e.g. Apple Silicon), they are reported as skipped rather than failed. Everything else,
+including all RISC-V and MIPS assembler tests, runs on every platform.
+
+**Run individual suites:**
+
+```bash
+python -m pytest tests/test_simulator.py             # API tests
+python -m pytest tests/test_console_working.py       # Console tests
+python -m pytest tests/test_riscv_encoder.py         # Built-in RISC-V assembler
+python -m pytest tests/test_mips_encoder.py          # Built-in MIPS assembler
+python -m pytest tests/test_loading.py               # load/reload/examples and the CLI
+python -m pytest tests/test_regressions.py           # Fixed bugs
 ```
 
 **Run with verbose output:**
@@ -214,17 +223,11 @@ x10 (a0)  = 42  (0x2a)  - exit code
 
 - **test_simple_basic.py** - Basic simulator functionality test
 - **test_run_completion.py** - Detailed program execution through completion
-- **TESTING_NOTES.md** - Important notes about Sail behavior and test strategy
 
 ## Test Summary
 
-**Total API Tests:** 31 (all passing)
-**Total Console Tests:** 38 (all passing)
-**Total Symbol Tests:** 24 (all passing)
-**Total Disassembly Tests:** 30 (all passing)
-**Total Correctness Tests:** 10 (all passing)
-**Total I/O Syscall Tests:** 4 (all passing)
-**Total:** 137 tests passing
+Run `python -m pytest tests/ -q` for the current count; CI runs the full suite on Linux, Windows,
+and macOS (Apple Silicon).
 
 **Programs Tested:**
 - fibonacci (recursive calculation)

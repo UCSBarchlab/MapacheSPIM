@@ -104,6 +104,20 @@ class TestConsoleLoading(unittest.TestCase):
         self.assertIn("hello from source", text)
         self.assertIn("exited with code 7", text)
 
+    def test_isa_directive_with_comment(self):
+        src = self.write("c.s", HELLO_RISCV.replace(".isa riscv64", ".isa riscv64   # target"))
+        self.console.onecmd(f"load {src}")
+        self.assertIn("Assembled", self.output())
+
+    def test_first_regs_marks_changes_since_load(self):
+        self.console.onecmd("load riscv/fibonacci")
+        self.console.onecmd("step 3")
+        self.output()
+        self.console.onecmd("regs")
+        self.assertIn("★", self.output())
+        self.console.onecmd("regs")
+        self.assertNotIn("★", self.output())
+
     def test_list_shows_source(self):
         src = self.write("hello.s", HELLO_RISCV)
         self.console.onecmd(f"load {src}")

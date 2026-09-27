@@ -1,4 +1,4 @@
-# MapacheSPIM <img src="docs/Mapache.png" alt="MapacheSPIM Logo" width="100">
+# MapacheSPIM <img src="https://github.com/UCSBarchlab/MapacheSPIM/raw/main/docs/Mapache.png" alt="MapacheSPIM Logo" width="100">
 
 MapacheSPIM is a SPIM-like simulator for assembly programming built on the Unicorn Engine CPU emulator. It provides
 an interactive, console-based environment for learning assembly language, debugging programs
@@ -25,52 +25,59 @@ and why.
 
 ### Install
 
-The easiest way to get started with MapacheSPIM is to clone from GitHub:
+MapacheSPIM is a pure Python package that runs on Windows, macOS (Intel and Apple Silicon), and
+Linux with Python 3.9 or newer. No cross-compiler or other toolchain is needed: it includes its own
+assembler.
 
-```git clone https://github.com/mapachespim/MapacheSPIM.git
-cd MapacheSPIM
-pip install -e .
+The easiest way to install it is with [pipx](https://pipx.pypa.io/), which puts the
+`mapachespim` command on your path in its own isolated environment:
+
+```bash
+pipx install git+https://github.com/UCSBarchlab/MapacheSPIM.git
 ```
 
-**Prerequisites:**
-- Python 3.8+
-- RISC-V or ARM toolchain (optional, for compiling your own assembly)
+or, with [uv](https://docs.astral.sh/uv/): `uv tool install git+https://github.com/UCSBarchlab/MapacheSPIM.git`.
+Plain `pip install git+https://github.com/UCSBarchlab/MapacheSPIM.git` works too (ideally inside a
+virtual environment).
 
-**Dependencies** (automatically installed):
-- `unicorn>=2.0.0` - CPU emulator framework
-- `capstone>=5.0.0` - Disassembler
-- `pyelftools>=0.29` - ELF file parsing
+Check that it worked:
+
+```bash
+mapachespim --version
+```
+
+**Dependencies** (installed automatically):
+- `unicorn` - CPU emulator framework
+- `capstone` - Disassembler
+- `pyelftools` - ELF file parsing
+- `keystone-engine` - Assembler for ARM64 and x86-64, installed automatically on x86 machines. RISC-V
+  and MIPS use MapacheSPIM's built-in assembler, so they work everywhere; see
+  [ISA support](#multi-isa-support) for details.
 
 ### Running MapacheSPIM
 
-Run the console by typing:
+Start the console by typing:
 
-```mapachespim
+```bash
+mapachespim
 ```
 
-This will start the interactive console where you can load programs, set breakpoints, step through code, and 
-inspect machine state. Type `help` at the console to see available commands.
+Type `examples` to see the example programs that come with MapacheSPIM, `quickstart` for a short
+tutorial, or `help` for all commands.
 
 ### A Quick Example
 
-Here is an example loading a RISC-V fibonacci program, stepping through the first few instructions, and examining 
-the machine state:
+Here is an example loading the bundled RISC-V Fibonacci program, stopping at a function, and
+looking at the source and machine state:
 
 ```
 $ mapachespim
-Welcome to MapacheSPIM. Type help or ? to list commands.
+Welcome to MapacheSPIM. Type help or ? to list commands, or quickstart for a tutorial.
 
-(mapachespim) load examples/riscv/fibonacci/fibonacci
-Loaded examples/riscv/fibonacci/fibonacci
+(mapachespim) load riscv/fibonacci
+Loaded riscv/fibonacci (RISCV)
 Entry point: 0x0000000080000000
-
-(mapachespim) info symbols
-Symbols (11 total):
-  0x80000000  _start
-  0x80000034  exit_loop
-  0x80000038  fibonacci
-  0x80000080  base_case_zero
-  ...
+Source info: fibonacci.s (32 address mappings)
 
 (mapachespim) break fibonacci
 Breakpoint set at fibonacci (0x80000038)
@@ -79,59 +86,95 @@ Breakpoint set at fibonacci (0x80000038)
 Breakpoint hit at 0x0000000080000038 after 6 instructions
 PC = 0x0000000080000038
 
-(mapachespim) step
-[0x80000038] 0x63040504  beq x10, x0, 0x48  <fibonacci>
+(mapachespim) list
+fibonacci.s:
+   84: fibonacci:
+   85:     # Base case 1: if n == 0, return 0
+   86>     beqz    a0, base_case_zero  # <-- PC: 0x80000038
+   87:
+   88:     # Base case 2: if n == 1, return 1
+   89:     li      t0, 1
 
 (mapachespim) step
-[0x8000003c] 0x93021000  addi x5, x0, 0x1  <fibonacci+4>
+[0x80000038] 0x63040504  beqz a0, 0x48  <fibonacci>
 
-(mapachespim) continue
-Breakpoint hit at 0x0000000080000038 after 7 instructions
-PC = 0x0000000080000038
+(mapachespim) step
+[0x8000003c] 0x93021000  addi t0, zero, 1  <fibonacci+4>
 
 (mapachespim) regs
 
-(mapachespim) regs
+x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000080000018 ★
+x2  (  sp) = 0x0000000080181000 ★  x3  (  gp) = 0x0000000000000000
+x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000000000001 ★
+...
+x10 (  a0) = 0x0000000000000007 ★  x11 (  a1) = 0x0000000000000000
+...
 
-x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x000000008000005c ★ 
-x2  (  sp) = 0x0000000083efffe8 ★  x3  (  gp) = 0x0000000000000000   
-x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000000000001 ★ 
-x6  (  t1) = 0x0000000000000000    x7  (  t2) = 0x0000000000000000   
-x8  (  s0) = 0x0000000000000000    x9  (  s1) = 0x0000000000000000   
-x10 (  a0) = 0x0000000000000006 ★  x11 (  a1) = 0x0000000000001000   
-x12 (  a2) = 0x0000000000000000    x13 (  a3) = 0x0000000000000000   
-x14 (  a4) = 0x0000000000000000    x15 (  a5) = 0x0000000000000000   
-x16 (  a6) = 0x0000000000000000    x17 (  a7) = 0x0000000000000000   
-x18 (  s2) = 0x0000000000000000    x19 (  s3) = 0x0000000000000000   
-x20 (  s4) = 0x0000000000000000    x21 (  s5) = 0x0000000000000000   
-x22 (  s6) = 0x0000000000000000    x23 (  s7) = 0x0000000000000000   
-x24 (  s8) = 0x0000000000000000    x25 (  s9) = 0x0000000000000000   
-x26 ( s10) = 0x0000000000000000    x27 ( s11) = 0x0000000000000000   
-x28 (  t3) = 0x0000000000000000    x29 (  t4) = 0x0000000000000000   
-x30 (  t5) = 0x0000000000000000    x31 (  t6) = 0x0000000000000000   
+pc = 0x0000000080000040
 
-pc = 0x0000000080000038
+(mapachespim) mem fib_input 8
 
-(mapachespim) mem .text
-
-0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08  |................|
-0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07  |......@.........|
-0x80000020:  23 a0 a2 00  93 02 10 00  17 13 00 00  13 03 83 fd  |#...............|
-0x80000030:  23 30 53 00  6f 00 00 00  63 04 05 04  93 02 10 00  |#0S.o...c.......|
-0x80000040:  63 04 55 04  13 01 81 fe  23 38 11 00  23 34 81 00  |c.U.....#8..#4..|
-0x80000050:  23 30 a1 00  13 05 f5 ff  ef f0 1f fe  13 04 05 00  |#0..............|
-0x80000060:  03 35 01 00  13 05 e5 ff  ef f0 1f fd  33 05 a4 00  |.5..........3...|
-0x80000070:  83 30 01 01  03 34 81 00  13 01 81 01  67 80 00 00  |.0...4......g...|
-0x80000080:  13 05 00 00  67 80 00 00  13 05 10 00  67 80 00 00  |....g.......g...|
+0x80100000:  07 00 00 00  00 00 00 00                              |........|
 
 (mapachespim) quit
 Goodbye!
 ```
 
-At any point when execution is stopped, you can inspect registers and memory. The full 64-bit value of each 
+At any point when execution is stopped, you can inspect registers and memory. The full 64-bit value of each
 register is shown in hex along with its ABI name (like `a0`, `sp`, `ra`). A star (★) appears next to registers
-that have changed to help you follow the execution of the program.  Memory is shown in bytes, grouped into 
-4-byte words for easier reading.
+that have changed since you last looked, to help you follow the execution of the program. Memory is shown in
+bytes, grouped into 4-byte words for easier reading.
+
+### Writing Your Own Programs
+
+Write your program in a `.s` file and load it directly; MapacheSPIM assembles it for you (with debug
+info, so `list` shows your source):
+
+```asm
+# hello.s
+.isa riscv64            # which ISA this file is for
+
+.data
+msg: .asciz "Hello, world!\n"
+
+.text
+.globl _start
+_start:
+    la   a0, msg        # print_string(msg)
+    li   a7, 4
+    ecall
+    li   a7, 10         # exit
+    ecall
+```
+
+```
+(mapachespim) load hello.s
+Assembled hello.s (1096 bytes)
+Loaded hello.s (RISCV)
+...
+(mapachespim) run
+Hello, world!
+Program exited with code 0 after 6 instructions
+```
+
+After editing the file, type `reload` to re-assemble and load the new version; breakpoints on labels
+follow their labels. If your file has no `.isa` line, give the ISA when loading: `load hello.s riscv64`.
+
+To start from the examples, copy them somewhere you can edit them:
+
+```bash
+mapachespim --copy-examples my-examples
+```
+
+You can also run a program without the interactive console, which is handy for testing and
+autograding. The exit status is the program's exit code (1 on a runtime error, 124 if it doesn't finish
+within `--max-steps` instructions):
+
+```bash
+mapachespim -e hello.s
+```
+
+The standalone assembler writes an ELF file if you want one: `mapachespim-as -g hello.s -o hello`.
 
 ## Features
 
@@ -166,9 +209,9 @@ li a7, 10           # Syscall 10 = exit
 ecall
 ```
 
-Supported syscalls: `print_int` (1), `print_string` (4), `read_int` (5), `exit` (10), `print_char` (11), `read_char` (12), `exit_code` (93)
+Supported syscalls: `print_int` (1), `print_string` (4), `read_int` (5), `exit` (10), `print_char` (11), `read_char` (12), `exit2` (17), `exit_code` (93)
 
-See [Syscall Reference](docs/user/syscalls.md) for complete details.
+See [Syscall Reference](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/user/syscalls.md) for complete details.
 
 ### Console Commands
 
@@ -176,21 +219,24 @@ Familiar SPIM-like interface:
 
 | Command | Alias | Description |
 |---------|-------|-------------|
-| `load <file>` | | Load an ELF executable |
+| `load <file>` | | Load a `.s` file (assembled for you), an ELF executable, or an example |
+| `reload` | | Re-assemble and reload the current program after editing |
+| `examples` | | List the bundled example programs |
 | `step [n]` | `s` | Execute n instructions (default 1) |
-| `run [max]` | `r` | Run until halt or max instructions |
-| `break <addr>` | `b` | Set breakpoint at address or symbol |
+| `run [max]` | `r` | Run until exit, breakpoint, or max instructions |
+| `break <addr>` | `b` | Set breakpoint at address or label |
 | `continue` | `c` | Continue after breakpoint |
+| `reset` | | Restart the program from the beginning |
 | `regs` | | Show all registers |
 | `pc` | | Show program counter |
-| `mem <addr> [len]` | | Show memory contents |
+| `mem <addr> [len]` | | Show memory contents (address, label, or section) |
 | `disasm <addr> [n]` | `d` | Disassemble n instructions |
+| `list` | `l` | Show source code around the PC |
 | `info symbols` | | List all symbols |
 | `info sections` | | List ELF sections |
-| `list` | `l` | Show source code (if debug info) |
 | `quit` | `q` | Exit simulator |
 
-See [Console Guide](docs/user/console-guide.md) for complete command reference.
+See [Console Guide](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/user/console-guide.md) for complete command reference.
 
 ## What Makes This Special?
 
@@ -205,21 +251,23 @@ MapacheSPIM is powered by the [Unicorn Engine](https://www.unicorn-engine.org/),
 
 ### Multi-ISA Support
 
-MapacheSPIM supports multiple instruction set architectures:
+MapacheSPIM supports four instruction set architectures, each with the same console commands,
+syscalls, and a matching set of example programs:
 
-```
-MapacheSPIM/
-├── mapachespim/
-│   ├── unicorn_backend.py   # Unicorn-based simulator
-│   ├── elf_loader.py        # ELF parsing with pyelftools
-│   └── console.py           # Interactive console
-├── examples/riscv/          # RISC-V 64-bit examples
-├── examples/arm/            # ARM64 (AArch64) examples
-├── examples/x86_64/         # x86-64 examples
-└── examples/mips/           # MIPS32 examples
-```
+| ISA | Examples | Assembling `.s` files |
+|-----|----------|-----------------------|
+| RISC-V 64-bit (RV64IM) | `examples/riscv/` | Built in, works everywhere |
+| MIPS32 (big-endian) | `examples/mips/` | Built in, works everywhere |
+| ARM64 (AArch64) | `examples/arm/` | Uses [Keystone](https://www.keystone-engine.org/) |
+| x86-64 (AT&T or Intel syntax) | `examples/x86_64/` | Uses [Keystone](https://www.keystone-engine.org/) |
 
-The same console commands and Python API work across all supported ISAs. Just load an ELF file and MapacheSPIM detects the architecture automatically.
+Keystone is installed automatically on x86 machines (Windows, Intel Macs, x86 Linux). Its PyPI release
+has no prebuilt package for ARM machines such as Apple Silicon Macs, so it is not installed there by
+default; you can still run and debug ARM64 and x86-64 programs (including all the bundled examples), and
+can try `pip install 'mapachespim[keystone]'` to build Keystone from source (this needs CMake and a C++
+compiler).
+
+Loading an ELF file detects its ISA automatically.
 
 ### Student-Friendly Design
 
@@ -233,32 +281,26 @@ Inspired by SPIM, designed for education:
 
 ## Documentation
 
-- [Quick Start Guide](docs/user/quick-start.md) - Get running in 5 minutes
-- [Console Guide](docs/user/console-guide.md) - Complete command reference
-- [Syscall Reference](docs/user/syscalls.md) - I/O syscalls for programs
-- [Examples Guide](examples/README.md) - Learn from example programs
+- [Quick Start Guide](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/user/quick-start.md) - Get running in 5 minutes
+- [Console Guide](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/user/console-guide.md) - Complete command reference
+- [Syscall Reference](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/user/syscalls.md) - I/O syscalls for programs
+- [Examples Guide](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/examples/README.md) - Learn from example programs
 
-## Testing
+## Development
 
 ```bash
-# Run all tests (265 tests)
-python -m pytest tests/ -v
+git clone https://github.com/UCSBarchlab/MapacheSPIM.git
+cd MapacheSPIM
+pip install -e ".[dev]"
 
-# Or run individual test suites
-python -m pytest tests/test_simulator.py           # Core API tests
-python -m pytest tests/test_console_commands.py    # Console tests
-python -m pytest tests/test_disasm_comprehensive.py  # Disassembly tests
-python -m pytest tests/test_symbols.py             # Symbol tests
-python -m pytest tests/test_multi_isa.py           # Multi-ISA tests
+python -m pytest tests/          # run the test suite
+ruff check mapachespim/          # lint
+ruff format mapachespim/         # format
+mypy mapachespim/                # type check
+make -C examples DEBUG=1         # rebuild the example binaries
 ```
 
-All tests verify:
-- Correct program execution (fibonacci, matrix multiplication)
-- Console command functionality
-- Symbol table handling
-- Disassembly accuracy
-- Syscall behavior
-- Multi-ISA support (RISC-V and ARM)
+See [docs/RELEASING.md](https://github.com/UCSBarchlab/MapacheSPIM/blob/main/docs/RELEASING.md) for how to publish a release.
 
 ## License
 
@@ -269,7 +311,7 @@ All tests verify:
 
 ## Contact
 
-- Issues: [GitHub Issues](https://github.com/mapachespim/MapacheSPIM/issues)
-- Discussions: [GitHub Discussions](https://github.com/mapachespim/MapacheSPIM/discussions)
+- Issues: [GitHub Issues](https://github.com/UCSBarchlab/MapacheSPIM/issues)
+- Discussions: [GitHub Discussions](https://github.com/UCSBarchlab/MapacheSPIM/discussions)
 
-<img src="docs/Mapache.png" alt="MapacheSPIM Logo" width="300">
+<img src="https://github.com/UCSBarchlab/MapacheSPIM/raw/main/docs/Mapache.png" alt="MapacheSPIM Logo" width="300">

@@ -5,9 +5,9 @@ build-backend = "hatchling.build"
 [project]
 name = "mapachespim"
 version = "0.2.0"
-description = "Educational Multi-ISA Simulator using Unicorn Engine"
+description = "SPIM-like educational simulator and assembler for RISC-V, MIPS, ARM64, and x86-64"
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 license = {text = "MIT"}
 authors = [
     {name = "MapacheSPIM Contributors"},
@@ -18,12 +18,13 @@ classifiers = [
     "Intended Audience :: Education",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
+    "Programming Language :: Assembly",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: Education",
     "Topic :: Software Development :: Debuggers",
     "Topic :: System :: Emulators",
@@ -55,10 +56,10 @@ mapachespim = "mapachespim.console:main"
 mapachespim-as = "mapachespim.toolchain.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/mapachespim/MapacheSPIM"
-Documentation = "https://github.com/mapachespim/MapacheSPIM#readme"
-Repository = "https://github.com/mapachespim/MapacheSPIM.git"
-Issues = "https://github.com/mapachespim/MapacheSPIM/issues"
+Homepage = "https://github.com/UCSBarchlab/MapacheSPIM"
+Documentation = "https://github.com/UCSBarchlab/MapacheSPIM#readme"
+Repository = "https://github.com/UCSBarchlab/MapacheSPIM.git"
+Issues = "https://github.com/UCSBarchlab/MapacheSPIM/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["mapachespim"]
@@ -72,7 +73,7 @@ include = ["mapachespim", "examples", "tests", "docs", "README.md", "pyproject.t
 
 [tool.ruff]
 line-length = 100
-target-version = "py38"
+target-version = "py39"
 
 [tool.ruff.lint]
 select = [
@@ -91,9 +92,10 @@ ignore = [
     "SIM108", # use ternary operator (sometimes less readable)
     "SIM116", # dictionary instead of if statements (sometimes less readable)
     "SIM118", # dict instead of dict.keys() (explicit is better)
-    "UP006",  # use dict/list instead of Dict/List (need typing module for Python 3.8)
-    "UP007",  # use X | Y instead of Union[X, Y] (need typing module for Python 3.8)
-    "UP045",  # use X | None instead of Optional[X] (need typing module for Python 3.8)
+    "UP006",  # use dict/list instead of Dict/List (typing names kept for consistency)
+    "UP007",  # use X | Y instead of Union[X, Y] (needs Python 3.10)
+    "UP045",  # use X | None instead of Optional[X] (needs Python 3.10)
+    "UP035",  # typing.Dict etc. are deprecated aliases (kept for consistency)
     "B904",   # raise from (valid but would change exception semantics)
 ]
 

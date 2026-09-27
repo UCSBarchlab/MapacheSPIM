@@ -193,9 +193,10 @@ def _detect_isa_from_directive(source: str) -> Optional[str]:
             continue
         # Check for .isa directive
         if line.lower().startswith(".isa"):
-            parts = line.split(None, 1)
+            parts = line.split()
             if len(parts) >= 2:
-                isa_value = parts[1].strip().lower().replace("-", "_")
+                # First token only, so a trailing comment is ignored
+                isa_value = parts[1].lower().replace("-", "_")
                 if isa_value in DirectiveParser.VALID_ISAS:
                     return isa_value
         # Stop after first non-empty, non-comment, non-.isa line
