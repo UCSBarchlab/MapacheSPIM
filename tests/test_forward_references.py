@@ -3,14 +3,7 @@
 import pytest
 
 from mapachespim.toolchain import assemble
-from mapachespim.toolchain.assembler import KEYSTONE_AVAILABLE
 
-
-# Skip all tests if Keystone not available
-pytestmark = pytest.mark.skipif(
-    not KEYSTONE_AVAILABLE,
-    reason="Keystone engine not available"
-)
 
 
 class TestRISCVForwardReferences:

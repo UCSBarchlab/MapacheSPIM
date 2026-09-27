@@ -1,270 +1,214 @@
 # Quick Start Guide
 
-Get started with MapacheSPIM in 5 minutes. This guide will help you install the simulator and debug your first RISC-V program.
+Get started with MapacheSPIM in 5 minutes. This guide installs the simulator, runs an example
+program, and then has you write and debug your own RISC-V program.
 
-## Prerequisites
+## Install
 
-You'll need:
-- macOS or Linux (Windows via WSL)
-- Python 3.8+
+You need Python 3.9 or newer on Windows, macOS, or Linux. Check with:
 
-Check your Python version:
 ```bash
-python3 --version  # Should be 3.8 or higher
+python3 --version
 ```
 
-## Installation
+Install MapacheSPIM with [pipx](https://pipx.pypa.io/) (recommended; it keeps MapacheSPIM in its own
+environment and puts the command on your path):
 
 ```bash
-# Clone the repository
-git clone https://github.com/UCSBarchlab/MapacheSPIM.git
-cd MapacheSPIM
+pipx install git+https://github.com/UCSBarchlab/MapacheSPIM.git
+```
 
-# Create virtual environment (recommended)
-python3 -m venv venv
-source venv/bin/activate
+If you don't have pipx, `pip install git+https://github.com/UCSBarchlab/MapacheSPIM.git` works too,
+ideally inside a [virtual environment](https://docs.python.org/3/tutorial/venv.html).
 
-# Install Python package
-pip install -e .
+Verify the installation:
 
-# Verify installation
+```bash
 mapachespim --version
 ```
 
-## Your First Program
+You do not need a cross-compiler or any other tools: MapacheSPIM assembles your programs itself.
 
-Let's debug a simple Fibonacci program that's already included.
+## Run an Example
 
-### Step 1: Start the Console
-
-```bash
-mapachespim
-```
-
-You'll see:
-```
-Welcome to MapacheSPIM. Type help or ? to list commands.
-(mapachespim)
-```
-
-### Step 2: Load a Program
+Start the console and list the example programs that come with MapacheSPIM:
 
 ```
-(mapachespim) load examples/riscv/fibonacci/fibonacci
-Loaded examples/riscv/fibonacci/fibonacci
+$ mapachespim
+Welcome to MapacheSPIM. Type help or ? to list commands, or quickstart for a tutorial.
+
+(mapachespim) examples riscv
+
+RISC-V 64-bit:
+  riscv/array_stats        Array Processing with Loops
+  riscv/fibonacci          Recursive Fibonacci Calculator
+  riscv/guess_game         Number Guessing Game
+  riscv/hello_asm          Your First RISC-V Assembly Program
+  riscv/matrix_multiply    3x3 Matrix Multiplication
+```
+
+Load one and look at its source code:
+
+```
+(mapachespim) load riscv/hello_asm
+Loaded riscv/hello_asm (RISCV)
 Entry point: 0x0000000080000000
+Source info: hello_asm.s (19 address mappings)
+
+(mapachespim) list
+hello_asm.s:
+   ...
+   61>     la      a0, hello_msg   # la = "Load Address" - puts address of hello_msg into a0  # <-- PC: 0x80000000
+   62:     li      a7, 4           # li = "Load Immediate" - puts the value 4 into a7
+   63:     ecall                   # Make the syscall - this prints the string!
 ```
 
-### Step 3: See Available Symbols
+The `>` marks the line the program counter (PC) is on. Step through a few instructions:
 
 ```
-(mapachespim) info symbols
+(mapachespim) step 3
+[0x80000000] 0x17051000  auipc a0, 0x100  <_start>
+[0x80000004] 0x13050500  mv a0, a0  <_start+4>
+[0x80000008] 0x93084000  addi a7, zero, 4  <_start+8>
 ```
 
-You'll see function names and their addresses.
+Each line shows the address, the instruction's bytes, the instruction, and where it is relative to
+the nearest label. Notice that the single `la` in the source became two machine instructions
+(`auipc` and `addi`, which the disassembler shows as `mv` because its immediate is 0): `la` is a
+*pseudo-instruction*.
 
-### Step 4: Set a Breakpoint
-
-```
-(mapachespim) break main
-Breakpoint set at main (0x80000030)
-```
-
-### Step 5: Run to Breakpoint
+Run the rest of the program:
 
 ```
 (mapachespim) run
-Breakpoint hit at main (0x80000030)
-```
-
-### Step 6: Step Through Code
-
-```
-(mapachespim) step
-[0x80000030] 0x13050005  addi x10, x0, 0x5  <main>
-Register changes:
-  x10 (  a0) : 0x0000000000000000 -> 0x0000000000000005  *
-```
-
-You just saw:
-- The address (0x80000030)
-- The function name (<main>)
-- The instruction bytes (0x13050005)
-- The disassembly (addi x10, x0, 0x5)
-- Which register changed
-
-### Step 7: Inspect Registers
-
-```
-(mapachespim) regs
-```
-
-See all 32 registers with their ABI names and values.
-
-### Step 8: Continue Execution
-
-```
-(mapachespim) step 5
-```
-
-Step through 5 more instructions to see the program flow.
-
-### Step 9: Quit
-
-```
-(mapachespim) quit
+Hello, Assembly!
+Your lucky number is: 42
 Goodbye!
+Program exited with code 0 after 19 instructions
+```
+
+Use `reset` to start the program over from the beginning.
+
+## Write Your Own Program
+
+Create a file called `sum.s` in any text editor:
+
+```asm
+.isa riscv64                # This file is RISC-V (64-bit)
+
+.data
+msg:    .asciz "The sum is: "
+
+.text
+.globl _start
+_start:
+    li   t0, 0              # t0 = sum
+    li   t1, 1              # t1 = i
+    li   t2, 10             # t2 = limit
+loop:
+    add  t0, t0, t1         # sum += i
+    addi t1, t1, 1          # i++
+    ble  t1, t2, loop       # repeat while i <= limit
+
+    la   a0, msg            # print_string(msg)
+    li   a7, 4
+    ecall
+    mv   a0, t0             # print_int(sum)
+    li   a7, 1
+    ecall
+    li   a7, 10             # exit
+    ecall
+```
+
+Load it; MapacheSPIM assembles it for you:
+
+```
+(mapachespim) load sum.s
+Assembled sum.s (1160 bytes)
+Loaded sum.s (RISCV)
+Entry point: 0x0000000080000000
+Source info: sum.s (14 address mappings)
+
+(mapachespim) break loop
+Breakpoint set at loop (0x8000000c)
+
+(mapachespim) run
+Breakpoint hit at 0x000000008000000c after 3 instructions
+PC = 0x000000008000000c
+
+(mapachespim) continue
+Breakpoint hit at 0x000000008000000c after 3 instructions
+PC = 0x000000008000000c
+
+(mapachespim) regs decimal
+```
+
+`regs` shows every register; a ★ marks the ones that changed since you last looked, so you can see
+`t0` (the sum) and `t1` (the counter) changing each time around the loop. `regs decimal` shows the
+values in decimal.
+
+When you find a bug, edit `sum.s` and type `reload` to re-assemble it. Your breakpoints stay on
+their labels. If there's a mistake in the program, the error tells you the line:
+
+```
+(mapachespim) reload
+
+Error: could not assemble sum.s:
+  sum.s: Line 13: unknown register 't9' - add  t0, t0, t9
+```
+
+To check a program's output without the interactive console, use `-e`:
+
+```bash
+$ mapachespim -e sum.s
+The sum is: 55
 ```
 
 ## Essential Commands
 
-Here are the commands you'll use most:
-
 | Command | Example | What it does |
 |---------|---------|--------------|
-| load | load examples/riscv/fibonacci/fibonacci | Load a program |
-| break | break main | Set breakpoint at function |
-| run | run | Run until breakpoint/halt |
-| step | step or step 5 | Execute 1 or N instructions |
-| regs | regs | Show all registers |
-| mem | mem 0x80000000 64 | Show memory contents |
-| disasm | disasm 0x80000000 10 | Disassemble instructions |
-| info symbols | info symbols | List all symbols |
-| info breakpoints | info breakpoints | List breakpoints |
-| delete | delete 0x80000030 | Remove breakpoint |
-| clear | clear | Remove all breakpoints |
-| pc | pc | Show program counter |
-| quit | quit or Ctrl-D | Exit console |
+| load | `load sum.s` or `load riscv/fibonacci` | Load a program or example |
+| reload | `reload` | Re-assemble and reload after editing |
+| list | `list` | Show your source code around the PC |
+| break | `break loop` | Set a breakpoint at a label (or address) |
+| run | `run` | Run until the program exits or hits a breakpoint |
+| continue | `continue` | Keep running after a breakpoint |
+| step | `step` or `step 5` | Execute 1 or N instructions |
+| regs | `regs` or `regs decimal` | Show all registers |
+| mem | `mem msg 16` or `mem .data` | Show memory at a label, address, or section |
+| disasm | `disasm` or `disasm loop 5` | Disassemble instructions |
+| reset | `reset` | Restart the program from the beginning |
+| info | `info symbols` / `info breakpoints` | List labels or breakpoints |
+| examples | `examples` | List the bundled example programs |
+| quit | `quit` or Ctrl-D | Exit the console |
 
-Tip: Many commands have short aliases:
-- step -> s
-- break -> b
-- run -> r
-- continue -> c
-- disasm -> d
-- quit -> q
+Many commands have short aliases: `s` (step), `b` (break), `r` (run), `c` (continue), `d` (disasm),
+`l` (list), `q` (quit). Pressing Enter on an empty line repeats the last command, which is handy
+for stepping. Type `help <command>` for details on any command.
 
-## Debugging Tips
+## Other ISAs
 
-### 1. Use Symbolic Breakpoints
+Everything above works the same for MIPS, ARM64, and x86-64. Use `.isa mips32`, `.isa arm64`, or
+`.isa x86_64` in your file, and try `examples mips`, `examples arm`, and `examples x86_64`. See the
+[Syscall Reference](syscalls.md) for the registers each ISA uses for syscalls.
+
+To get editable copies of all the examples:
+
+```bash
+mapachespim --copy-examples my-examples
 ```
-(mapachespim) break fibonacci
-(mapachespim) run
-```
-
-Much easier than memorizing addresses.
-
-### 2. Watch Register Changes
-Single-step automatically shows what changed:
-```
-(mapachespim) step
-[0x80000000] 0x9302a000  addi x5, x0, 0xa  <_start>
-Register changes:
-  x5  (  t0) : 0x0000000000000000 -> 0x000000000000000a  *
-```
-
-### 3. Disassemble to Understand Code
-```
-(mapachespim) disasm 0x80000000 10
-```
-
-See the next 10 instructions before executing them.
-
-### 4. Multi-step for Known-Good Code
-```
-(mapachespim) step 10
-```
-
-Skip over initialization code quickly.
-
-### 5. Check Memory Contents
-```
-(mapachespim) mem 0x80000000 32
-```
-
-See the raw instruction bytes.
-
-## Example Debugging Session
-
-Here's a complete session debugging the Fibonacci program:
-
-```
-$ mapachespim
-(mapachespim) load examples/riscv/fibonacci/fibonacci
-Loaded examples/riscv/fibonacci/fibonacci
-
-(mapachespim) info symbols
-  0x80000000  _start
-  0x80000030  main
-  0x80000038  fibonacci
-  ...
-
-(mapachespim) break main
-Breakpoint set at main (0x80000030)
-
-(mapachespim) run
-Breakpoint hit at main (0x80000030)
-
-(mapachespim) step
-[0x80000030] 0x13050005  addi x10, x0, 0x5  <main>
-Register changes:
-  x10 (  a0) : 0x0000000000000000 -> 0x0000000000000005  *
-
-(mapachespim) step
-[0x80000034] 0x040000ef  jal ra, fibonacci  <main+4>
-Register changes:
-  x1  (  ra) : 0x0000000000000000 -> 0x0000000080000038  *
-
-(mapachespim) regs
-x0  (zero) = 0x0000000000000000  x1  (  ra) = 0x0000000080000038  ...
-x10 (  a0) = 0x0000000000000005  ...
-
-(mapachespim) continue
-Program halted after 42 instructions
-
-(mapachespim) quit
-Goodbye!
-```
-
-## Next Steps
-
-Now that you've run your first program:
-
-1. [Console Guide](console-guide.md) - Learn all commands in detail
-2. [Examples](../../examples/README.md) - Explore more example programs
-3. Write Your Own - Create and debug your own RISC-V programs
 
 ## Troubleshooting
 
-### Command Not Found: mapachespim
+### `mapachespim: command not found`
 
-If the console doesn't start, try:
-```bash
-# Make sure your virtual environment is activated
-source venv/bin/activate
-
-# Or run from Python package
-python3 -m mapachespim.console
-```
-
-### Import Error
-
-Make sure you installed the Python package:
-```bash
-pip3 install -e .
-```
+- With pipx, run `pipx ensurepath` and open a new terminal.
+- With pip in a virtual environment, make sure it is activated.
+- You can always run `python3 -m mapachespim.console` instead.
 
 ### Still Stuck?
 
-- Check the [full console guide](console-guide.md)
-- Look at [example programs](../../examples/README.md)
+- Read the [Console Guide](console-guide.md)
+- Look at the [example programs](../../examples/README.md)
 - Open an issue on [GitHub](https://github.com/UCSBarchlab/MapacheSPIM/issues)
-
-## What's Next?
-
-After mastering the basics, explore:
-
-- Advanced Debugging - Watchpoints, conditional breakpoints (future)
-- Multiple ISAs - ARM and CHERI support (future)
-- Custom Programs - Write and compile your own RISC-V code
-- C++ Console - Native performance console (future)

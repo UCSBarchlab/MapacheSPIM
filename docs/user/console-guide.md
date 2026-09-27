@@ -1,6 +1,6 @@
 # MapacheSPIM Interactive Console Guide
 
-SPIM-like interactive console for RISC-V programs using the Unicorn Engine.
+SPIM-like interactive console for RISC-V, MIPS, ARM64, and x86-64 programs using the Unicorn Engine.
 
 ## Quick Start
 
@@ -8,16 +8,38 @@ SPIM-like interactive console for RISC-V programs using the Unicorn Engine.
 # Launch interactive console
 mapachespim
 
-# Or load a program on startup
-mapachespim examples/riscv/fibonacci/fibonacci
+# Or load a program on startup: your own source file, an ELF, or an example
+mapachespim myprog.s
+mapachespim riscv/fibonacci
 ```
 
 ## Basic Commands
 
 ### File Loading
-- `load <file>` - Load a RISC-V ELF executable
+- `load <file> [isa]` - Load a program
+  - Assembly source (`.s`, `.S`, `.asm`) is assembled for you, with debug info so `list` works.
+    The ISA comes from an `.isa` directive in the file, or the optional `isa` argument
+    (`riscv64`, `mips32`, `arm64`, `x86_64`).
+  - ELF executables are loaded directly and their ISA is detected automatically.
+  - Bundled examples can be loaded by name.
   ```
+  (mapachespim) load myprog.s
+  (mapachespim) load myprog.s riscv64
+  (mapachespim) load riscv/fibonacci
   (mapachespim) load examples/riscv/fibonacci/fibonacci
+  ```
+
+- `reload` - Re-assemble and reload the current program (after you edit it). Breakpoints on
+  labels move with their labels.
+
+- `examples [isa]` - List the bundled example programs
+  ```
+  (mapachespim) examples mips
+
+  MIPS32:
+    mips/array_stats         Array Processing with Loops
+    mips/fibonacci           Recursive Fibonacci Calculator
+    ...
   ```
 
 ### Execution
@@ -27,23 +49,31 @@ mapachespim examples/riscv/fibonacci/fibonacci
   (mapachespim) step 10    # Execute 10 instructions
   ```
 
-- `run [max]` - Run until halt or max instructions (alias: `r`)
+- `run [max]` - Run until the program exits, hits a breakpoint, or reaches max instructions (alias: `r`)
   ```
-  (mapachespim) run        # Run until program halts
+  (mapachespim) run        # Run until program exits
   (mapachespim) run 1000   # Run max 1000 instructions
+  ```
+
+  If the program crashes, you see why and where:
+  ```
+  Error: Read from unmapped address 0x0 (at PC=0x80000004)
+    [0x80000004] 0x03350500  ld a0, 0(a0)  <_start+4>
+    prog.s:5: ld a0, 0(a0)
   ```
 
 - `continue` - Continue after breakpoint (alias: `c`)
 
 ### State Inspection
-- `regs` - Display all 32 registers + PC with ABI names
+- `regs [hex|decimal|binary]` - Display all registers + PC with ABI names. A ★ marks registers
+  that changed since you last displayed them (`regs peek` shows them without resetting that).
   ```
   (mapachespim) regs
 
   x0  (zero) = 0x0000000000000000  x1  (  ra) = 0x0000000080000018  ...
-  x2  (  sp) = 0x0000000083efffe8  x3  (  gp) = 0x0000000000000000  ...
+  x2  (  sp) = 0x0000000080181000  x3  (  gp) = 0x0000000000000000  ...
   ...
-  pc                 = 0x0000000080000004
+  pc = 0x0000000080000004
   ```
 
 - `pc` - Show just the program counter
@@ -52,9 +82,10 @@ mapachespim examples/riscv/fibonacci/fibonacci
   pc = 0x0000000080000004
   ```
 
-- `mem <addr|section> [len]` - Display memory contents with ASCII sidebar (default 256 bytes)
+- `mem <addr|label|section> [len]` - Display memory contents with ASCII sidebar (default 256 bytes)
   ```
   (mapachespim) mem 0x80000000           # By address
+  (mapachespim) mem fib_input 8          # By label
   (mapachespim) mem 0x80000000 64        # Show 64 bytes
   (mapachespim) mem .text                # By section name
   (mapachespim) mem .data 128            # Section with length
@@ -82,14 +113,16 @@ mapachespim examples/riscv/fibonacci/fibonacci
      49:     mv   t0, a0
      50:     addi a0, s0, -2
 
-  Tip: Compile with 'as -g' to include debug symbols
+  Tip: Programs loaded from .s files always have source info
   ```
 
 ### Breakpoints
-- `break <addr>` - Set breakpoint at address (alias: `b`)
+- `break <addr|label>` - Set breakpoint at an address or label (alias: `b`)
   ```
+  (mapachespim) break fibonacci
+  Breakpoint set at fibonacci (0x80000038)
   (mapachespim) break 0x80000010
-  Breakpoint set at 0x0000000080000010
+  Breakpoint set at 0x80000010
   ```
 
 - `info breakpoints` - List all breakpoints
@@ -105,9 +138,9 @@ mapachespim examples/riscv/fibonacci/fibonacci
   ```
   (mapachespim) info symbols
 
-  Symbols (22 total):
+  Symbols (11 total):
     0x80000000  _start
-    0x80000030  main
+    0x80000034  exit_loop
     0x80000038  fibonacci
     ...
   ```
@@ -127,7 +160,7 @@ mapachespim examples/riscv/fibonacci/fibonacci
   Use 'mem <section>' to view section contents (e.g., mem .data)
   ```
 
-- `delete <addr>` - Remove breakpoint at address
+- `delete <addr|label>` - Remove breakpoint at address or label
   ```
   (mapachespim) delete 0x80000010
   Breakpoint removed at 0x0000000080000010
@@ -137,7 +170,7 @@ mapachespim examples/riscv/fibonacci/fibonacci
 
 ### Utility
 - `status` - Show simulator status
-- `reset` - Reset simulator (keeps program loaded)
+- `reset` - Restart the program from the beginning (reloads memory and registers; keeps breakpoints)
 - `help` - Show all commands
 - `quit` / `exit` - Exit console (alias: `q`)
 
@@ -145,35 +178,38 @@ mapachespim examples/riscv/fibonacci/fibonacci
 
 ```
 $ mapachespim
-Welcome to MapacheSPIM. Type help or ? to list commands.
+Welcome to MapacheSPIM. Type help or ? to list commands, or quickstart for a tutorial.
 
-(mapachespim) load examples/riscv/fibonacci/fibonacci
-✓ Loaded examples/riscv/fibonacci/fibonacci
+(mapachespim) load riscv/fibonacci
+Loaded riscv/fibonacci (RISCV)
 Entry point: 0x0000000080000000
+Source info: fibonacci.s (32 address mappings)
 
-(mapachespim) step
-[0x0000000080000000] Executed 1 instruction
-
-(mapachespim) regs
-x0  (zero) = 0x0000000000000000  x1  (  ra) = 0x0000000000000000  ...
-...
-pc                 = 0x0000000080000004
-
-(mapachespim) break 0x80000038
-Breakpoint set at 0x0000000080000038
+(mapachespim) break fibonacci
+Breakpoint set at fibonacci (0x80000038)
 
 (mapachespim) run
-Breakpoint hit at 0x0000000080000038 after 5 instructions
+Breakpoint hit at 0x0000000080000038 after 6 instructions
 PC = 0x0000000080000038
 
+(mapachespim) step
+[0x80000038] 0x63040504  beqz a0, 0x48  <fibonacci>
+
+(mapachespim) regs
+x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000080000018 ★
+...
+pc = 0x000000008000003c
+
+(mapachespim) delete fibonacci
+Breakpoint removed at 0x0000000080000038
+
 (mapachespim) continue
-Executed 95 instruction(s)
-PC = 0x00000000800000f0
+Program completed (tohost) after 455 instructions
+PC = 0x0000000080000034
 
-(mapachespim) mem 0x80000000 32
+(mapachespim) mem fib_result 8
 
-0x80000000:  17 01 f0 03  13 01 01 00  97 02 00 00  93 82 82 08  |................|
-0x80000010:  03 a5 02 00  ef 00 40 02  97 02 00 00  93 82 c2 07  |......@.........|
+0x80100004:  0d 00 00 00  00 00 00 00                              |........|
 
 (mapachespim) quit
 Goodbye!
@@ -201,21 +237,29 @@ The console shows both numeric (x0-x31) and ABI names:
 ## Command Line Options
 
 ```bash
-# Launch console
-mapachespim
+mapachespim                          # Launch the console
+mapachespim myprog.s                 # Load a program on startup
+mapachespim myprog.s --isa riscv64   # ...for a .s file without an .isa directive
+mapachespim -e myprog.s              # Run without the console and exit
+mapachespim -e myprog.s --max-steps 1000000
+mapachespim --copy-examples my-dir   # Copy the bundled examples somewhere editable
+mapachespim --version
+```
 
-# Load file on startup
-mapachespim examples/riscv/fibonacci/fibonacci
+With `-e`, only the program's output goes to stdout, and the exit status is the program's exit code,
+1 if it crashed, or 124 if it did not finish within `--max-steps` instructions (default 10,000,000).
+This makes `-e` convenient for testing and autograding:
 
-# Quiet mode (less verbose)
-mapachespim -q examples/riscv/fibonacci/fibonacci
+```bash
+echo 7 | mapachespim -e fib.s > output.txt
 ```
 
 ## Keyboard Shortcuts
 
 - **Ctrl-C** during `run` - Interrupt execution
 - **Ctrl-D** or `quit` - Exit console
-- **Tab** - Command completion
+- **Tab** - Complete commands, file paths, example names, and labels (after `break`)
+- **Enter** on an empty line - Repeat the last command (handy for `step`)
 - **Up/Down arrows** - Command history
 
 ## Tips
@@ -244,10 +288,10 @@ mapachespim -q examples/riscv/fibonacci/fibonacci
    info sections     # List all available sections
    ```
 
-4. **Source code viewing**: Requires debug symbols (compile with `-g`)
+4. **Source code viewing**: Requires debug info (automatic when you load a `.s` file)
    ```
    list              # Show source around current PC
-   list main         # Show source around function
+   list fibonacci    # Show source around function
    list 25           # Show source around line 25
    ```
 
@@ -256,38 +300,46 @@ mapachespim -q examples/riscv/fibonacci/fibonacci
    step 10           # Execute 10 instructions at once
    ```
 
-## Compiling with Debug Symbols
+## Assembling Programs
 
-To enable the `list` command for source code viewing, compile your assembly with debug symbols:
+The simplest way is to `load` your `.s` file; MapacheSPIM assembles it with debug info. To produce
+an ELF file instead, use the bundled assembler:
 
 ```bash
-# Assemble with debug symbols
-riscv64-unknown-elf-as -march=rv64g -mabi=lp64 -g -o program.o program.s
-
-# Link as normal
-riscv64-unknown-elf-ld -T linker.ld -o program program.o
+mapachespim-as -g program.s -o program           # .isa directive in the file
+mapachespim-as -g program.s -o program --isa mips32
 ```
 
-The `-g` flag adds DWARF debug information that maps machine addresses to source lines.
+The `-g` flag adds DWARF debug information that maps machine addresses to source lines, which the
+`list` command uses. ELF files from other toolchains (such as GNU `as`/`ld` with `-g`) also load,
+as long as they are statically linked executables for a supported ISA.
 
 ## Differences from SPIM
 
 MapacheSPIM is similar to SPIM but has key differences:
 
-1. **RISC-V instead of MIPS**: Uses RISC-V ISA via Unicorn Engine
-2. **ELF files**: Loads compiled ELF binaries (not assembly source)
-3. **64-bit**: Full RV64I support by default
-4. **Source display**: Optional via `list` command (requires `-g` flag)
+1. **Several ISAs**: RISC-V (RV64IM), MIPS32, ARM64, and x86-64, all with the same commands and syscalls
+2. **Real executables**: Programs are assembled to ELF files, so the same binaries work with other tools
+3. **Delay slots**: On MIPS, the assembler fills each branch and jump delay slot with a `nop` (like
+   GNU `as` in its default `.set reorder` mode), and the simulator executes delay slots as real
+   hardware does. Write `.set noreorder` to fill delay slots yourself
+4. **Same code as GNU as**: RISC-V and MIPS programs assemble to exactly what GNU `as` produces,
+   so disassembly matches what you see in textbooks and `objdump`. One deliberate exception follows
+   SPIM instead: on MIPS, the two-operand `div $t0, $t1` / `divu $t0, $t1` is the real instruction
+   (results in HI and LO), whereas GNU `as` treats it as `div $t0, $t0, $t1`
+5. **Runtime checks**: MIPS `div`/`rem` with three operands trap on division by zero and on
+   overflow, as in SPIM, and the console reports "Division by zero"
+6. **Source display**: `list` shows your source code next to the program counter
 
 ## Troubleshooting
 
 **Console won't start:**
-- Make sure you've installed the package: `pip install -e .`
-- Check Python path includes mapachespim package
+- See the install instructions in the [Quick Start Guide](quick-start.md)
+- You can always run `python3 -m mapachespim.console`
 
-**Can't load ELF file:**
-- Verify file is RISC-V ELF: `file examples/riscv/fibonacci/fibonacci`
-- Check file path is correct
+**Can't load a file:**
+- Check the file path is correct; type `examples` to see the bundled programs
+- ELF files must be statically linked executables for RISC-V, MIPS, ARM64, or x86-64
 
 **Breakpoint not hit:**
 - Verify address is correct: `mem <addr>`

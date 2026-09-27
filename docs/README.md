@@ -5,19 +5,14 @@ This directory contains all project documentation organized by audience and purp
 ## Quick Links
 
 ### For Students and Users
-- [Quick Start Guide](user/quick-start.md) - Get started in 5 minutes
+- [Quick Start Guide](user/quick-start.md) - Install and write your first program in 5 minutes
 - [Console Guide](user/console-guide.md) - Complete console command reference
-- [Examples Guide](../examples/README.md) - Learn from example programs
+- [Syscall Reference](user/syscalls.md) - I/O syscalls for each ISA
+- [Examples Guide](../examples/README.md) - The bundled example programs and templates
 
-## Documentation Structure
-
-```
-docs/
-├── README.md (this file)       # Documentation index
-│
-└── user/                        # User documentation
-    ├── quick-start.md          # Getting started guide
-    └── console-guide.md        # Console usage reference
- 
-
-```
+### For Developers and Maintainers
+- [Python API](../mapachespim/README.md) - Using the simulator and assembler from Python
+- [Architecture](dev/architecture.md) - How the code is organized, and how to add an ISA
+- [Tests](../tests/README.md) - The test suite
+- [Releasing](RELEASING.md) - Publishing a new version to PyPI
+- [Changelog](../CHANGELOG.md)

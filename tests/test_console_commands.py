@@ -580,6 +580,18 @@ class TestTabCompletion(unittest.TestCase):
         for r in result:
             self.assertTrue(r.startswith('examples/'), f"Expected path to start with 'examples/', got '{r}'")
 
+    def test_complete_load_keeps_forward_slashes_on_windows(self):
+        """On Windows glob returns backslash paths; completions keep the user's '/'"""
+        import os
+        from unittest import mock
+
+        with mock.patch.object(os, "sep", "\\"), mock.patch(
+            "glob.glob", return_value=["examples\\arm", "examples\\riscv"]
+        ):
+            result = self.console.complete_load('examples/', 'load examples/', 5, 14)
+        self.assertIn('examples/arm/', result)
+        self.assertIn('examples/riscv/', result)
+
     def test_complete_break_with_symbols(self):
         """Test break command completes symbol names"""
         self.console.onecmd('load examples/riscv/fibonacci/fibonacci')

@@ -13,28 +13,23 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim.unicorn_backend import (
-    UnicornSimulator, ISA, StepResult, X86_64Config
-)
+from mapachespim.isa import get_spec
+from mapachespim.unicorn_backend import UnicornSimulator, ISA, StepResult
 
 
-class TestX86Config(unittest.TestCase):
-    """Test x86-64 configuration"""
-
-    def test_x86_config_exists(self):
-        """Test that X86_64Config class exists"""
-        config = X86_64Config()
-        self.assertIsNotNone(config)
+class TestX86Spec(unittest.TestCase):
+    """Test the x86-64 ISA spec"""
 
     def test_x86_register_names(self):
         """Test x86-64 register names"""
-        config = X86_64Config()
+        names = get_spec(ISA.X86_64).registers.names
         expected_names = [
             "rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi",
             "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15"
         ]
         for i, expected in enumerate(expected_names):
-            self.assertEqual(config.get_reg_name(i), expected)
+            self.assertEqual(names[i], expected)
+            self.assertEqual(UnicornSimulator(isa=ISA.X86_64).get_reg_name(i), expected)
 
 
 class TestX86Simulator(unittest.TestCase):

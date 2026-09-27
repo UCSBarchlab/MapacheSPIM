@@ -17,16 +17,10 @@ import pytest
 from typing import Dict, List, Tuple
 
 from mapachespim.toolchain import assemble
-from mapachespim.toolchain.assembler import Assembler, KEYSTONE_AVAILABLE
+from mapachespim.toolchain.assembler import Assembler
 from mapachespim.toolchain.directives import DirectiveParser, LineType
-from mapachespim.toolchain.memory_map import get_layout
+from mapachespim.memory_map import get_layout
 
-
-# Skip all tests if Keystone not available
-pytestmark = pytest.mark.skipif(
-    not KEYSTONE_AVAILABLE,
-    reason="Keystone engine not available"
-)
 
 
 # =============================================================================
@@ -222,14 +216,14 @@ class TestInstructionSizeEstimation:
         assert not errors, f"Label mismatches:\n" + "\n".join(errors)
 
     def test_arm64_adr_with_symbol(self):
-        """ARM64 adr with symbol may expand to movz+movk sequence."""
+        """ARM64 ldr =symbol (literal pool load) is one instruction."""
         source = """
         .data
         message: .asciz "Hello"
 
         .text
         start:
-            adr x0, message
+            ldr x0, =message
         after_adr:
             nop
         """
@@ -253,7 +247,7 @@ class TestInstructionSizeEstimation:
         assert not errors, f"Label mismatches:\n" + "\n".join(errors)
 
     def test_arm64_multiple_adr(self):
-        """ARM64 multiple adr instructions - tests cumulative error."""
+        """ARM64 multiple literal loads - tests cumulative error."""
         source = """
         .data
         msg1: .asciz "Hello"
@@ -261,9 +255,9 @@ class TestInstructionSizeEstimation:
 
         .text
         start:
-            adr x0, msg1
+            ldr x0, =msg1
         after_adr1:
-            adr x1, msg2
+            ldr x1, =msg2
         after_adr2:
             bl helper
         after_bl:
@@ -731,23 +725,23 @@ class TestPseudoInstructionExpansion:
                 f"'{branch}' should expand to 12 bytes (slt+branch+nop), got {size}"
 
     def test_arm64_adr_expansion(self):
-        """Test ARM64 adr with symbol expands correctly."""
+        """Test ARM64 ldr =symbol assembles to a single instruction."""
         source = """
         .data
         msg: .asciz "Hello"
 
         .text
         start:
-            adr x0, msg
+            ldr x0, =msg
         end:
             nop
         """
         result = assemble(source, isa="arm64")
         assert result.success, f"Assembly failed: {result.errors}"
 
-        # adr with far symbol should expand to movz + movk(s)
+        # A literal load is one instruction; the address lives in a literal pool
         size = result.symbols["end"] - result.symbols["start"]
-        assert size >= 4, f"adr should be at least 4 bytes, got {size}"
+        assert size == 4, f"ldr = should be 4 bytes, got {size}"
 
         errors = verify_label_accuracy(source, "arm64")
         assert not errors, f"Label mismatches:\n" + "\n".join(errors)
@@ -905,7 +899,7 @@ class TestRegressions:
 
         .text
         _start:
-            adr x0, msg
+            ldr x0, =msg
             bl done
             nop
             nop
@@ -929,8 +923,8 @@ class TestRegressions:
 
         .text
         _start:
-            adr x0, msg1
-            adr x1, msg2
+            ldr x0, =msg1
+            ldr x1, =msg2
             bl target
             nop
         target:
@@ -1040,7 +1034,7 @@ class TestDiagnosticReport:
             .text
             start: nop
             l1: mov x0, 5
-            l2: adr x1, msg
+            l2: ldr x1, =msg
             l3: bl start
             l4: cbz x0, start
             end: nop

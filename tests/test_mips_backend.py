@@ -13,20 +13,16 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim.unicorn_backend import ISA, MIPSConfig, UnicornSimulator
+from mapachespim.isa import get_spec
+from mapachespim.unicorn_backend import ISA, UnicornSimulator
 
 
-class TestMIPSConfig(unittest.TestCase):
-    """Test MIPS configuration"""
-
-    def test_mips_config_exists(self):
-        """Test that MIPSConfig class exists"""
-        config = MIPSConfig()
-        self.assertIsNotNone(config)
+class TestMIPSSpec(unittest.TestCase):
+    """Test the MIPS ISA spec"""
 
     def test_mips_register_names(self):
         """Test MIPS register names"""
-        config = MIPSConfig()
+        names = get_spec(ISA.MIPS).registers.names
         expected_names = [
             "zero", "at", "v0", "v1",  # $0-$3
             "a0", "a1", "a2", "a3",    # $4-$7
@@ -39,7 +35,8 @@ class TestMIPSConfig(unittest.TestCase):
             "gp", "sp", "fp", "ra",    # $28-$31
         ]
         for i, expected in enumerate(expected_names):
-            self.assertEqual(config.get_reg_name(i), expected)
+            self.assertEqual(names[i], expected)
+            self.assertEqual(UnicornSimulator(isa=ISA.MIPS).get_reg_name(i), expected)
 
 
 class TestMIPSSimulator(unittest.TestCase):

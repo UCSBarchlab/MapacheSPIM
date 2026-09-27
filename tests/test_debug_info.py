@@ -15,7 +15,8 @@ from io import StringIO
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim.console import MapacheSPIMConsole, _parse_dwarf_line_info, SourceInfo
+from mapachespim.console import MapacheSPIMConsole
+from mapachespim.debug_info import SourceInfo, parse_line_info
 from mapachespim import create_simulator
 
 
@@ -24,7 +25,7 @@ class TestDWARFParsing(unittest.TestCase):
 
     def test_parse_riscv_debug_info(self):
         """Test parsing DWARF info from RISC-V ELF with debug symbols"""
-        info = _parse_dwarf_line_info('examples/riscv/hello_asm/hello_asm')
+        info = parse_line_info('examples/riscv/hello_asm/hello_asm')
 
         self.assertTrue(info.has_debug_info, "Should have debug info")
         self.assertGreater(len(info.addr_to_line), 0, "Should have address mappings")
@@ -34,7 +35,7 @@ class TestDWARFParsing(unittest.TestCase):
 
     def test_address_mappings_exist(self):
         """Test that address mappings point to valid source lines"""
-        info = _parse_dwarf_line_info('examples/riscv/hello_asm/hello_asm')
+        info = parse_line_info('examples/riscv/hello_asm/hello_asm')
 
         for addr, (filename, line_num) in info.addr_to_line.items():
             self.assertIsInstance(addr, int)
@@ -48,7 +49,7 @@ class TestSourceLocationMapping(unittest.TestCase):
 
     def test_exact_address_lookup(self):
         """Test that exact address lookup works"""
-        info = _parse_dwarf_line_info('examples/riscv/hello_asm/hello_asm')
+        info = parse_line_info('examples/riscv/hello_asm/hello_asm')
 
         # Entry point should have a mapping
         location = info.get_location(0x80000000)
@@ -61,7 +62,7 @@ class TestSourceLocationMapping(unittest.TestCase):
         The 'la' instruction expands to 'auipc + addi' (2 instructions, 8 bytes).
         Both 0x80000000 and 0x80000004 should map to line 61.
         """
-        info = _parse_dwarf_line_info('examples/riscv/hello_asm/hello_asm')
+        info = parse_line_info('examples/riscv/hello_asm/hello_asm')
 
         # The first 'la' at 0x80000000 expands to two instructions
         # Both addresses should map to the same source line
@@ -77,7 +78,7 @@ class TestSourceLocationMapping(unittest.TestCase):
 
     def test_all_pcs_have_mapping(self):
         """Test that stepping through the program, every PC has a source mapping"""
-        info = _parse_dwarf_line_info('examples/riscv/hello_asm/hello_asm')
+        info = parse_line_info('examples/riscv/hello_asm/hello_asm')
         sim = create_simulator('examples/riscv/hello_asm/hello_asm')
 
         # Step through first 20 instructions

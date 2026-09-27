@@ -37,3 +37,8 @@ dist/
 
 # Temporary/debug files
 *.log
+
+# Coverage data
+.coverage
+.coverage.*
+htmlcov/

@@ -1,16 +1,10 @@
-"""Tests for the MapacheSPIM toolchain (Keystone-based assembler)."""
+"""Tests for the MapacheSPIM toolchain (built-in assemblers)."""
 
 import pytest
 from mapachespim.toolchain import assemble, AssemblyResult
-from mapachespim.toolchain.assembler import Assembler, KEYSTONE_AVAILABLE
+from mapachespim.toolchain.assembler import Assembler
 from mapachespim.toolchain.directives import DirectiveParser, LineType
 
-
-# Skip all tests if Keystone not available
-pytestmark = pytest.mark.skipif(
-    not KEYSTONE_AVAILABLE,
-    reason="Keystone engine not available"
-)
 
 
 class TestDirectiveParser:
@@ -49,7 +43,7 @@ class TestDirectiveParser:
 
     def test_arm_immediate_not_comment(self):
         """Test that ARM-style #immediate is not treated as comment."""
-        parser = DirectiveParser()
+        parser = DirectiveParser(isa="arm64")
         sections = parser.parse("mov x0, #42")
         lines = sections[".text"].lines
         assert len(lines) == 1

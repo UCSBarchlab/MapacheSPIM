@@ -16,24 +16,25 @@ import argparse
 import sys
 from pathlib import Path
 
+from .. import __version__
+from ..isa import ISA_SPECS, isa_names
+
 
 def main(args: list[str] | None = None) -> int:
     """Main entry point for mapachespim-as CLI."""
+    supported = "\n".join(f"    {spec.name:<8} - {spec.display_name}" for spec in ISA_SPECS)
     parser = argparse.ArgumentParser(
         prog="mapachespim-as",
         description="Assemble source files to ELF executables",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
     mapachespim-as program.s -o program.elf --isa riscv64
     mapachespim-as hello.s --isa arm64 -g  # With debug info
     mapachespim-as test.s  # Auto-detect ISA from source
 
 Supported ISAs:
-    riscv64  - RISC-V 64-bit
-    arm64    - ARM AArch64
-    x86_64   - Intel/AMD 64-bit
-    mips32   - MIPS 32-bit (big-endian)
+{supported}
 """,
     )
 
@@ -44,7 +45,8 @@ Supported ISAs:
     )
 
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=Path,
         default=None,
         help="Output ELF file (default: source with .elf extension)",
@@ -53,7 +55,7 @@ Supported ISAs:
     parser.add_argument(
         "--isa",
         type=str,
-        choices=["riscv64", "arm64", "x86_64", "mips32"],
+        choices=isa_names(),
         default=None,
         help="Target ISA (auto-detected if not specified)",
     )
@@ -66,13 +68,15 @@ Supported ISAs:
     )
 
     parser.add_argument(
-        "-g", "--debug",
+        "-g",
+        "--debug",
         action="store_true",
         help="Generate DWARF debug information",
     )
 
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Verbose output",
     )
@@ -80,7 +84,7 @@ Supported ISAs:
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 0.1.0",
+        version=f"%(prog)s {__version__}",
     )
 
     parsed = parser.parse_args(args)
@@ -126,13 +130,12 @@ Supported ISAs:
         return 1
 
     # Success
-    if parsed.verbose or True:  # Always show success message
-        isa_name = result.isa.upper() if result.isa else "Unknown"
-        size = len(result.elf_bytes)
-        symbols = len(result.symbols)
-        debug_str = ", debug" if parsed.debug else ""
-        print(f"Assembled: {output_path} ({isa_name}, {size} bytes, {symbols} symbols{debug_str})")
-        print(f"Entry point: 0x{result.entry_point:08x}")
+    isa_name = result.isa.upper() if result.isa else "Unknown"
+    size = len(result.elf_bytes)
+    symbols = len(result.symbols)
+    debug_str = ", debug" if parsed.debug else ""
+    print(f"Assembled: {output_path} ({isa_name}, {size} bytes, {symbols} symbols{debug_str})")
+    print(f"Entry point: 0x{result.entry_point:08x}")
 
     return 0
 

@@ -28,106 +28,117 @@ Each ISA directory contains 5 progressively challenging programs:
 # Start MapacheSPIM
 mapachespim
 
-# Load and run a RISC-V example
-(mapachespim) load examples/riscv/fibonacci/fibonacci
+# List the examples, then load and run one
+(mapachespim) examples
+(mapachespim) load riscv/fibonacci
 (mapachespim) run
 
-# Try an ARM64 example
-(mapachespim) load examples/arm/fibonacci/fibonacci
+# Try the same program on another ISA
+(mapachespim) load arm/fibonacci
 (mapachespim) run
+```
+
+The examples are included in the installed package, so these names work from any directory. To get
+your own editable copy:
+
+```bash
+mapachespim --copy-examples my-examples
 ```
 
 ## Building Examples
 
-Each ISA directory has a Makefile. You'll need the appropriate cross-compiler:
-
-### RISC-V
-```bash
-# macOS
-brew install riscv64-elf-gcc
-
-# Build
-cd examples/riscv && make
-```
-
-### ARM64
-```bash
-# macOS
-brew install aarch64-elf-gcc
-
-# Build
-cd examples/arm && make
-```
-
-### x86-64
-```bash
-# macOS
-brew install x86_64-elf-binutils x86_64-elf-gcc
-
-# Build
-cd examples/x86_64 && make
-```
-
-### MIPS32
-```bash
-# Linux
-sudo apt install binutils-mips-linux-gnu gcc-mips-linux-gnu
-
-# Build
-cd examples/mips && make
-```
-
-## Using the Built-in Assembler
-
-MapacheSPIM includes a built-in assembler that doesn't require external toolchains:
+Each directory has the assembly source (`.s`) next to a prebuilt executable. You can load a source
+file directly (`load riscv/fibonacci/fibonacci.s`) and MapacheSPIM assembles it for you. To rebuild
+the executables with the bundled assembler, from this directory:
 
 ```bash
-# Assemble a RISC-V program
-mapachespim-as examples/riscv/hello_asm/hello_asm.s -o hello_asm
-
-# Then load it
-mapachespim
-(mapachespim) load hello_asm
-(mapachespim) run
+make            # build all examples
+make DEBUG=1    # build with debug info (how the committed binaries are built)
+make riscv      # build only one ISA: riscv, mips, arm, or x86_64
 ```
+
+or assemble a single file:
+
+```bash
+mapachespim-as -g riscv/hello_asm/hello_asm.s -o hello_asm
+```
+
+All four ISAs are assembled by MapacheSPIM's built-in assembler, which produces the same machine
+code as GNU `as`.
+
+The Makefiles inside each ISA directory are an alternative that builds with the GNU cross
+toolchains (for example `riscv64-unknown-elf-as`), for anyone who prefers them.
 
 ## Creating Your Own Programs
 
+Start each file with an `.isa` line so MapacheSPIM knows which ISA it is for. Each template below
+prints a number and exits.
+
 ### RISC-V Template
 ```assembly
+.isa riscv64
 .text
 .globl _start
-
 _start:
-    # Your code here
-    li a0, 42           # Return value
-    li a7, 10           # Exit syscall
+    li a0, 42           # Value to print
+    li a7, 1            # print_int
     ecall
+    li a7, 10           # exit
+    ecall
+```
+
+### MIPS Template
+```assembly
+.isa mips32
+.text
+.globl _start
+_start:
+    li $a0, 42          # Value to print
+    li $v0, 1           # print_int
+    syscall
+    li $v0, 10          # exit
+    syscall
 ```
 
 ### ARM64 Template
 ```assembly
+.isa arm64
 .text
 .globl _start
-
 _start:
-    // Your code here
-    mov x0, #42         // Return value
-    mov x8, #10         // Exit syscall
+    mov x0, #42         // Value to print
+    mov x8, #1          // print_int
     svc #0
+    mov x8, #10         // exit
+    svc #0
+```
+
+### x86-64 Template
+```assembly
+.isa x86_64
+.text
+.globl _start
+_start:
+    movq $42, %rdi      # Value to print
+    movq $1, %rax       # print_int
+    syscall
+    movq $10, %rax      # exit
+    syscall
 ```
 
 ### Syscalls
 
-All ISAs support SPIM-compatible syscalls:
+All ISAs support the same SPIM-compatible syscalls; only the registers differ:
 
-| # | Name | Arguments | Description |
-|---|------|-----------|-------------|
-| 1 | print_int | a0 = integer | Print integer |
-| 4 | print_string | a0 = address | Print null-terminated string |
-| 5 | read_int | | Read integer into v0/a0 |
-| 10 | exit | | Exit program |
-| 11 | print_char | a0 = char | Print ASCII character |
+| # | Name | Description |
+|---|------|-------------|
+| 1 | print_int | Print integer |
+| 4 | print_string | Print null-terminated string |
+| 5 | read_int | Read integer |
+| 10 | exit | Exit program |
+| 11 | print_char | Print ASCII character |
+| 12 | read_char | Read a character |
+| 17 | exit2 | Exit with a code |
 
 See [Syscall Reference](../docs/user/syscalls.md) for complete details.
 
