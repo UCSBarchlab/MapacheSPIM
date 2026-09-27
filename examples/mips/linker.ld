@@ -1,5 +1,5 @@
 /* ============================================================================
- * MIPS Linker Script for Bare-Metal Programs (Unicorn Emulator)
+ * MIPS Linker Script for Bare-Metal Programs (GNU ld)
  * ============================================================================
  *
  * Uses traditional MIPS user-space memory layout:

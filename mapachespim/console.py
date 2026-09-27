@@ -223,7 +223,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         self.loaded_source = source
         self._elf_path = elf_path
         # Registers at the entry point are the baseline for ★ change markers
-        self.prev_regs = self.sim.get_all_regs()
+        self.prev_regs = self._reg_snapshot()
         pc = self.sim.get_pc()
         isa_name = self.sim.get_isa_name()
         print(f"Loaded {display_name} ({isa_name})", file=self.stdout)
@@ -404,8 +404,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         Usage:
             step [n]
 
-        Executes n instructions (default 1) and displays the program
-        counter for each step. If a breakpoint is hit, execution stops.
+        Executes n instructions (default 1), showing each one before it
+        runs. If a breakpoint is hit, execution stops.
 
         Arguments:
             n - Number of instructions to execute (optional, default=1)
@@ -418,11 +418,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             step 5          # Execute 5 instructions
             s 10            # Execute 10 instructions (using alias)
 
-        Tips:
-            - Use 'step 1' to carefully trace through code
-            - Use 'step 10' to quickly skip over known-good code
-            - After stepping, use 'regs' to see register changes
-            - Set breakpoints before stepping to stop at key locations
+        Pressing Enter on an empty line repeats the last command, so after
+        one 'step' each Enter steps again. Use 'stepreg' to see the
+        registers after each step.
         """
         if not self._require_program():
             return
@@ -617,7 +615,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         except Exception as e:
             self.print_error(f"Error reloading {self.loaded_file}: {e}")
             return
-        self.prev_regs = self.sim.get_all_regs()
+        self.prev_regs = self._reg_snapshot()
         print(
             f"Reset {self.loaded_file}. PC = {self.sim.get_pc():#018x}",
             file=self.stdout,
@@ -740,6 +738,13 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         return sign + prefix + formatted
 
+    def _reg_snapshot(self) -> List[int]:
+        """Every register value 'regs' shows except the PC: the general-purpose
+        registers, then any special registers, then the flags"""
+        flags = self.sim.get_flags()
+        extra = [flags] if flags is not None else []
+        return self.sim.get_all_regs() + self.sim.get_special_regs() + extra
+
     def _change_marker(self) -> str:
         """Marker for changed registers; '*' where the terminal can't show ★"""
         encoding = getattr(self.stdout, "encoding", None) or "utf-8"
@@ -758,8 +763,10 @@ class MapacheSPIMConsole(cmd.Cmd):
         Shows all general-purpose registers with their ABI names plus the
         program counter (PC). Register count and names vary by ISA:
           - RISC-V: 32 registers (x0-x31)
-          - ARM64:  32 registers (x0-x30, sp)
-          - x86-64: 16 registers (rax, rcx, rdx, etc.)
+          - MIPS:   32 registers ($zero-$ra), plus hi and lo (set by mult and div)
+          - ARM64:  32 registers (x0-x30, sp), plus the nzcv flags
+          - x86-64: 16 registers (rax, rcx, rdx, etc.), plus the rflags flags
+                    CF, ZF, SF, and OF
 
         Display format can be controlled with arguments or 'set' command.
 
@@ -788,6 +795,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use 'regs peek' to view without resetting the change baseline
             - Use 'status' to see current ISA
         """
+        if not self._require_program():
+            return
+
         # Parse arguments for temporary overrides and peek mode
         show_mode = self.regs_base
         leading_zeros_mode = self.regs_leading_zeros
@@ -810,7 +820,7 @@ class MapacheSPIMConsole(cmd.Cmd):
                     return
 
         self._print_block_start()
-        regs = self.sim.get_all_regs()
+        regs = self._reg_snapshot()
         pc = self.sim.get_pc()
 
         # Determine the width needed for values based on format
@@ -823,49 +833,50 @@ class MapacheSPIMConsole(cmd.Cmd):
         else:
             value_width = 18
 
+        def star(index: int) -> str:
+            """The change marker for regs[index], if it changed since last shown"""
+            changed = (
+                self.show_reg_changes
+                and self.prev_regs is not None
+                and index < len(self.prev_regs)
+                and self.prev_regs[index] != regs[index]
+            )
+            return f" {self._change_marker()} " if changed else "   "
+
+        # Label each general-purpose register by ISA, e.g. "x5 (t0)" or "rax",
+        # then the special registers (MIPS hi and lo) by name
+        num_regs = self.sim.get_register_count()
+        registers = self.sim.spec.registers
+        labels = []
+        for reg_num in range(num_regs):
+            abi_name = self.sim.get_reg_name(reg_num)
+            if registers.number_prefix:
+                labels.append(f"{registers.number_prefix}{reg_num:<2} ({abi_name:>4})")
+            else:
+                labels.append(f"{abi_name:>3}")
+        labels += [f"{name:>3}" for name in registers.special]
+
         # Format registers in 2 columns (or 1 if binary is too wide)
         cols = 1 if show_mode == "binary" else 2
-        num_regs = self.sim.get_register_count()
-        prefix = self.sim.spec.registers.number_prefix if self.sim.get_isa() is not None else None
-
-        reg_lines = []
-        for i in range(0, num_regs, cols):
+        for i in range(0, len(labels), cols):
             line_parts = []
-            for j in range(cols):
-                if i + j < num_regs:
-                    reg_num = i + j
-                    abi_name = self.sim.get_reg_name(reg_num)
-                    value = regs[reg_num]
-
-                    # Format the value
-                    formatted_value = self._format_reg_value(value, show_mode, leading_zeros_mode)
-
-                    # Check if this register changed with the last instruction
-                    star = (
-                        f" {self._change_marker()} "
-                        if (
-                            self.show_reg_changes
-                            and self.prev_regs is not None
-                            and reg_num < len(self.prev_regs)
-                            and self.prev_regs[reg_num] != value
-                        )
-                        else "   "
-                    )
-
-                    # Format register name based on ISA
-                    if prefix:  # e.g. "x5 (t0)"
-                        label = f"{prefix}{reg_num:<2} ({abi_name:>4})"
-                    else:  # just the name, e.g. "rax"
-                        label = f"{abi_name:>3}"
-                    line_parts.append(f"{label} = {formatted_value:<{value_width}}{star}")
-            reg_lines.append(" ".join(line_parts))
-
-        for line in reg_lines:
-            print(line, file=self.stdout)
+            for index in range(i, min(i + cols, len(labels))):
+                formatted_value = self._format_reg_value(regs[index], show_mode, leading_zeros_mode)
+                line_parts.append(
+                    f"{labels[index]} = {formatted_value:<{value_width}}{star(index)}"
+                )
+            print(" ".join(line_parts), file=self.stdout)
 
         # Format PC
         formatted_pc = self._format_reg_value(pc, show_mode, leading_zeros_mode)
         print(f"\npc = {formatted_pc}", file=self.stdout)
+
+        # The flags, one bit each, e.g. "nzcv: N=0 Z=1 C=1 V=0"
+        if registers.flags is not None:
+            flags = regs[-1]
+            bits = " ".join(f"{name}={(flags >> bit) & 1}" for name, bit in registers.flags.bits)
+            marker = star(len(regs) - 1).rstrip()
+            print(f"{registers.flags.name}: {bits}{marker}", file=self.stdout)
         self._print_block_end()
 
         # Update the snapshot for change tracking (unless peek mode)
@@ -887,10 +898,13 @@ class MapacheSPIMConsole(cmd.Cmd):
             pc              # See new PC value
 
         Tips:
-            - PC increments by 4 for each instruction (32-bit encoding)
+            - PC advances by the size of each instruction (always 4 bytes on
+              RISC-V, MIPS, and ARM64; 1 to 15 bytes on x86-64)
             - Jump/branch instructions change PC non-sequentially
             - Use 'mem <pc_value>' to see instructions at PC
         """
+        if not self._require_program():
+            return
         pc = self.sim.get_pc()
         print(f"pc = {pc:#018x}", file=self.stdout)
 

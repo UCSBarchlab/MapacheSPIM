@@ -523,6 +523,20 @@ class UnicornSimulator:
         """All general-purpose register values, by register number"""
         return [self.get_reg(i) for i in range(self.get_register_count())]
 
+    def get_special_regs(self) -> List[int]:
+        """Values of the ISA's other registers (e.g. MIPS hi and lo), in the
+        order of ``spec.registers.special``"""
+        if self._uc is None:
+            return []
+        return [self._uc.reg_read(reg) for reg in self._engine.special_regs]
+
+    def get_flags(self) -> Optional[int]:
+        """The condition-code register (e.g. x86 rflags, ARM64 nzcv), or None if
+        the ISA has none; ``spec.registers.flags`` says which bits are which"""
+        if self._uc is None or self._engine.flags_reg is None:
+            return None
+        return self._uc.reg_read(self._engine.flags_reg)
+
     # --- Memory ---
 
     def read_mem(self, addr: int, length: int) -> bytes:

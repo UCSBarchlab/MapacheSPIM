@@ -6,14 +6,17 @@ This is our most critical test suite - it verifies that the simulator
 actually executes programs correctly and produces the right answers!
 """
 
+import os
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import Simulator, StepResult
+from mapachespim import Simulator, StepResult, StopReason
+from mapachespim.toolchain import assemble
 
 
 class TestFibonacciCorrectness(unittest.TestCase):
@@ -107,17 +110,36 @@ class TestFibonacciCorrectness(unittest.TestCase):
 
 
 class TestToHostMechanism(unittest.TestCase):
-    """Test HTIF (Host-Target Interface) tohost/fromhost mechanism"""
+    """Test HTIF (Host-Target Interface) tohost/fromhost mechanism, which some
+    RISC-V test programs use to exit instead of a syscall"""
 
-    FIBONACCI_PATH = 'examples/riscv/fibonacci/fibonacci'
+    SOURCE = """
+.text
+.globl _start
+_start:
+    li      t0, 1               # exit code 1 (success)
+    la      t1, tohost
+    sd      t0, 0(t1)           # write to tohost to signal exit
+exit_loop:
+    j       exit_loop
+
+.section .tohost,"aw",@progbits
+.align 6
+.globl tohost
+tohost: .dword 0
+"""
 
     def setUp(self):
         self.sim = Simulator()
+        result = assemble(self.SOURCE, "riscv64")
+        self.assertTrue(result.success, result.errors)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            f.write(result.elf_bytes)
+        self.addCleanup(os.unlink, f.name)
+        self.sim.load_elf(f.name)
 
     def test_tohost_written_on_exit(self):
         """Verify program writes to tohost to signal completion"""
-        self.sim.load_elf(self.FIBONACCI_PATH)
-
         # Get tohost address
         tohost_addr = self.sim.lookup_symbol('tohost')
         self.assertIsNotNone(tohost_addr, "Could not find 'tohost' symbol")
@@ -127,33 +149,15 @@ class TestToHostMechanism(unittest.TestCase):
         tohost_value_before = int.from_bytes(tohost_before, byteorder='little', signed=False)
         self.assertEqual(tohost_value_before, 0, "tohost should be 0 initially")
 
-        # Run program
-        steps = self.sim.run(max_steps=10000)
-        self.assertLess(steps, 10000, "Program should complete")
+        # Run program: the simulator stops at the tohost write rather than
+        # spinning in exit_loop
+        result = self.sim.run_until(10000)
+        self.assertEqual(result.reason, StopReason.TOHOST)
 
-        # After running, tohost should be non-zero (exit code written)
+        # After running, tohost holds the exit code
         tohost_after = self.sim.read_mem(tohost_addr, 8)
         tohost_value_after = int.from_bytes(tohost_after, byteorder='little', signed=False)
-
-        self.assertNotEqual(tohost_value_after, 0,
-            "tohost should be non-zero after program exit (exit code should be written)")
-
-        print(f"  ✓ tohost written: {tohost_value_after:#x}")
-
-    def test_tohost_exit_code(self):
-        """Verify exit code written to tohost"""
-        self.sim.load_elf(self.FIBONACCI_PATH)
-
-        tohost_addr = self.sim.lookup_symbol('tohost')
-        self.sim.run(max_steps=10000)
-
-        tohost_bytes = self.sim.read_mem(tohost_addr, 8)
-        tohost_value = int.from_bytes(tohost_bytes, byteorder='little', signed=False)
-
-        # fibonacci.s writes exit code 1 to tohost
-        # The actual value might be encoded (HTIF protocol)
-        # For now, just verify it's non-zero
-        self.assertGreater(tohost_value, 0, "Exit code should be positive")
+        self.assertEqual(tohost_value_after, 1)
 
 
 class TestMatrixMultiplyCorrectness(unittest.TestCase):

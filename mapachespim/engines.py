@@ -8,7 +8,7 @@ in :mod:`mapachespim.isa`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 try:
     import unicorn
@@ -44,6 +44,12 @@ class EngineBinding:
     cs_arch: int
     cs_mode: int
 
+    special_regs: Tuple[int, ...] = ()
+    """Unicorn register constant for each of the ISA's ``RegisterFile.special`` registers."""
+
+    flags_reg: Optional[int] = None
+    """Unicorn register constant for the ISA's ``RegisterFile.flags`` register."""
+
 
 ENGINES: Dict[ISA, EngineBinding] = {
     ISA.RISCV: EngineBinding(
@@ -63,6 +69,7 @@ ENGINES: Dict[ISA, EngineBinding] = {
         gpr_regs=tuple(getattr(mips_const, f"UC_MIPS_REG_{n}") for n in range(32)),
         cs_arch=capstone.CS_ARCH_MIPS,
         cs_mode=capstone.CS_MODE_MIPS32 | capstone.CS_MODE_BIG_ENDIAN,
+        special_regs=(mips_const.UC_MIPS_REG_HI, mips_const.UC_MIPS_REG_LO),
     ),
     ISA.ARM: EngineBinding(
         uc_arch=unicorn.UC_ARCH_ARM64,
@@ -75,6 +82,7 @@ ENGINES: Dict[ISA, EngineBinding] = {
         + (arm64_const.UC_ARM64_REG_SP,),
         cs_arch=capstone.CS_ARCH_ARM64,
         cs_mode=capstone.CS_MODE_ARM,
+        flags_reg=arm64_const.UC_ARM64_REG_NZCV,
     ),
     ISA.X86_64: EngineBinding(
         uc_arch=unicorn.UC_ARCH_X86,
@@ -87,6 +95,7 @@ ENGINES: Dict[ISA, EngineBinding] = {
         ),
         cs_arch=capstone.CS_ARCH_X86,
         cs_mode=capstone.CS_MODE_64,
+        flags_reg=x86_const.UC_X86_REG_RFLAGS,
     ),
 }
 

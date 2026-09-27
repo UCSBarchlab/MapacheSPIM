@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Console
+- `regs` shows MIPS `hi` and `lo`, and the condition flags on ARM64 (`nzcv: N Z C V`) and
+  x86-64 (`rflags: CF ZF SF OF`), with ★ when they change. New `Simulator.get_special_regs()`
+  and `get_flags()`.
+- `regs` and `pc` ask you to load a program first instead of showing an unset machine.
+
+### Examples and docs
+- The RISC-V `fibonacci` and `matrix_multiply` examples exit with the exit syscall, like the
+  other ISAs, instead of the HTIF `tohost` mechanism; `fibonacci` now prints its result.
+- Removed the out-of-date `examples/arm/README.md`. The Console Guide has a register table for
+  all four ISAs in place of the RISC-V-only one.
+
 ### Code structure
 - Each ISA is described once, in `mapachespim/isa.py`; the simulator, disassembler, ELF loader and
   writer, assembler, console, and command-line tools all read their ISA-specific facts from it.

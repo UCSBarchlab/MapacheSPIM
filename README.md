@@ -76,28 +76,28 @@ Welcome to MapacheSPIM. Type help or ? to list commands, or quickstart for a tut
 (mapachespim) load riscv/fibonacci
 Loaded riscv/fibonacci (RISCV)
 Entry point: 0x0000000080000000
-Source info: fibonacci.s (32 address mappings)
+Source info: fibonacci.s (34 address mappings)
 
 (mapachespim) break fibonacci
 Breakpoint set at fibonacci (0x80000038)
 
 (mapachespim) run
-Breakpoint hit at 0x0000000080000038 after 6 instructions
+Breakpoint hit at 0x0000000080000038 after 4 instructions
 PC = 0x0000000080000038
 
 (mapachespim) list
 
 fibonacci.s:
-   81: #   sp+16: saved a0 (original n value)
-   82: #   Total: 24 bytes
-   83: # ============================================================================
-   84: fibonacci:
-   85:     # Base case 1: if n == 0, return 0
-   86>     beqz    a0, base_case_zero  # <-- PC: 0x80000038
-   87:
-   88:     # Base case 2: if n == 1, return 1
-   89:     li      t0, 1
-   90:     beq     a0, t0, base_case_one
+   75: #   sp+16: saved ra (return address)
+   76: #   Total: 24 bytes
+   77: # ============================================================================
+   78: fibonacci:
+   79:     # Base case 1: if n == 0, return 0
+   80>     beqz    a0, base_case_zero  # <-- PC: 0x80000038
+   81:
+   82:     # Base case 2: if n == 1, return 1
+   83:     li      t0, 1
+   84:     beq     a0, t0, base_case_one
 
 (mapachespim) step
 [0x80000038] 0x63040504  beqz a0, 0x48  <fibonacci>
@@ -107,8 +107,8 @@ fibonacci.s:
 
 (mapachespim) regs
 
-x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000080000018 ★
-x2  (  sp) = 0x0000000080181000 ★  x3  (  gp) = 0x0000000000000000
+x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000080000010 ★
+x2  (  sp) = 0x0000000083effff8    x3  (  gp) = 0x0000000000000000
 x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000000000001 ★
 x6  (  t1) = 0x0000000000000000    x7  (  t2) = 0x0000000000000000
 x8  (  s0) = 0x0000000000000000    x9  (  s1) = 0x0000000000000000

@@ -45,9 +45,6 @@
 .globl _start
 
 _start:
-    # Initialize stack pointer (required for function calls)
-    la      sp, _stack_start    # sp = top of stack
-
     # Load base addresses of matrices into registers
     la      a0, matrix_a        # a0 = address of matrix A
     la      a1, matrix_b        # a1 = address of matrix B
@@ -56,14 +53,9 @@ _start:
     # Call matrix multiply function
     jal     ra, matrix_multiply
 
-    # Exit program using HTIF (write to tohost)
-    li      t0, 1               # exit code 1 (success)
-    la      t1, tohost          # load address of tohost
-    sd      t0, 0(t1)           # write to tohost to signal exit
-
-exit_loop:
-    # Infinite loop - emulator will detect tohost write and stop
-    j       exit_loop
+    # Exit program using syscall
+    li      a7, 10              # syscall 10 = exit
+    ecall
 
 # ============================================================================
 # Function: matrix_multiply
@@ -182,19 +174,3 @@ end_outer:
 # [ 84   69   54 ]     (4*9+5*6+6*3=84,  4*8+5*5+6*2=69,  4*7+5*4+6*1=54)
 # [138  114   90 ]     (7*9+8*6+9*3=138, 7*8+8*5+9*2=114, 7*7+8*4+9*1=90)
 # ============================================================================
-
-# Stack space in .bss section
-.section .bss
-    .align 4
-    _stack_bottom:
-        .space 4096
-    _stack_start:
-
-# HTIF (Host-Target Interface) section for Sail emulator
-.section .tohost,"aw",@progbits
-.align 6
-.globl tohost
-tohost: .dword 0
-.align 6
-.globl fromhost
-fromhost: .dword 0

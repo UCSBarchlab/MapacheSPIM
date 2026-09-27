@@ -72,7 +72,7 @@ class TestRunUntil:
     def test_runs_to_exit(self, capsys):
         sim = self._sim()
         result = sim.run_until()
-        assert result.reason == StopReason.TOHOST  # fibonacci signals completion via tohost
+        assert result.reason == StopReason.EXIT
         assert result.steps > 10
 
     def test_step_limit(self):

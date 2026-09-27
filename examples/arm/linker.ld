@@ -1,5 +1,5 @@
 /* ============================================================================
- * ARM64 Linker Script for Bare-Metal Programs (Sail Emulator)
+ * ARM64 Linker Script for Bare-Metal Programs (GNU ld)
  * ============================================================================
  */
 
