@@ -25,7 +25,8 @@ except Exception as e:
     KEYSTONE_ERROR = f"Keystone native library failed: {e}"
     keystone = None
 
-from .directives import DirectiveParser, LineType
+from . import riscv
+from .directives import DirectiveParser, LineType, SectionData
 from .dwarf import DWARFv2Builder
 from .elf_builder import ELFBuilder, Section, Symbol, STT_FUNC, STT_NOTYPE, STB_GLOBAL, STB_LOCAL
 from .memory_map import get_layout, MemoryLayout
@@ -68,13 +69,11 @@ class AssemblyResult:
 KS_ARCH_ARM64 = 2
 KS_ARCH_MIPS = 3
 KS_ARCH_X86 = 4
-KS_ARCH_RISCV = 10  # Added in recent Keystone
 
 KS_MODE_LITTLE_ENDIAN = 0
 KS_MODE_BIG_ENDIAN = 0x40000000
 KS_MODE_64 = 0x8
 KS_MODE_32 = 0x4
-KS_MODE_RISCV64 = 0x8
 KS_MODE_MIPS32 = 0x4
 
 
@@ -101,14 +100,15 @@ class Assembler:
 
     # ISA configuration mapping
     ISA_CONFIG = {
+        # RISC-V is encoded by the built-in pure-Python encoder (riscv.py)
         "riscv64": {
-            "arch": KS_ARCH_RISCV,
-            "mode": KS_MODE_RISCV64 | KS_MODE_LITTLE_ENDIAN,
+            "arch": None,
+            "mode": None,
             "instr_size": 4,
         },
         "riscv": {
-            "arch": KS_ARCH_RISCV,
-            "mode": KS_MODE_RISCV64 | KS_MODE_LITTLE_ENDIAN,
+            "arch": None,
+            "mode": None,
             "instr_size": 4,
         },
         "arm64": {
@@ -159,16 +159,6 @@ class Assembler:
             ValueError: If ISA is not supported.
             ImportError: If Keystone is not available.
         """
-        if not KEYSTONE_AVAILABLE:
-            msg = "Keystone Engine not available.\n"
-            if KEYSTONE_ERROR:
-                msg += f"Error: {KEYSTONE_ERROR}\n\n"
-            msg += "Install with: pip install keystone-engine\n\n"
-            msg += "On Apple Silicon, you may need to install via Homebrew:\n"
-            msg += "  brew install keystone\n"
-            msg += "  pip install keystone-engine"
-            raise ImportError(msg)
-
         isa_lower = isa.lower().replace("-", "_")
         if isa_lower not in self.ISA_CONFIG:
             valid = sorted(set(k for k in self.ISA_CONFIG.keys() if "_" not in k))
@@ -177,12 +167,28 @@ class Assembler:
         self.isa = isa_lower
         self._config = self.ISA_CONFIG[isa_lower]
         self._layout = get_layout(isa_lower)
+        self._ks = None
 
-        # Initialize Keystone
+        # RISC-V uses the built-in encoder; other ISAs need Keystone
+        if self._config["arch"] is None:
+            return
+
+        if not KEYSTONE_AVAILABLE:
+            msg = f"Assembling {isa} requires the Keystone Engine, which is not installed.\n"
+            if KEYSTONE_ERROR:
+                msg += f"Error: {KEYSTONE_ERROR}\n\n"
+            msg += "Install it with:  pip install 'mapachespim[keystone]'\n\n"
+            msg += "RISC-V programs can be assembled without Keystone."
+            raise ImportError(msg)
+
         try:
             self._ks = keystone.Ks(self._config["arch"], self._config["mode"])
         except keystone.KsError as e:
             raise RuntimeError(f"Failed to initialize Keystone for {isa}: {e}")
+
+    @property
+    def _is_riscv(self) -> bool:
+        return self.isa in ("riscv64", "riscv")
 
     def assemble(
         self,
@@ -253,10 +259,14 @@ class Assembler:
 
         # Calculate .text section label positions
         # Pass all_labels (which now contains data section labels) for pseudo-instruction sizing
+        # .equ/.set constants can be used as instruction operands but are
+        # not addresses, so they are kept out of the ELF symbol table
+        constants = dict(parser.constants)
+
         text_section = sections.get(".text")
         if text_section:
             text_labels = self._calculate_text_labels(
-                text_section, self._layout.text_base, all_labels
+                text_section, self._layout.text_base, {**constants, **all_labels}
             )
             all_labels.update(text_labels)
 
@@ -264,7 +274,7 @@ class Assembler:
         debug_lines: List[Tuple[int, int]] = []
         if text_section:
             code, code_labels, asm_errors, section_debug_lines = self._assemble_section(
-                text_section, self._layout.text_base, all_labels
+                text_section, self._layout.text_base, {**constants, **all_labels}
             )
             result.errors.extend(asm_errors)
             debug_lines = section_debug_lines
@@ -342,7 +352,7 @@ class Assembler:
 
     def _calculate_text_labels(
         self,
-        section: "SectionData",
+        section: SectionData,
         base_addr: int,
         data_labels: Optional[Dict[str, int]] = None,
     ) -> Dict[str, int]:
@@ -371,6 +381,9 @@ class Assembler:
         if instr_size is None:
             return self._calculate_x86_text_labels_iterative(section, base_addr)
 
+        if self._is_riscv:
+            return self._calculate_riscv_text_labels(section, base_addr, data_labels or {})
+
         # Fixed-size ISA: single pass with size estimation
         labels: Dict[str, int] = {}
         current_addr = base_addr
@@ -390,9 +403,36 @@ class Assembler:
 
         return labels
 
+    def _calculate_riscv_text_labels(
+        self,
+        section: SectionData,
+        base_addr: int,
+        data_labels: Dict[str, int],
+    ) -> Dict[str, int]:
+        """
+        Calculate RISC-V label addresses using the encoder's own sizing.
+
+        Only li's size depends on a value, so this converges in a pass or two;
+        the loop re-sizes with the labels found so far until they are stable.
+        """
+        labels: Dict[str, int] = {}
+        for _ in range(8):
+            known = {**data_labels, **labels}
+            new_labels: Dict[str, int] = {}
+            addr = base_addr
+            for line in section.lines:
+                if line.label:
+                    new_labels[line.label] = addr
+                if line.line_type == LineType.INSTRUCTION and line.instruction:
+                    addr += riscv.instruction_size(line.instruction, known)
+            if new_labels == labels:
+                break
+            labels = new_labels
+        return labels
+
     def _calculate_x86_text_labels_iterative(
         self,
-        section: "SectionData",
+        section: SectionData,
         base_addr: int,
         max_iterations: int = 5,
     ) -> Dict[str, int]:
@@ -554,30 +594,8 @@ class Assembler:
                 # Unknown symbol - conservatively estimate as lui + ori
                 return base_size * 2
 
-        # RISC-V pseudo-instructions that might expand
-        if self.isa in ("riscv64", "riscv"):
-            # li with large immediate: lui + addi = 8 bytes
-            if mnemonic == "li":
-                operands = parts[1] if len(parts) > 1 else ""
-                ops = [o.strip() for o in operands.split(',')]
-                if len(ops) == 2:
-                    try:
-                        imm_str = ops[1].strip()
-                        if imm_str.startswith('0x'):
-                            imm = int(imm_str, 16)
-                        else:
-                            imm = int(imm_str)
-                        if not (-2048 <= imm <= 2047):
-                            return base_size * 2
-                    except ValueError:
-                        pass
-            # la always expands to lui + addi
-            if mnemonic == "la":
-                return base_size * 2
-            # call is typically a single jal instruction (4 bytes)
-            # Keystone handles near calls as jal, not auipc+jalr
-            if mnemonic == "call":
-                return base_size  # Single jal instruction
+        if self._is_riscv:
+            return riscv.instruction_size(instr, data_labels or {})
 
         # ARM64 pseudo-instructions that expand to multiple instructions
         if self.isa in ("arm64", "aarch64"):
@@ -677,7 +695,7 @@ class Assembler:
 
     def _assemble_section(
         self,
-        section: "SectionData",
+        section: SectionData,
         base_addr: int,
         labels: Dict[str, int],
     ) -> Tuple[bytes, Dict[str, int], List[str], List[Tuple[int, int]]]:
@@ -688,8 +706,6 @@ class Assembler:
             (assembled_bytes, label_addresses, errors, debug_lines)
             where debug_lines is a list of (address, source_line_number) tuples.
         """
-        from .directives import SectionData
-
         code = bytearray()
         label_addrs: Dict[str, int] = {}
         errors: List[str] = []
@@ -710,9 +726,16 @@ class Assembler:
 
             instr = line.instruction
 
-            # Expand pseudo-instructions for RISC-V
-            if self.isa in ("riscv64", "riscv"):
-                instr = self._expand_riscv_pseudo(instr, current_addr, labels)
+            # RISC-V: built-in encoder handles instructions and pseudo-instructions
+            if self._is_riscv:
+                try:
+                    encoding = riscv.encode(instr, current_addr, labels)
+                except riscv.RISCVEncodeError as e:
+                    errors.append(f"Line {line.line_number}: {e} - {line.instruction}")
+                    continue
+                code.extend(encoding)
+                current_addr += len(encoding)
+                continue
 
             # Expand pseudo-instructions for MIPS and normalize syntax
             if self.isa in ("mips32", "mips"):
@@ -730,10 +753,6 @@ class Assembler:
 
             # Assemble instruction
             try:
-                # For RISC-V, disable compressed instructions for predictable 4-byte encoding
-                if self.isa in ("riscv64", "riscv"):
-                    instr = f".option norvc\n{instr}"
-
                 encoding, count = self._ks.asm(instr, current_addr)
                 if encoding is None or count == 0:
                     errors.append(f"Line {line.line_number}: Failed to assemble: {line.instruction}")
@@ -745,179 +764,17 @@ class Assembler:
             except keystone.KsError as e:
                 errors.append(f"Line {line.line_number}: {e} - {line.instruction}")
 
+        # Pass 1 must have predicted every label's address, or branch offsets
+        # computed from those predictions would be wrong
+        if not errors and self.isa != "x86_64":
+            for name, addr in label_addrs.items():
+                if labels.get(name, addr) != addr:
+                    errors.append(
+                        f"Internal error: label '{name}' moved from 0x{labels[name]:x} "
+                        f"to 0x{addr:x} between passes; please report this bug"
+                    )
+
         return bytes(code), label_addrs, errors, debug_lines
-
-    def _expand_riscv_pseudo(
-        self,
-        instr: str,
-        addr: int,
-        labels: Dict[str, int],
-    ) -> str:
-        """
-        Expand RISC-V pseudo-instructions.
-
-        Keystone handles most, but some need help.
-        """
-        parts = instr.split(None, 1)
-        if not parts:
-            return instr
-
-        mnemonic = parts[0].lower()
-        operands = parts[1] if len(parts) > 1 else ""
-
-        # Handle 'li' (load immediate) - Keystone may not handle large values
-        if mnemonic == "li":
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 2:
-                reg = ops[0]
-                try:
-                    # Try to parse the immediate
-                    imm_str = ops[1].strip()
-                    if imm_str in labels:
-                        imm = labels[imm_str]
-                    elif imm_str.startswith('0x'):
-                        imm = int(imm_str, 16)
-                    else:
-                        imm = int(imm_str)
-
-                    # If small enough, let Keystone handle it
-                    if -2048 <= imm <= 2047:
-                        return f"addi {reg}, x0, {imm}"
-
-                    # Large immediate: use lui + addi
-                    upper = (imm + 0x800) >> 12
-                    lower = imm - (upper << 12)
-                    if lower < -2048:
-                        lower += 4096
-                        upper -= 1
-
-                    return f"lui {reg}, {upper}; addi {reg}, {reg}, {lower}"
-
-                except (ValueError, KeyError):
-                    pass  # Let Keystone try
-
-        # Handle 'la' (load address) - use PC-relative auipc + addi
-        # This works correctly for all addresses in RV64, unlike lui which sign-extends
-        if mnemonic == "la":
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 2:
-                reg = ops[0]
-                symbol = ops[1].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    # Calculate PC-relative offset
-                    # auipc is at addr, so offset = target - addr
-                    offset = target - addr
-                    # Split into upper 20 bits and lower 12 bits
-                    # Add 0x800 to round properly when lower bits are negative
-                    upper = ((offset + 0x800) >> 12) & 0xFFFFF
-                    lower = offset - (upper << 12)
-                    # Ensure lower is in signed 12-bit range
-                    if lower > 2047:
-                        lower -= 4096
-                        upper = (upper + 1) & 0xFFFFF
-                    elif lower < -2048:
-                        lower += 4096
-                        upper = (upper - 1) & 0xFFFFF
-                    return f"auipc {reg}, {upper}; addi {reg}, {reg}, {lower}"
-
-        # Handle 'call' pseudo
-        if mnemonic == "call":
-            symbol = operands.strip()
-            if symbol in labels:
-                target = labels[symbol]
-                offset = target - addr
-                if -1048576 <= offset <= 1048575:
-                    return f"jal ra, {offset}"
-                # For far calls, use auipc + jalr
-                upper = ((offset + 0x800) >> 12) & 0xFFFFF
-                lower = offset - (upper << 12)
-                return f"auipc ra, {upper}; jalr ra, ra, {lower}"
-
-        # Handle 'j' pseudo (jump without link)
-        if mnemonic == "j":
-            symbol = operands.strip()
-            if symbol in labels:
-                target = labels[symbol]
-                offset = target - addr
-                return f"jal x0, {offset}"
-
-        # Handle 'jal' with symbol (calculate offset)
-        if mnemonic == "jal":
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 2:
-                rd = ops[0]
-                symbol = ops[1].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    offset = target - addr
-                    return f"jal {rd}, {offset}"
-
-        # Handle branch instructions with symbols
-        branch_ops = ["beq", "bne", "blt", "bge", "bltu", "bgeu"]
-        if mnemonic in branch_ops:
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 3:
-                rs1, rs2, symbol = ops[0], ops[1], ops[2].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    offset = target - addr
-                    return f"{mnemonic} {rs1}, {rs2}, {offset}"
-
-        # Handle beqz/bnez pseudo-instructions (branch if zero/not zero)
-        if mnemonic in ("beqz", "bnez"):
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 2:
-                rs = ops[0]
-                symbol = ops[1].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    offset = target - addr
-                    real_mnemonic = "beq" if mnemonic == "beqz" else "bne"
-                    return f"{real_mnemonic} {rs}, x0, {offset}"
-
-        # Handle pseudo-branches that swap operands
-        # ble rs1, rs2, label → bge rs2, rs1, label
-        # bgt rs1, rs2, label → blt rs2, rs1, label
-        # bleu rs1, rs2, label → bgeu rs2, rs1, label
-        # bgtu rs1, rs2, label → bltu rs2, rs1, label
-        swap_branches = {
-            "ble": "bge",
-            "bgt": "blt",
-            "bleu": "bgeu",
-            "bgtu": "bltu",
-        }
-        if mnemonic in swap_branches:
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 3:
-                rs1, rs2, symbol = ops[0], ops[1], ops[2].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    offset = target - addr
-                    real_mnemonic = swap_branches[mnemonic]
-                    return f"{real_mnemonic} {rs2}, {rs1}, {offset}"
-
-        # Handle blez/bgtz/bltz/bgez (single register branches)
-        single_reg_branches = {
-            "blez": ("bge", "x0"),   # blez rs, label → bge x0, rs, label
-            "bgtz": ("blt", "x0"),   # bgtz rs, label → blt x0, rs, label
-            "bltz": ("blt", None),   # bltz rs, label → blt rs, x0, label
-            "bgez": ("bge", None),   # bgez rs, label → bge rs, x0, label
-        }
-        if mnemonic in single_reg_branches:
-            ops = [o.strip() for o in operands.split(',')]
-            if len(ops) == 2:
-                rs, symbol = ops[0], ops[1].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    offset = target - addr
-                    real_mnemonic, first_reg = single_reg_branches[mnemonic]
-                    if first_reg is not None:
-                        return f"{real_mnemonic} {first_reg}, {rs}, {offset}"
-                    else:
-                        return f"{real_mnemonic} {rs}, x0, {offset}"
-
-        return instr
 
     def _normalize_mips_syntax(self, instr: str) -> str:
         """
@@ -1337,6 +1194,11 @@ class Assembler:
         Raises:
             ValueError: If assembly fails.
         """
+        if self._is_riscv:
+            try:
+                return riscv.encode(instr, address, {})
+            except riscv.RISCVEncodeError as e:
+                raise ValueError(f"Assembly error: {e}")
         try:
             encoding, count = self._ks.asm(instr, address)
             if encoding is None or count == 0:

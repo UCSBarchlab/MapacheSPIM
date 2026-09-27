@@ -17,16 +17,14 @@ import pytest
 from typing import Dict, List, Tuple
 
 from mapachespim.toolchain import assemble
-from mapachespim.toolchain.assembler import Assembler, KEYSTONE_AVAILABLE
+from mapachespim.toolchain.assembler import Assembler
 from mapachespim.toolchain.directives import DirectiveParser, LineType
 from mapachespim.toolchain.memory_map import get_layout
 
 
 # Skip all tests if Keystone not available
-pytestmark = pytest.mark.skipif(
-    not KEYSTONE_AVAILABLE,
-    reason="Keystone engine not available"
-)
+# Tests needing Keystone (ARM64/x86-64/MIPS) are skipped by conftest.py when
+# it is not installed; RISC-V tests use the built-in encoder and always run.
 
 
 # =============================================================================

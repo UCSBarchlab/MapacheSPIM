@@ -16,6 +16,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from .. import __version__
+
 
 def main(args: list[str] | None = None) -> int:
     """Main entry point for mapachespim-as CLI."""
@@ -80,7 +82,7 @@ Supported ISAs:
     parser.add_argument(
         "--version",
         action="version",
-        version="%(prog)s 0.1.0",
+        version=f"%(prog)s {__version__}",
     )
 
     parsed = parser.parse_args(args)
