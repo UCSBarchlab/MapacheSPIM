@@ -338,7 +338,9 @@ def test_branches():
 def test_literals_and_addresses():
     rng = random.Random(9)
     lines = []
-    for _ in range(n(6)):
+    for i in range(n(6)):
+        if i % 100 == 99:
+            lines.append(".ltorg")  # GNU as allows at most 1024 entries per pool
         value = rng.choice([rng.randrange(1 << 64), rng.randrange(1 << 16), 0x123456789, 5])
         lines += [
             f"ldr {xreg(rng, zr=False)}, ={hex(value)}",
