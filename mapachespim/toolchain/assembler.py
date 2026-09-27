@@ -1,5 +1,5 @@
 """
-Multi-architecture assembler using Keystone Engine.
+Multi-architecture assembler with built-in, GNU as compatible encoders.
 
 Assembles source code into machine code for RISC-V, ARM64, x86-64, and MIPS32.
 """
@@ -8,28 +8,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import ModuleType
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Set, Tuple
 
-try:
-    import keystone
-
-    # Verify keystone actually works by trying to access a constant
-    _ = keystone.KS_ARCH_X86
-    KEYSTONE_AVAILABLE = True
-    KEYSTONE_ERROR = None
-except ImportError:
-    # Simply not installed; the message raised later explains how to add it
-    KEYSTONE_AVAILABLE = False
-    KEYSTONE_ERROR = None
-    keystone = None
-except Exception as e:
-    # Keystone installed but native library failed to load
-    KEYSTONE_AVAILABLE = False
-    KEYSTONE_ERROR = f"Keystone native library failed: {e}"
-    keystone = None
-
-from . import arm64, mips, riscv
+from . import arm64, mips, riscv, x86
 from .directives import (
+    ALIGN_DIRECTIVES,
+    BYTE_DIRECTIVES,
+    DATA_SIZES,
     INTERNAL_LABEL_PREFIXES,
     POOL_LABEL_PREFIX,
     DirectiveParser,
@@ -52,6 +37,39 @@ def _lookup(values: Dict[str, int]) -> Callable[[str], int]:
         raise UndefinedSymbol(name)
 
     return resolve
+
+
+class _RelaxView(Mapping[str, int]):
+    """
+    Label lookup during one x86 relaxation pass, the way GNU as sees it:
+    labels already passed have their new address, labels ahead have their
+    old address shifted by the growth so far (``stretch``).
+    """
+
+    def __init__(
+        self,
+        data_labels: Dict[str, int],
+        old: Dict[str, int],
+        new: Dict[str, int],
+        stretch: int,
+    ) -> None:
+        self.data_labels, self.old, self.new, self.stretch = data_labels, old, new, stretch
+
+    def __contains__(self, name: object) -> bool:
+        return name in self.new or name in self.old or name in self.data_labels
+
+    def __iter__(self) -> Iterator[str]:
+        return iter({**self.data_labels, **self.old, **self.new})
+
+    def __len__(self) -> int:
+        return len({**self.data_labels, **self.old, **self.new})
+
+    def __getitem__(self, name: str) -> int:
+        if name in self.new:
+            return self.new[name]
+        if name in self.old:
+            return self.old[name] + self.stretch
+        return self.data_labels[name]
 
 
 @dataclass
@@ -87,20 +105,13 @@ class AssemblyResult:
         return len(self.errors) == 0 and len(self.elf_bytes) > 0
 
 
-# Keystone architecture/mode constants
-KS_ARCH_X86 = 4
-
-KS_MODE_LITTLE_ENDIAN = 0
-KS_MODE_64 = 0x8
-KS_MODE_32 = 0x4
-
-
 class Assembler:
     """
     Multi-architecture assembler.
 
-    Uses Keystone Engine for instruction encoding and a custom
-    directive parser for GNU-as compatible source files.
+    Each ISA has a pure-Python encoder (riscv.py, mips.py, arm64.py,
+    x86.py) that produces the same bytes as GNU as, plus a shared directive
+    parser for GNU-as compatible source files.
 
     Example:
         >>> asm = Assembler("riscv64")
@@ -118,52 +129,31 @@ class Assembler:
 
     # ISA configuration mapping
     ISA_CONFIG: Dict[str, Dict[str, Any]] = {
-        # RISC-V is encoded by the built-in pure-Python encoder (riscv.py)
         "riscv64": {
-            "arch": None,
-            "mode": None,
             "instr_size": 4,
         },
         "riscv": {
-            "arch": None,
-            "mode": None,
             "instr_size": 4,
         },
-        # ARM64 is encoded by the built-in pure-Python encoder (arm64.py)
         "arm64": {
-            "arch": None,
-            "mode": None,
             "instr_size": 4,
         },
         "aarch64": {
-            "arch": None,
-            "mode": None,
             "instr_size": 4,
         },
         "x86_64": {
-            "arch": KS_ARCH_X86,
-            "mode": KS_MODE_64,
             "instr_size": None,  # Variable length
         },
         "x86-64": {
-            "arch": KS_ARCH_X86,
-            "mode": KS_MODE_64,
             "instr_size": None,
         },
         "x64": {
-            "arch": KS_ARCH_X86,
-            "mode": KS_MODE_64,
             "instr_size": None,
         },
-        # MIPS is encoded by the built-in pure-Python encoder (mips.py)
         "mips32": {
-            "arch": None,
-            "mode": None,
             "instr_size": 4,
         },
         "mips": {
-            "arch": None,
-            "mode": None,
             "instr_size": 4,
         },
     }
@@ -177,7 +167,6 @@ class Assembler:
 
         Raises:
             ValueError: If ISA is not supported.
-            ImportError: If Keystone is not available.
         """
         isa_lower = isa.lower().replace("-", "_")
         if isa_lower not in self.ISA_CONFIG:
@@ -187,28 +176,11 @@ class Assembler:
         self.isa = isa_lower
         self._config = self.ISA_CONFIG[isa_lower]
         self._layout = get_layout(isa_lower)
-        self._ks = None
         # Replaced for each assemble() call; also used by the layout passes
         self._parser = DirectiveParser(isa=isa_lower)
-
-        # RISC-V and MIPS use built-in encoders; ARM64 and x86-64 need Keystone
-        if self._config["arch"] is None:
-            return
-
-        if not KEYSTONE_AVAILABLE:
-            if KEYSTONE_ERROR:
-                msg = f"Assembling {isa} requires the Keystone Engine, which failed to load:\n"
-                msg += f"  {KEYSTONE_ERROR}\n"
-            else:
-                msg = f"Assembling {isa} requires the Keystone Engine, which is not installed.\n"
-            msg += "Install it with:  pip install 'mapachespim[keystone]'\n"
-            msg += "(RISC-V and MIPS programs can be assembled without it.)"
-            raise ImportError(msg)
-
-        try:
-            self._ks = keystone.Ks(self._config["arch"], self._config["mode"])
-        except keystone.KsError as e:
-            raise RuntimeError(f"Failed to initialize Keystone for {isa}: {e}")
+        self._long_jumps: Set[int] = set()  # x86 jumps that need rel32
+        self._align_after_data: Set[int] = set()  # x86 code alignment after data
+        self._absolute_symbols: Set[str] = set()  # names of .equ constants
 
     @staticmethod
     def _add_literal_pools(section: SectionData) -> None:
@@ -234,7 +206,7 @@ class Assembler:
                         LineType.DIRECTIVE,
                         "",
                         directive="balign",
-                        directive_args=[str(size)],
+                        directive_args=[str(size), "0"],  # zeros, not nops
                     )
                 )
                 for label, expr in entries:
@@ -301,13 +273,33 @@ class Assembler:
                 progress = resolved_any = True
         return resolved_any
 
+    @staticmethod
+    def _alignments_after_data(section: Optional[SectionData]) -> Set[int]:
+        """Alignment directives in code whose last preceding item is data.
+
+        GNU as pads x86 code with a one-byte nop first in that case, since
+        the data might be an incomplete instruction.
+        """
+        found: Set[int] = set()
+        after_data = False
+        for line in section.lines if section else []:
+            if line.line_type == LineType.INSTRUCTION and line.instruction:
+                after_data = False
+            elif line.line_type == LineType.DIRECTIVE:
+                if line.directive in ALIGN_DIRECTIVES:
+                    if after_data:
+                        found.add(id(line))
+                elif Assembler._emits_data(line):
+                    after_data = True
+        return found
+
     def _text_directive_bytes(
         self, line: ParsedLine, addr: int, base: int, labels: Dict[str, int], strict: bool
     ) -> bytes:
         """Bytes a data or alignment directive in .text produces at ``addr``.
 
-        Alignment padding in RISC-V code is made of nop instructions, as GNU
-        as does (MIPS's nop is all zeros, the default fill).
+        Alignment padding in code is made of nop instructions, as GNU as
+        does.
         """
         values = {**labels, ".": addr}
 
@@ -323,32 +315,82 @@ class Assembler:
         )
         if data is None:
             return b""
-        is_align = line.directive in ("align", "balign", "p2align")
-        explicit_fill = len(line.directive_args) > 1 and line.directive_args[1]
-        if is_align and not explicit_fill and data and len(data) % 4 == 0 and self._is_riscv:
-            data = (0x00000013).to_bytes(4, "little") * (len(data) // 4)
+        is_align = line.directive in ALIGN_DIRECTIVES
+        args = line.directive_args
+        explicit_fill = len(args) > 1 and bool(args[1])
+        if self._builtin_encoder is x86 and explicit_fill:
+            # GNU as treats a fill of 0x90 (nop) like no fill: best nops
+            explicit_fill = evaluate(args[1], resolve) & 0xFF != 0x90
+        if not is_align or explicit_fill or not data:
+            return data
+        # Pad code with nops, as GNU as does (MIPS's nop is all zeros)
+        if self._is_riscv:
+            # As GNU as's riscv_make_nops: a zero byte if odd, at most one
+            # 2-byte c.nop, then 4-byte nops
+            head = bytes(len(data) % 2) + (b"\x01\x00" if len(data) % 4 >= 2 else b"")
+            data = head + (0x00000013).to_bytes(4, "little") * (len(data) // 4)
+        elif self._builtin_encoder is arm64:
+            misaligned = len(data) % 4
+            data = bytes(misaligned) + (0xD503201F).to_bytes(4, "little") * (len(data) // 4)
+        elif self._builtin_encoder is x86:
+            data = x86.nop_padding(len(data), id(line) in self._align_after_data)
         return data
 
     def _line_options(self, line: ParsedLine) -> Dict[str, Any]:
-        """Per-line encoder options (MIPS: .set reorder / noreorder)."""
+        """Per-line encoder options (MIPS: .set reorder / noreorder; x86-64:
+        syntax, which symbols are constants, and jump size)."""
         if self.isa in ("mips32", "mips"):
             return {"reorder": line.reorder}
+        if self._builtin_encoder is x86:
+            return {
+                "syntax": line.syntax,
+                "absolute_symbols": self._absolute_symbols,
+                "long_jump": id(line) in self._long_jumps,
+            }
         return {}
+
+    def _instruction_padding(self, addr: int, after_data: bool) -> int:
+        """Zero bytes GNU as puts before an instruction at ``addr``.
+
+        ARM64 aligns an instruction to 4 bytes when it directly follows data
+        (GNU as does this when switching from data to code; an alignment
+        directive in between counts as code).
+        """
+        return -addr % 4 if after_data and self._builtin_encoder is arm64 else 0
+
+    @staticmethod
+    def _emits_data(line: ParsedLine) -> bool:
+        """Whether ``line`` is a data directive such as .byte or .fill."""
+        directive = line.directive or ""
+        return line.line_type == LineType.DIRECTIVE and (
+            directive in DATA_SIZES or directive in BYTE_DIRECTIVES or directive == "value"
+        )
+
+    def _is_real_alignment(self, line: ParsedLine, labels: Dict[str, int]) -> bool:
+        """Whether ``line`` aligns to more than 1 byte (even if it inserts
+        no padding), which GNU as treats like code."""
+        if line.line_type != LineType.DIRECTIVE or line.directive not in ALIGN_DIRECTIVES:
+            return False
+        try:
+            value = evaluate(line.directive_args[0], _lookup(labels))
+        except (ExpressionError, IndexError):
+            return False
+        return self._parser.alignment(line.directive or "", value) > 1
 
     @property
     def _is_riscv(self) -> bool:
         return self.isa in ("riscv64", "riscv")
 
     @property
-    def _builtin_encoder(self) -> Optional[ModuleType]:
-        """The pure-Python encoder module for this ISA, or None for Keystone ISAs."""
+    def _builtin_encoder(self) -> ModuleType:
+        """The pure-Python encoder module for this ISA."""
         if self._is_riscv:
             return riscv
         if self.isa in ("mips32", "mips"):
             return mips
         if self.isa in ("arm64", "aarch64"):
             return arm64
-        return None
+        return x86
 
     def assemble(
         self,
@@ -374,7 +416,10 @@ class Assembler:
         # Parse source
         parser = DirectiveParser(isa=self.isa)
         self._parser = parser
+        self._long_jumps = set()
         sections = parser.parse(source)
+        self._absolute_symbols = set(parser.constants) | set(parser.deferred_constants)
+        self._align_after_data = self._alignments_after_data(sections.get(".text"))
         if self.isa in ("arm64", "aarch64") and ".text" in sections:
             try:
                 self._add_literal_pools(sections[".text"])
@@ -572,8 +617,8 @@ class Assembler:
         Pass 1 of two-pass assembly: determine where each label will be
         based on instruction count.
 
-        For fixed-size ISAs (RISC-V, ARM64, MIPS): 4 bytes per instruction.
-        For variable-size ISAs (x86-64): use iterative assembly until stable.
+        Sizes come from the encoder itself, so pseudo-instructions and
+        x86-64's variable-length jumps are laid out exactly as encoded.
 
         Args:
             section: The text section to process.
@@ -583,35 +628,7 @@ class Assembler:
         Returns:
             Dictionary of label name -> address.
         """
-        from .directives import LineType
-
-        instr_size = self._config.get("instr_size", 4)
-
-        # Variable-length ISA (x86-64) needs iterative approach
-        if instr_size is None:
-            return self._calculate_x86_text_labels_iterative(section, base_addr)
-
-        if self._builtin_encoder is not None:
-            return self._calculate_builtin_text_labels(section, base_addr, data_labels or {})
-
-        # Fixed-size ISA: single pass with size estimation
-        labels: Dict[str, int] = {}
-        current_addr = base_addr
-
-        for line in section.lines:
-            # Record label position
-            if line.label:
-                labels[line.label] = current_addr
-
-            # Skip non-instructions
-            if line.line_type != LineType.INSTRUCTION or not line.instruction:
-                continue
-
-            # Check for pseudo-instructions that expand to multiple instructions
-            size = self._estimate_fixed_instr_size(line.instruction, instr_size, data_labels)
-            current_addr += size
-
-        return labels
+        return self._calculate_builtin_text_labels(section, base_addr, data_labels or {})
 
     def _calculate_builtin_text_labels(
         self,
@@ -627,17 +644,44 @@ class Assembler:
         re-sizes with the labels found so far until they are stable.
         """
         labels: Dict[str, int] = {}
-        for _ in range(8):
+        for _ in range(100):
             known = {**data_labels, **labels}
             new_labels: Dict[str, int] = {}
             addr = base_addr
+            grew = False
+            stretch = 0  # growth so far this pass, as in GNU's relax_segment
+            after_data = False  # see _instruction_padding
             for line in section.lines:
                 if line.label:
                     new_labels[line.label] = addr
+                    if line.label in labels:
+                        stretch = addr - labels[line.label]
                 if line.line_type == LineType.INSTRUCTION and line.instruction:
-                    addr += self._builtin_encoder.instruction_size(
+                    addr += self._instruction_padding(addr, after_data)
+                    after_data = False
+                    # x86 jumps start short (rel8) and grow to rel32 once, for
+                    # good, when the target is out of range (GNU's relaxation)
+                    if (
+                        self._builtin_encoder is x86
+                        and id(line) not in self._long_jumps
+                        and x86.is_relaxable(line.instruction)
+                        and not x86.short_jump_fits(
+                            line.instruction,
+                            addr,
+                            _RelaxView(data_labels, labels, new_labels, stretch),
+                        )
+                    ):
+                        self._long_jumps.add(id(line))
+                        grew = True
+                        grown = True
+                    else:
+                        grown = False
+                    size = self._builtin_encoder.instruction_size(
                         line.instruction, known, addr, **self._line_options(line)
                     )
+                    if grown:
+                        stretch += size - 2
+                    addr += size
                 elif line.line_type == LineType.DIRECTIVE:
                     try:
                         addr += len(
@@ -645,278 +689,14 @@ class Assembler:
                         )
                     except ExpressionError:
                         pass  # reported when the section is assembled
-            if new_labels == labels:
+                    if self._emits_data(line):
+                        after_data = True
+                    elif self._is_real_alignment(line, known):
+                        after_data = False
+            if new_labels == labels and not grew:
                 break
             labels = new_labels
         return labels
-
-    def _calculate_x86_text_labels_iterative(
-        self,
-        section: SectionData,
-        base_addr: int,
-        max_iterations: int = 5,
-    ) -> Dict[str, int]:
-        """
-        Calculate x86-64 label addresses using iterative refinement.
-
-        For variable-length instruction sets, instruction sizes can depend on
-        label addresses (e.g., short vs near jumps). This method iterates
-        until label addresses stabilize.
-
-        Args:
-            section: The text section to process.
-            base_addr: Base address for the section.
-            max_iterations: Maximum iterations before giving up.
-
-        Returns:
-            Dictionary of label name -> address.
-        """
-        from .directives import LineType
-
-        labels: Dict[str, int] = {}
-
-        for _ in range(max_iterations):
-            new_labels: Dict[str, int] = {}
-            current_addr = base_addr
-
-            for line in section.lines:
-                # Record label at current position
-                if line.label:
-                    new_labels[line.label] = current_addr
-
-                # Skip non-instructions
-                if line.line_type != LineType.INSTRUCTION or not line.instruction:
-                    continue
-
-                # Get actual instruction size by assembling
-                size = self._get_x86_actual_size(line.instruction, current_addr, labels)
-                current_addr += size
-
-            # Check for convergence
-            if new_labels == labels:
-                return new_labels
-
-            labels = new_labels
-
-        # Return best effort if max iterations reached
-        return labels
-
-    def _get_x86_actual_size(
-        self,
-        instr: str,
-        addr: int,
-        labels: Dict[str, int],
-    ) -> int:
-        """
-        Get actual x86-64 instruction size by assembling it.
-
-        Args:
-            instr: Instruction text (AT&T or Intel syntax).
-            addr: Current address for PC-relative calculations.
-            labels: Currently known label addresses.
-
-        Returns:
-            Instruction size in bytes.
-        """
-        # Convert to Intel syntax, resolving known labels
-        converted = self._convert_x86_att_to_intel(instr, labels)
-
-        # Try to assemble
-        try:
-            encoding, count = self._ks.asm(converted, addr)
-            if encoding is not None and count > 0:
-                return len(encoding)
-        except keystone.KsError:
-            pass
-
-        # Assembly failed - likely unresolved forward reference
-        # Try with a placeholder to get encoding size
-        parts = converted.split(None, 1)
-        mnemonic = parts[0].lower() if parts else ""
-
-        # For branch/call instructions, use placeholder offset
-        if mnemonic in (
-            "jmp",
-            "call",
-            "je",
-            "jne",
-            "jz",
-            "jnz",
-            "jl",
-            "jle",
-            "jg",
-            "jge",
-            "ja",
-            "jae",
-            "jb",
-            "jbe",
-            "jo",
-            "jno",
-            "js",
-            "jns",
-            "jc",
-            "jnc",
-            "loop",
-            "loope",
-            "loopne",
-        ):
-            # Use a medium-range placeholder to get near (not short) encoding
-            placeholder_addr = addr + 0x100
-            placeholder_instr = f"{mnemonic} {placeholder_addr}"
-            try:
-                encoding, count = self._ks.asm(placeholder_instr, addr)
-                if encoding is not None and count > 0:
-                    return len(encoding)
-            except keystone.KsError:
-                pass
-
-        # Final fallback: use existing estimation
-        return self._estimate_x86_instr_size(instr)
-
-    def _estimate_fixed_instr_size(
-        self,
-        instr: str,
-        base_size: int,
-        data_labels: Optional[Dict[str, int]] = None,
-    ) -> int:
-        """
-        Estimate instruction size for fixed-size ISAs.
-
-        Accounts for pseudo-instructions that expand to multiple instructions.
-
-        Args:
-            instr: The instruction text.
-            base_size: Base instruction size (typically 4 bytes).
-            data_labels: Optional dict of data section labels for address lookups.
-        """
-        parts = instr.split(None, 1)
-        if not parts:
-            return base_size
-
-        mnemonic = parts[0].lower()
-
-        if self._builtin_encoder is not None:
-            return self._builtin_encoder.instruction_size(instr, data_labels or {})
-
-        return base_size
-
-    def _estimate_x86_instr_size(self, instr: str) -> int:
-        """
-        Estimate the size of an x86-64 instruction.
-
-        This is a conservative estimate for pass 1.
-        Pass 2 will use actual assembled sizes.
-        """
-        parts = instr.split(None, 1)
-        if not parts:
-            return 1
-
-        mnemonic = parts[0].lower().rstrip("bwlq")
-        operands = parts[1] if len(parts) > 1 else ""
-
-        # Single/two-byte instructions
-        if mnemonic == "nop":
-            return 1
-        if mnemonic == "ret":
-            return 1
-        if mnemonic in ("syscall", "hlt", "cld", "std", "cdqe", "cqo"):
-            return 2
-
-        # Near jumps/calls with label: 5 bytes (1 opcode + 4 offset)
-        # But conditional jumps can be 2 bytes for short jumps, assume 6 for safety
-        if mnemonic in ("jmp", "call"):
-            return 5
-        if mnemonic in (
-            "je",
-            "jne",
-            "jz",
-            "jnz",
-            "jl",
-            "jle",
-            "jg",
-            "jge",
-            "ja",
-            "jae",
-            "jb",
-            "jbe",
-            "jo",
-            "jno",
-            "js",
-            "jns",
-            "jc",
-            "jnc",
-            "loop",
-            "loope",
-            "loopne",
-        ):
-            return 6  # 0F XX + 4-byte offset
-
-        # RIP-relative addressing: 7 bytes
-        # Format: symbol(%rip) or [rip + symbol]
-        if "%rip" in operands or "rip" in operands.lower():
-            # REX.W (1) + opcode (1-2) + ModR/M (1) + disp32 (4) = 7-8 bytes
-            return 7
-
-        # LEA with memory operand
-        if mnemonic == "lea":
-            if "%rip" in operands or "rip" in operands.lower():
-                return 7
-            return 4  # Base case
-
-        # MOV with 64-bit immediate
-        if mnemonic == "mov":
-            # Check for 64-bit register destination with immediate
-            if operands.startswith("$") or operands.startswith("%"):
-                # AT&T: movq $imm, %reg or Intel mov reg, imm
-                if any(
-                    r in operands
-                    for r in [
-                        "%rax",
-                        "%rbx",
-                        "%rcx",
-                        "%rdx",
-                        "%rsi",
-                        "%rdi",
-                        "%rbp",
-                        "%rsp",
-                        "%r8",
-                        "%r9",
-                        "%r10",
-                        "%r11",
-                        "%r12",
-                        "%r13",
-                        "%r14",
-                        "%r15",
-                        "rax",
-                        "rbx",
-                        "rcx",
-                        "rdx",
-                    ]
-                ):
-                    # Could be 10 bytes for movabs
-                    if "$" in operands:
-                        return 10
-                    return 7
-            # Simple reg-reg or reg-mem: 2-4 bytes
-            return 3
-
-        # TEST, CMP with register: 2-3 bytes
-        if mnemonic in ("test", "cmp"):
-            if "(" not in operands and "[" not in operands:
-                return 3
-
-        # ADD, SUB, XOR, AND, OR with immediate or register: 3-7 bytes
-        if mnemonic in ("add", "sub", "xor", "and", "or"):
-            if "$" in operands or any(c.isdigit() for c in operands[:5]):
-                return 7  # Could have 32-bit immediate
-            return 3  # Register-register
-
-        # Push/pop: 1-2 bytes
-        if mnemonic in ("push", "pop"):
-            return 2
-
-        # Default for unknown instructions
-        return 5
 
     def _assemble_section(
         self,
@@ -936,14 +716,15 @@ class Assembler:
         errors: List[str] = []
         debug_lines: List[Tuple[int, int]] = []
         current_addr = base_addr
+        after_data = False  # see _instruction_padding
 
         for line in section.lines:
             # Record label position
             if line.label:
                 label_addrs[line.label] = current_addr
 
-            # Data and alignment directives in code (built-in encoders only)
-            if line.line_type == LineType.DIRECTIVE and self._builtin_encoder is not None:
+            # Data and alignment directives in code
+            if line.line_type == LineType.DIRECTIVE:
                 try:
                     data = self._text_directive_bytes(
                         line, current_addr, base_addr, labels, strict=True
@@ -953,54 +734,39 @@ class Assembler:
                     continue
                 code.extend(data)
                 current_addr += len(data)
+                if self._emits_data(line):
+                    after_data = True
+                elif self._is_real_alignment(line, labels):
+                    after_data = False
                 continue
 
             # Skip non-instructions
             if line.line_type != LineType.INSTRUCTION or not line.instruction:
                 continue
 
+            padding = self._instruction_padding(current_addr, after_data)
+            after_data = False
+            code.extend(bytes(padding))
+            current_addr += padding
+
             # Record debug line info before assembling
             debug_lines.append((current_addr, line.line_number))
 
             instr = line.instruction
 
-            # RISC-V and MIPS: built-in encoders handle instructions and
-            # pseudo-instructions directly
-            encoder = self._builtin_encoder
-            if encoder is not None:
-                try:
-                    encoding = encoder.encode(
-                        instr, current_addr, labels, **self._line_options(line)
-                    )
-                except EncodeError as e:
-                    errors.append(f"Line {line.line_number}: {e} - {line.instruction}")
-                    continue
-                code.extend(encoding)
-                current_addr += len(encoding)
-                continue
-
-            # Convert AT&T to Intel syntax for x86-64
-            if self.isa == "x86_64":
-                instr = self._convert_x86_att_to_intel(instr, labels)
-
-            # Assemble instruction
             try:
-                encoding, count = self._ks.asm(instr, current_addr)
-                if encoding is None or count == 0:
-                    errors.append(
-                        f"Line {line.line_number}: Failed to assemble: {line.instruction}"
-                    )
-                    continue
-
-                code.extend(encoding)
-                current_addr += len(encoding)
-
-            except keystone.KsError as e:
+                encoding = self._builtin_encoder.encode(
+                    instr, current_addr, labels, **self._line_options(line)
+                )
+            except EncodeError as e:
                 errors.append(f"Line {line.line_number}: {e} - {line.instruction}")
+                continue
+            code.extend(encoding)
+            current_addr += len(encoding)
 
         # Pass 1 must have predicted every label's address, or branch offsets
         # computed from those predictions would be wrong
-        if not errors and self.isa != "x86_64":
+        if not errors:
             for name, addr in label_addrs.items():
                 if labels.get(name, addr) != addr:
                     errors.append(
@@ -1009,206 +775,6 @@ class Assembler:
                     )
 
         return bytes(code), label_addrs, errors, debug_lines
-
-    def _convert_x86_att_to_intel(
-        self,
-        instr: str,
-        labels: Dict[str, int],
-    ) -> str:
-        """
-        Convert x86 AT&T syntax to Intel syntax.
-
-        Handles common patterns:
-        - %reg -> reg (remove % prefix)
-        - $imm -> imm (remove $ prefix)
-        - op src, dst -> op dst, src (reverse operand order)
-        - symbol(%rip) -> [rip + symbol] (RIP-relative addressing)
-        """
-        import re
-
-        parts = instr.split(None, 1)
-        if not parts:
-            return instr
-
-        mnemonic = parts[0].lower()
-        operands = parts[1] if len(parts) > 1 else ""
-
-        # Check if already Intel syntax (no % or $)
-        is_att_syntax = "%" in instr or "$" in instr
-
-        # For Intel-syntax jump/call with symbol, resolve the symbol
-        if not is_att_syntax:
-            if mnemonic in (
-                "jmp",
-                "call",
-                "je",
-                "jne",
-                "jz",
-                "jnz",
-                "jl",
-                "jle",
-                "jg",
-                "jge",
-                "ja",
-                "jae",
-                "jb",
-                "jbe",
-                "jo",
-                "jno",
-                "js",
-                "jns",
-                "jc",
-                "jnc",
-                "loop",
-                "loope",
-                "loopne",
-            ):
-                symbol = operands.strip()
-                if symbol in labels:
-                    return f"{mnemonic} {labels[symbol]}"
-            return instr
-
-        # Handle special AT&T mnemonics
-        # movslq = move sign-extend long to quad (Intel: movsxd)
-        if mnemonic == "movslq":
-            mnemonic = "movsxd"
-        # cltq = sign-extend eax to rax (Intel: cdqe)
-        elif mnemonic == "cltq":
-            return "cdqe"
-        # cqto = sign-extend rax to rdx:rax (Intel: cqo)
-        elif mnemonic == "cqto":
-            return "cqo"
-
-        # Remove size suffixes (b, w, l, q)
-        if mnemonic.endswith(("b", "w", "l", "q")) and len(mnemonic) > 2:
-            base = mnemonic[:-1]
-            if base in (
-                "mov",
-                "add",
-                "sub",
-                "xor",
-                "and",
-                "or",
-                "cmp",
-                "test",
-                "lea",
-                "push",
-                "pop",
-                "call",
-                "ret",
-                "jmp",
-                "dec",
-                "inc",
-                "neg",
-                "not",
-                "mul",
-                "imul",
-                "div",
-                "idiv",
-                "shl",
-                "shr",
-                "sar",
-                "sal",
-                "rol",
-                "ror",
-                "rcl",
-                "rcr",
-            ):
-                mnemonic = base
-
-        # Handle no-operand instructions
-        if not operands:
-            return mnemonic
-
-        # Split operands
-        op_list = []
-        depth = 0
-        current = ""
-        for c in operands:
-            if c == "(":
-                depth += 1
-            elif c == ")":
-                depth -= 1
-            elif c == "," and depth == 0:
-                op_list.append(current.strip())
-                current = ""
-                continue
-            current += c
-        if current.strip():
-            op_list.append(current.strip())
-
-        # Convert each operand
-        converted = []
-        for op in op_list:
-            op = op.strip()
-
-            # Handle RIP-relative: symbol(%rip) -> [rip + address]
-            rip_match = re.match(r"(\w+)\s*\(\s*%rip\s*\)", op)
-            if rip_match:
-                symbol = rip_match.group(1)
-                if symbol in labels:
-                    addr = labels[symbol]
-                    converted.append(f"[0x{addr:x}]")
-                else:
-                    # Symbol not found, use placeholder
-                    converted.append(f"[rip + {symbol}]")
-                continue
-
-            # Handle memory operands with index and scale: offset(base, index, scale)
-            # AT&T: (%r12, %rax, 4) -> Intel: [r12 + rax*4]
-            # AT&T: 16(%rsp, %rax, 8) -> Intel: [rsp + rax*8 + 16]
-            sib_match = re.match(r"(-?\d+)?\s*\(\s*%(\w+)\s*,\s*%(\w+)\s*,\s*(\d+)\s*\)", op)
-            if sib_match:
-                offset = sib_match.group(1)
-                base = sib_match.group(2)
-                index = sib_match.group(3)
-                scale = sib_match.group(4)
-                intel_op = f"[{base} + {index}*{scale}"
-                if offset:
-                    intel_op += f" + {offset}"
-                intel_op += "]"
-                converted.append(intel_op)
-                continue
-
-            # Handle memory operands: (%reg) -> [reg], offset(%reg) -> [reg + offset]
-            mem_match = re.match(r"(-?\d+)?\s*\(\s*%(\w+)\s*\)", op)
-            if mem_match:
-                offset = mem_match.group(1)
-                reg = mem_match.group(2)
-                if offset:
-                    converted.append(f"[{reg} + {offset}]")
-                else:
-                    converted.append(f"[{reg}]")
-                continue
-
-            # Handle immediate: $value -> value
-            if op.startswith("$"):
-                value = op[1:]
-                # Check if it's a symbol
-                if value in labels:
-                    converted.append(str(labels[value]))
-                else:
-                    converted.append(value)
-                continue
-
-            # Handle register: %reg -> reg
-            if op.startswith("%"):
-                converted.append(op[1:])
-                continue
-
-            # Check if it's a bare symbol (for jump/call targets)
-            if op in labels:
-                converted.append(str(labels[op]))
-                continue
-
-            # Pass through as-is
-            converted.append(op)
-
-        # Reverse operand order for two-operand instructions (AT&T: src, dst -> Intel: dst, src)
-        if len(converted) == 2 and mnemonic not in ("push", "pop", "call", "jmp", "syscall"):
-            converted = converted[::-1]
-
-        return f"{mnemonic} {', '.join(converted)}"
 
     def assemble_instruction(self, instr: str, address: int = 0) -> bytes:
         """
@@ -1224,15 +790,7 @@ class Assembler:
         Raises:
             ValueError: If assembly fails.
         """
-        if self._builtin_encoder is not None:
-            try:
-                return self._builtin_encoder.encode(instr, address, {})
-            except EncodeError as e:
-                raise ValueError(f"Assembly error: {e}")
         try:
-            encoding, count = self._ks.asm(instr, address)
-            if encoding is None or count == 0:
-                raise ValueError(f"Failed to assemble: {instr}")
-            return bytes(encoding)
-        except keystone.KsError as e:
+            return bytes(self._builtin_encoder.encode(instr, address, {}))
+        except EncodeError as e:
             raise ValueError(f"Assembly error: {e}")

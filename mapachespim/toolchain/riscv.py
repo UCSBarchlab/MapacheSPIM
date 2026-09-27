@@ -1,10 +1,9 @@
 """
 Pure-Python RISC-V (RV64IM) instruction encoder.
 
-The Keystone release on PyPI has no RISC-V support, so MapacheSPIM encodes
-RISC-V itself. RISC-V's six instruction formats are regular enough that a
-table-driven encoder is short, and doing it here means the most commonly
-taught ISA needs no native assembler library at all.
+RISC-V's six instruction formats are regular enough that a table-driven
+encoder is short. Like the other built-in encoders, it matches GNU as byte
+for byte, including pseudo-instruction expansions.
 
 Supported:
     - RV64I base integer instructions (including the *W word variants)

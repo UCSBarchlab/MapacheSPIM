@@ -14,6 +14,20 @@ from typing import Callable, Dict, List, Literal, Optional, Tuple
 
 from .expr import ExpressionError, UndefinedSymbol, evaluate
 
+ALIGN_DIRECTIVES = ("align", "balign", "p2align")
+
+_ISA_ALIASES = {"riscv": "riscv64", "aarch64": "arm64", "x64": "x86_64", "mips": "mips32"}
+
+
+def canonical_isa(isa: str) -> str:
+    """The canonical name for an ISA or one of its aliases (e.g. mips -> mips32)."""
+    isa = isa.lower().replace("-", "_")
+    return _ISA_ALIASES.get(isa, isa)
+
+
+# Other directives that emit bytes (besides the DATA_SIZES ones)
+BYTE_DIRECTIVES = ("ascii", "asciz", "string", "space", "skip", "zero", "fill")
+
 
 class LineType(Enum):
     """Type of assembly source line."""
@@ -51,6 +65,9 @@ class ParsedLine:
 
     reorder: bool = True
     """MIPS: whether the assembler fills delay slots (.set reorder, the default)."""
+
+    syntax: str = "auto"
+    """x86-64: "att", "intel", or "auto" (from .att_syntax / .intel_syntax)."""
     """Instruction mnemonic and operands."""
 
 
@@ -162,7 +179,7 @@ class DirectiveParser:
                 decides byte order and what .align means; an .isa directive
                 in the source is used when this is not given.
         """
-        self.target_isa = isa.lower().replace("-", "_") if isa else None
+        self.target_isa = canonical_isa(isa) if isa else None
         self.sections: Dict[str, SectionData] = {}
         self.current_section: str = ".text"
         self.global_symbols: set = set()
@@ -174,6 +191,7 @@ class DirectiveParser:
         # .equ/.set constants that refer to labels: name -> (expression, line)
         self.deferred_constants: Dict[str, Tuple[str, int]] = {}
         self.reorder = True  # MIPS .set reorder / .set noreorder
+        self.syntax = "auto"  # x86-64 .att_syntax / .intel_syntax
         self._dot_count = 0
 
         # Initialize default sections
@@ -190,7 +208,16 @@ class DirectiveParser:
             return "big"
         return "little"
 
-    def _alignment(self, directive: str, value: int) -> int:
+    def data_size(self, directive: str) -> Optional[int]:
+        """Bytes per value for a data directive like .word, or None.
+
+        As in GNU as, .word (and .value) is 2 bytes on x86 but 4 elsewhere.
+        """
+        if self._effective_isa == "x86_64" and directive in ("word", "value"):
+            return 2
+        return DATA_SIZES.get(directive)
+
+    def alignment(self, directive: str, value: int) -> int:
         """Alignment in bytes for .align/.balign/.p2align with argument value.
 
         As in GNU as, .align takes a power of two on RISC-V, MIPS, and ARM,
@@ -236,8 +263,8 @@ class DirectiveParser:
         """
         byteorder = self._get_endianness()
 
-        if directive in DATA_SIZES:
-            size = DATA_SIZES[directive]
+        size = self.data_size(directive)
+        if size is not None:
             out = bytearray()
             for arg in args:
                 try:
@@ -267,14 +294,38 @@ class DirectiveParser:
             fill = evaluate(args[1], resolve) & 0xFF if len(args) > 1 else 0
             return bytes([fill]) * size
 
-        if directive in ("align", "balign", "p2align"):
+        if directive == "fill":
+            # .fill repeat, size, value: as in GNU as, size is capped at 8
+            # and only the low 4 bytes of each item come from value
+            if not args:
+                raise ExpressionError(".fill needs a repeat count")
+            repeat = evaluate(args[0], resolve)
+            size = evaluate(args[1], resolve) if len(args) > 1 and args[1] else 1
+            value = evaluate(args[2], resolve) & 0xFFFFFFFF if len(args) > 2 else 0
+            if repeat < 0 or size < 0:
+                raise ExpressionError(".fill repeat and size must not be negative")
+            size = min(size, 8)
+            if size <= 4:
+                item = value.to_bytes(4, byteorder)
+                item = item[-size:] if byteorder == "big" else item[:size]
+            else:
+                item = value.to_bytes(4, byteorder) + bytes(size - 4)
+            return item * repeat if size else b""
+
+        if directive in ALIGN_DIRECTIVES:
             if not args:
                 raise ExpressionError(f".{directive} needs an alignment")
-            alignment = self._alignment(directive, evaluate(args[0], resolve))
+            alignment = self.alignment(directive, evaluate(args[0], resolve))
             if alignment <= 0 or alignment & (alignment - 1):
                 raise ExpressionError(f"alignment {alignment} is not a power of 2")
             fill = evaluate(args[1], resolve) & 0xFF if len(args) > 1 and args[1] else 0
-            return bytes([fill]) * ((alignment - offset % alignment) % alignment)
+            padding = (alignment - offset % alignment) % alignment
+            # The optional third argument is the most padding to insert (0
+            # means no limit); when more would be needed, nothing is inserted.
+            limit = evaluate(args[2], resolve) if len(args) > 2 and args[2] else 0
+            if 0 < limit < padding:
+                padding = 0
+            return bytes([fill]) * padding
 
         return None
 
@@ -303,6 +354,7 @@ class DirectiveParser:
     def _add_line(self, parsed: ParsedLine) -> None:
         """Record a parsed line in the current section."""
         parsed.reorder = self.reorder
+        parsed.syntax = self.syntax
         section = self.sections[self.current_section]
         section.lines.append(parsed)
 
@@ -542,7 +594,10 @@ class DirectiveParser:
         return ParsedLine(line_num, LineType.INSTRUCTION, original, label=label, instruction=line)
 
     def _parse_args(self, args_str: str) -> List[str]:
-        """Parse comma-separated directive arguments, respecting quotes."""
+        """Parse comma-separated directive arguments, respecting quotes.
+
+        Empty arguments are kept, so later arguments keep their position.
+        """
         args = []
         current = ""
         in_string = False
@@ -558,15 +613,12 @@ class DirectiveParser:
                 string_char = char
                 current += char
             elif char == ",":
-                if current.strip():
-                    args.append(current.strip())
+                args.append(current.strip())  # may be empty: ".p2align 4,,7"
                 current = ""
             else:
                 current += char
 
-        if current.strip():
-            args.append(current.strip())
-
+        args.append(current.strip())
         return args
 
     def _process_directive(self, parsed: ParsedLine, section: SectionData) -> None:
@@ -618,6 +670,11 @@ class DirectiveParser:
                 self.local_symbols.add(arg)
             return
 
+        # x86-64 syntax selection
+        if directive in ("intel_syntax", "att_syntax"):
+            self.syntax = "intel" if directive == "intel_syntax" else "att"
+            return
+
         # MIPS assembler options: ".set noreorder", ".set noat", ...
         if directive == "set" and len(args) == 1:
             option = args[0].lower()
@@ -641,12 +698,8 @@ class DirectiveParser:
 
         # Like GNU as for MIPS, align .half/.word/.dword to their size, and
         # move labels that were waiting for this data along with it
-        if (
-            directive in DATA_SIZES
-            and DATA_SIZES[directive] > 1
-            and self._effective_isa in self.AUTO_ALIGN_ISAS
-        ):
-            size = DATA_SIZES[directive]
+        size = self.data_size(directive or "")
+        if size is not None and size > 1 and self._effective_isa in self.AUTO_ALIGN_ISAS:
             padding = (size - section.current_offset % size) % size
             if padding:
                 section.data.extend(b"\x00" * padding)

@@ -50,9 +50,8 @@ mapachespim --version
 - `unicorn` - CPU emulator framework
 - `capstone` - Disassembler
 - `pyelftools` - ELF file parsing
-- `keystone-engine` - Assembler for ARM64 and x86-64, installed automatically on x86 machines. RISC-V
-  and MIPS use MapacheSPIM's built-in assembler, so they work everywhere; see
-  [ISA support](#multi-isa-support) for details.
+
+The assembler is built in (pure Python), so there is nothing else to install on any platform.
 
 ### Running MapacheSPIM
 
@@ -254,23 +253,22 @@ MapacheSPIM is powered by the [Unicorn Engine](https://www.unicorn-engine.org/),
 MapacheSPIM supports four instruction set architectures, each with the same console commands,
 syscalls, and a matching set of example programs:
 
-| ISA | Examples | Assembling `.s` files |
-|-----|----------|-----------------------|
-| RISC-V 64-bit (RV64IM) | `examples/riscv/` | Built in, works everywhere\* |
-| MIPS32 (big-endian) | `examples/mips/` | Built in, works everywhere\* |
-| ARM64 (AArch64) | `examples/arm/` | Uses [Keystone](https://www.keystone-engine.org/) |
-| x86-64 (AT&T or Intel syntax) | `examples/x86_64/` | Uses [Keystone](https://www.keystone-engine.org/) |
+| ISA | Examples |
+|-----|----------|
+| RISC-V 64-bit (RV64IM) | `examples/riscv/` |
+| MIPS32 (big-endian) | `examples/mips/` |
+| ARM64 (AArch64) | `examples/arm/` |
+| x86-64 (AT&T or Intel syntax) | `examples/x86_64/` |
 
-Keystone is installed automatically on x86 machines (Windows, Intel Macs, x86 Linux). Its PyPI release
-has no prebuilt package for ARM machines such as Apple Silicon Macs, so it is not installed there by
-default; you can still run and debug ARM64 and x86-64 programs (including all the bundled examples), and
-can try `pip install 'mapachespim[keystone]'` to build Keystone from source (this needs CMake and a C++
-compiler).
+All four are assembled by MapacheSPIM's built-in assembler, which works on every platform. For
+everything it accepts, it produces byte-for-byte the same machine code as GNU `as` (the standard
+assembler used in textbooks and courses), including pseudo-instruction expansions (RISC-V `li`, MIPS
+`la`, ARM64 `ldr x0, =value` literal pools), data directives, alignment padding, and branch
+relaxation (x86-64 short and long jumps). This is checked continuously by randomized differential
+tests that assemble hundreds of thousands of instructions with both and compare the results.
 
-\* The built-in RISC-V and MIPS assemblers produce byte-for-byte the same machine code as GNU `as`
-(the standard assembler used in textbooks and courses), including its pseudo-instruction expansions,
-data directives, and branch relaxation. This is checked continuously by randomized differential tests
-that assemble hundreds of thousands of instructions with both and compare the results.
+x86-64 accepts both AT&T syntax (`movq $1, %rax`) and Intel syntax (`mov rax, 1`), detected per
+instruction, as well as the `.intel_syntax` / `.att_syntax` directives.
 
 Loading an ELF file detects its ISA automatically.
 

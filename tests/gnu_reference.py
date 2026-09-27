@@ -43,6 +43,7 @@ TARGETS: Dict[str, GnuTarget] = {
         ".option norvc\n.option norelax\n.option nopic\n",
     ),
     "arm64": GnuTarget("aarch64-linux-gnu-", (), ""),
+    "x86_64": GnuTarget("x86_64-linux-gnu-", ("--64",), ""),
     "mips32": GnuTarget(
         "mips-linux-gnu-",
         ("-march=mips32", "-EB", "-mno-shared", "-O0", "-32"),
@@ -117,11 +118,12 @@ RISCV_NOP = (0x00000013).to_bytes(4, "little")
 
 def trim_padding(gnu: bytes, ours: bytes) -> bytes:
     """Drop the padding GNU as adds at the end of a section to reach its
-    alignment: zeros, or nop instructions in RISC-V code."""
+    alignment: zeros, or nop instructions in RISC-V code (a zero byte if
+    odd, a 2-byte c.nop, then 4-byte nops, as GNU's riscv_make_nops)."""
     tail = gnu[len(ours) :]
-    if len(gnu) > len(ours) and (
-        not tail.strip(b"\0") or (len(tail) % 4 == 0 and tail == RISCV_NOP * (len(tail) // 4))
-    ):
+    riscv_nops = bytes(len(tail) % 2) + (b"\x01\x00" if len(tail) % 4 >= 2 else b"")
+    riscv_nops += RISCV_NOP * (len(tail) // 4)
+    if len(gnu) > len(ours) and (not tail.strip(b"\0") or tail == riscv_nops):
         return gnu[: len(ours)]
     return gnu
 

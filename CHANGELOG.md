@@ -3,10 +3,9 @@
 ## Unreleased
 
 ### Installation
-- RISC-V and MIPS programs are assembled by new built-in pure-Python encoders, so they assemble on
-  every platform. (RISC-V could not be assembled at all with the Keystone release on PyPI.)
-- Keystone is now only needed for ARM64 and x86-64, and is installed automatically only on x86
-  machines where prebuilt wheels exist. Elsewhere it is the optional `keystone` extra.
+- All four ISAs are assembled by new built-in pure-Python assemblers, so every ISA assembles on
+  every platform. The Keystone dependency is gone: it had no prebuilt packages for ARM machines
+  such as Apple Silicon Macs, and its PyPI release could not assemble RISC-V at all.
 - The example programs are included in the package, so `load riscv/fibonacci` works after
   `pip install`. `mapachespim --copy-examples DIR` copies them somewhere editable.
 - Python 3.9 or newer is required.
@@ -33,7 +32,7 @@
 - Loading a program starts from a fresh machine state and may switch ISA.
 
 ### Assembler
-- The built-in RISC-V and MIPS assemblers now produce byte-for-byte the same code as GNU `as`,
+- The built-in assemblers produce byte-for-byte the same code as GNU `as` for all four ISAs,
   verified by randomized differential tests against GNU binutils (run in CI). This changed some
   pseudo-instruction expansions to GNU's: RISC-V `call`/`tail` are always `auipc`+`jalr`, `li` uses
   GNU's algorithm; MIPS `la` is `lui`+`addiu`, and compare-branches, `abs`, `mul`/`div`/`rem` with
@@ -51,3 +50,13 @@
 - Debug info for big-endian targets (MIPS) was written in the wrong byte order, so source-level
   debugging never worked for MIPS.
 - `.isa riscv64  # comment` is recognized.
+- ARM64: `ldr x0, =value` uses a literal pool (`.ltorg`/`.pool`) like GNU `as`; logical immediates,
+  `mov` aliases, and `//` comments follow GNU. The ARM examples were updated to GNU syntax.
+- x86-64: AT&T and Intel syntax (auto-detected, or `.att_syntax`/`.intel_syntax`), GNU's choice of
+  encodings, and GNU's jump relaxation (short jumps grow to 32-bit only when needed). `.word` is 2
+  bytes on x86, as in GNU `as`.
+- Alignment in code is padded with nops the way GNU `as` does on each ISA; the `.p2align`/`.balign`
+  maximum-skip argument works; `.fill` is supported; `;` separates statements; numeric local labels
+  (`1:` with `1b`/`1f`) work.
+- ISA aliases (`mips`, `x64`, `aarch64`) were treated as unknown ISAs by the directive parser, so
+  e.g. `--isa mips` produced little-endian data.

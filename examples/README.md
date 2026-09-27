@@ -63,8 +63,8 @@ or assemble a single file:
 mapachespim-as -g riscv/hello_asm/hello_asm.s -o hello_asm
 ```
 
-RISC-V and MIPS are assembled by MapacheSPIM's built-in assembler. ARM64 and x86-64 use the Keystone
-library, which is installed automatically on x86 computers (see the main README for other machines).
+All four ISAs are assembled by MapacheSPIM's built-in assembler, which produces the same machine
+code as GNU `as`.
 
 The Makefiles inside each ISA directory are an alternative that builds with the GNU cross
 toolchains (for example `riscv64-unknown-elf-as`), for anyone who prefers them.

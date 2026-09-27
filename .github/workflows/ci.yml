@@ -34,9 +34,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # ubuntu/windows are x86 (Keystone installed automatically);
-        # macos-14 is Apple Silicon, where Keystone has no wheel, so it
-        # covers the "no Keystone" install that many students will have.
+        # macos-14 is Apple Silicon, which many students have.
         os: [ubuntu-latest, windows-latest, macos-14]
         python-version: ["3.9", "3.13"]
         include:
@@ -75,13 +73,15 @@ jobs:
           mapachespim --copy-examples ex
           mapachespim -e ex/riscv/fibonacci/fibonacci.s
           mapachespim -e ex/mips/fibonacci/fibonacci.s
+          mapachespim -e ex/arm/fibonacci/fibonacci.s
+          mapachespim -e ex/x86_64/fibonacci/fibonacci.S
           printf 'load riscv/fibonacci\nbreak fibonacci\nrun\nregs\nlist\nquit\n' | mapachespim
 
       - name: Install GNU binutils for the assembler differential tests
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq binutils-riscv64-linux-gnu binutils-mips-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get install -y -qq binutils-riscv64-linux-gnu binutils-mips-linux-gnu binutils-aarch64-linux-gnu binutils-x86-64-linux-gnu
 
       - name: Run tests
         run: python -m pytest tests/ --tb=short
@@ -101,7 +101,7 @@ jobs:
       - name: Install GNU binutils
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y -qq binutils-riscv64-linux-gnu binutils-mips-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get install -y -qq binutils-riscv64-linux-gnu binutils-mips-linux-gnu binutils-aarch64-linux-gnu binutils-x86-64-linux-gnu
 
       - name: Install package
         run: pip install -e ".[dev]"

@@ -1,14 +1,10 @@
-"""Tests for the MapacheSPIM toolchain (Keystone-based assembler)."""
+"""Tests for the MapacheSPIM toolchain (built-in assemblers)."""
 
 import pytest
 from mapachespim.toolchain import assemble, AssemblyResult
 from mapachespim.toolchain.assembler import Assembler
 from mapachespim.toolchain.directives import DirectiveParser, LineType
 
-
-# Skip all tests if Keystone not available
-# Tests needing Keystone (ARM64/x86-64/MIPS) are skipped by conftest.py when
-# it is not installed; RISC-V tests use the built-in encoder and always run.
 
 
 class TestDirectiveParser:

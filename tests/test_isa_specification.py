@@ -8,10 +8,6 @@ from mapachespim.toolchain import assemble, assemble_file, AssemblyResult
 from mapachespim.toolchain.directives import DirectiveParser
 
 
-# Skip all tests if Keystone not available
-# Tests needing Keystone (ARM64/x86-64/MIPS) are skipped by conftest.py when
-# it is not installed; RISC-V tests use the built-in encoder and always run.
-
 
 class TestISADirective:
     """Tests for .isa directive in source files."""

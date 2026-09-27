@@ -33,17 +33,9 @@ dependencies = [
     "pyelftools>=0.29",
     "unicorn>=2.0.0",
     "capstone>=5.0.0",
-    # Keystone assembles ARM64/x86-64/MIPS (RISC-V uses a built-in encoder).
-    # Its PyPI release only ships prebuilt wheels for x86 machines, so it is
-    # installed automatically only there; elsewhere pip would have to compile
-    # it from source. Use the "keystone" extra to try that explicitly.
-    "keystone-engine>=0.9.2; platform_machine == 'x86_64' or platform_machine == 'AMD64' or platform_machine == 'i686' or platform_machine == 'x86'",
 ]
 
 [project.optional-dependencies]
-keystone = [
-    "keystone-engine>=0.9.2",
-]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",

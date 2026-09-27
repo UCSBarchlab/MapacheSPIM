@@ -207,14 +207,6 @@ mapachespim --copy-examples my-examples
 - With pip in a virtual environment, make sure it is activated.
 - You can always run `python3 -m mapachespim.console` instead.
 
-### "Assembling arm64 requires the Keystone Engine"
-
-ARM64 and x86-64 programs are assembled with the Keystone library, which is installed automatically
-on x86 computers but not on ARM computers such as Apple Silicon Macs (it has no prebuilt package for
-them). RISC-V and MIPS always work. You can still load and debug the bundled ARM64 and x86-64
-examples, since they are already assembled. To build Keystone yourself (needs CMake and a C++
-compiler): `pip install 'mapachespim[keystone]'`.
-
 ### Still Stuck?
 
 - Read the [Console Guide](console-guide.md)
