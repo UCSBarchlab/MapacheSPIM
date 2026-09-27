@@ -9,6 +9,7 @@ Supports RISC-V, ARM64, and x86-64 architectures.
 from __future__ import annotations
 
 import cmd
+import os
 import signal
 import sys
 import tempfile
@@ -1659,8 +1660,11 @@ class MapacheSPIMConsole(cmd.Cmd):
             # No text yet, list current directory
             pattern = "*"
 
-        # Get matching paths
+        # Get matching paths. On Windows glob joins with backslashes; keep
+        # the forward slashes the user typed so completions extend their text.
         matches = glob.glob(pattern)
+        if os.sep != "/" and "\\" not in text:
+            matches = [m.replace(os.sep, "/") for m in matches]
 
         # Also offer bundled example names like "riscv/fibonacci"
         if not use_tilde and text.count("/") <= 1:

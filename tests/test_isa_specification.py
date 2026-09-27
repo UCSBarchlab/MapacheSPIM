@@ -1,7 +1,6 @@
 """Tests for ISA specification via --isa flag and .isa directive."""
 
 import pytest
-import tempfile
 from pathlib import Path
 
 from mapachespim.toolchain import assemble, assemble_file, AssemblyResult
@@ -104,102 +103,67 @@ class TestISADirective:
         assert "requires an argument" in parser.errors[0]
 
 
+def _source(tmp_path, text, name="program.s"):
+    """Write assembly source to a file and return its path."""
+    path = tmp_path / name
+    path.write_text(text)
+    return path
+
+
 class TestAssembleFile:
     """Tests for assemble_file with ISA specification."""
 
-    def test_explicit_isa_flag(self):
+    def test_explicit_isa_flag(self, tmp_path):
         """Test that explicit ISA flag works."""
-        with tempfile.NamedTemporaryFile(suffix=".s", delete=False, mode='w') as f:
-            f.write(".text\n_start: nop\n")
-            f.flush()
+        result = assemble_file(_source(tmp_path, ".text\n_start: nop\n"), isa="riscv64")
+        assert result.success
+        assert result.isa == "riscv64"
 
-            result = assemble_file(f.name, isa="riscv64")
-            assert result.success
-            assert result.isa == "riscv64"
-
-            Path(f.name).unlink()
-
-    def test_isa_directive_in_file(self):
+    def test_isa_directive_in_file(self, tmp_path):
         """Test that .isa directive in file is detected."""
-        with tempfile.NamedTemporaryFile(suffix=".s", delete=False, mode='w') as f:
-            f.write(".isa arm64\n.text\n_start: nop\n")
-            f.flush()
+        result = assemble_file(_source(tmp_path, ".isa arm64\n.text\n_start: nop\n"))
+        assert result.success
+        assert result.isa == "arm64"
 
-            result = assemble_file(f.name)  # No explicit ISA
-            assert result.success
-            assert result.isa == "arm64"
-
-            Path(f.name).unlink()
-
-    def test_explicit_isa_overrides_directive(self):
+    def test_explicit_isa_overrides_directive(self, tmp_path):
         """Test that --isa flag overrides .isa directive in file."""
-        with tempfile.NamedTemporaryFile(suffix=".s", delete=False, mode='w') as f:
-            # File says arm64, but we'll pass riscv64
-            f.write(".isa arm64\n.text\n_start: nop\n")
-            f.flush()
+        # File says arm64, but the explicit flag should win
+        path = _source(tmp_path, ".isa arm64\n.text\n_start: nop\n")
+        result = assemble_file(path, isa="riscv64")
+        assert result.success
+        assert result.isa == "riscv64"
 
-            # Explicit flag should override
-            result = assemble_file(f.name, isa="riscv64")
-            assert result.success
-            assert result.isa == "riscv64"
-
-            Path(f.name).unlink()
-
-    def test_missing_isa_produces_error(self):
+    def test_missing_isa_produces_error(self, tmp_path):
         """Test that missing ISA produces helpful error."""
-        with tempfile.NamedTemporaryFile(suffix=".s", delete=False, mode='w') as f:
-            f.write(".text\n_start: nop\n")
-            f.flush()
+        result = assemble_file(_source(tmp_path, ".text\n_start: nop\n"))
+        assert not result.success
+        assert len(result.errors) == 1
+        assert "ISA not specified" in result.errors[0]
+        assert "--isa" in result.errors[0]
+        assert ".isa" in result.errors[0]
 
-            result = assemble_file(f.name)  # No ISA specified anywhere
-            assert not result.success
-            assert len(result.errors) == 1
-            assert "ISA not specified" in result.errors[0]
-            assert "--isa" in result.errors[0]
-            assert ".isa" in result.errors[0]
-
-            Path(f.name).unlink()
-
-    def test_isa_directive_at_top_of_file(self):
+    def test_isa_directive_at_top_of_file(self, tmp_path):
         """Test that .isa directive works when at top (after comments)."""
-        with tempfile.NamedTemporaryFile(suffix=".s", delete=False, mode='w') as f:
-            f.write("# This is a comment\n")
-            f.write("// Another comment\n")
-            f.write(".isa mips32\n")
-            f.write(".text\n_start: nop\n")
-            f.flush()
+        source = "# This is a comment\n// Another comment\n.isa mips32\n.text\n_start: nop\n"
+        result = assemble_file(_source(tmp_path, source))
+        assert result.success
+        assert result.isa == "mips32"
 
-            result = assemble_file(f.name)
-            assert result.success
-            assert result.isa == "mips32"
-
-            Path(f.name).unlink()
-
-    def test_all_isas_with_flag(self):
+    def test_all_isas_with_flag(self, tmp_path):
         """Test that all ISAs work with explicit flag."""
         for isa in ["riscv64", "arm64", "x86_64", "mips32"]:
-            with tempfile.NamedTemporaryFile(suffix=".s", delete=False, mode='w') as f:
-                f.write(".text\n_start: nop\n")
-                f.flush()
+            path = _source(tmp_path, ".text\n_start: nop\n", f"{isa}.s")
+            result = assemble_file(path, isa=isa)
+            assert result.success, f"Failed for ISA: {isa}"
+            assert result.isa == isa
 
-                result = assemble_file(f.name, isa=isa)
-                assert result.success, f"Failed for ISA: {isa}"
-                assert result.isa == isa
-
-                Path(f.name).unlink()
-
-    def test_all_isas_with_directive(self):
+    def test_all_isas_with_directive(self, tmp_path):
         """Test that all ISAs work with .isa directive."""
         for isa in ["riscv64", "arm64", "x86_64", "mips32"]:
-            with tempfile.NamedTemporaryFile(suffix=".s", delete=False, mode='w') as f:
-                f.write(f".isa {isa}\n.text\n_start: nop\n")
-                f.flush()
-
-                result = assemble_file(f.name)
-                assert result.success, f"Failed for ISA: {isa}"
-                assert result.isa == isa
-
-                Path(f.name).unlink()
+            path = _source(tmp_path, f".isa {isa}\n.text\n_start: nop\n", f"{isa}.s")
+            result = assemble_file(path)
+            assert result.success, f"Failed for ISA: {isa}"
+            assert result.isa == isa
 
 
 class TestDirectAssemble:
