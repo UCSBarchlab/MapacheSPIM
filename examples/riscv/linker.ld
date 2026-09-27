@@ -1,5 +1,5 @@
 /* ============================================================================
- * RISC-V Linker Script for Bare-Metal Programs (Sail Emulator)
+ * RISC-V Linker Script for Bare-Metal Programs (GNU ld)
  * ============================================================================
  */
 
@@ -31,12 +31,6 @@ SECTIONS
     .bss : {
         *(.bss*)
         *(COMMON)
-    } > RAM
-
-    /* HTIF at fixed address - critical for Sail emulator */
-    . = 0x80001000;
-    .tohost ALIGN(64) : {
-        *(.tohost)
     } > RAM
 
     /* Stack at end of memory */

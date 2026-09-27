@@ -36,6 +36,17 @@ class ISA(IntEnum):
 
 
 @dataclass(frozen=True)
+class StatusFlags:
+    """A condition-code register, shown by the flags it holds rather than its raw value."""
+
+    name: str
+    """Name of the register (e.g. "rflags")."""
+
+    bits: Tuple[Tuple[str, int], ...]
+    """(flag name, bit number) of each flag to show, in display order."""
+
+
+@dataclass(frozen=True)
 class RegisterFile:
     """The general-purpose registers, numbered as the simulator API uses them."""
 
@@ -47,6 +58,12 @@ class RegisterFile:
 
     number_prefix: Optional[str] = None
     """Prefix for numbered display, e.g. "x" shows "x5 (t0)"; None shows only the name."""
+
+    special: Tuple[str, ...] = ()
+    """Other registers that instructions write and ``regs`` shows (e.g. MIPS hi and lo)."""
+
+    flags: Optional[StatusFlags] = None
+    """The condition codes that compare and branch instructions use, if the ISA has them."""
 
     @property
     def count(self) -> int:
@@ -252,6 +269,7 @@ MIPS32 = ISASpec(
     registers=RegisterFile(
         names=_MIPS_REGISTERS,
         zero_register=0,
+        special=("hi", "lo"),  # results of mult and div
     ),
     syscall_abi=SyscallABI(number=2, arg0=4, result=2),  # $v0, $a0, $v0
     syscall_instruction=InstructionPattern(4, 0xFFFFFFFF, 0x0000000C),  # syscall
@@ -276,6 +294,7 @@ ARM64 = ISASpec(
     registers=RegisterFile(
         names=tuple(f"x{n}" for n in range(31)) + ("sp",),
         number_prefix="x",
+        flags=StatusFlags("nzcv", (("N", 31), ("Z", 30), ("C", 29), ("V", 28))),
     ),
     syscall_abi=SyscallABI(number=8, arg0=0, result=0),  # x8, x0, x0
     syscall_instruction=InstructionPattern(4, 0xFFE0001F, 0xD4000001),  # svc #imm
@@ -296,6 +315,7 @@ X86_64 = ISASpec(
     layout=X86_64_LAYOUT,
     registers=RegisterFile(
         names=_X86_64_REGISTERS,
+        flags=StatusFlags("rflags", (("CF", 0), ("ZF", 6), ("SF", 7), ("OF", 11))),
     ),
     syscall_abi=SyscallABI(number=0, arg0=7, result=0),  # rax, rdi, rax
     syscall_instruction=InstructionPattern(2, 0xFFFF, 0x050F),  # syscall (0f 05)

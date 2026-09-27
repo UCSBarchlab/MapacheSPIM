@@ -47,7 +47,8 @@ mapachespim riscv/fibonacci
   ```
 
 ### Execution
-- `step [n]` - Execute 1 or n instructions (alias: `s`)
+- `step [n]` - Execute 1 or n instructions (alias: `s`). Each source line is shown before the
+  machine instructions it assembled to (a pseudo-instruction like `la` may become several).
   ```
   (mapachespim) step       # Execute 1 instruction
   (mapachespim) step 10    # Execute 10 instructions
@@ -91,8 +92,8 @@ mapachespim riscv/fibonacci
   (mapachespim) regs
 
   x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000000000000
-  x2  (  sp) = 0x0000000080181000 ★  x3  (  gp) = 0x0000000000000000
-  x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000000000000
+  x2  (  sp) = 0x0000000083effff8    x3  (  gp) = 0x0000000000000000
+  x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000080100000 ★
   x6  (  t1) = 0x0000000000000000    x7  (  t2) = 0x0000000000000000
   x8  (  s0) = 0x0000000000000000    x9  (  s1) = 0x0000000000000000
   x10 (  a0) = 0x0000000000000000    x11 (  a1) = 0x0000000000000000
@@ -109,6 +110,18 @@ mapachespim riscv/fibonacci
 
   pc = 0x0000000080000004
   ```
+
+  On MIPS, `regs` also shows `hi` and `lo`, where `mult` and `div` put their results. On ARM64
+  and x86-64 it shows the condition flags that compare instructions set and conditional branches
+  test. For example, on x86-64 after `movq $3, %rax` and `cmpq $5, %rax` (3 − 5 is negative and
+  borrows):
+  ```
+  pc = 0x000000000040000f
+  rflags: CF=1 ZF=0 SF=1 OF=0 ★
+  ```
+  ARM64 shows the same four flags as `nzcv: N=1 Z=0 C=0 V=0`.
+
+- `stepreg [n]` - Step, then show the registers, like `step` followed by `regs` (alias: `sr`)
 
 - `pc` - Show just the program counter
   ```
@@ -129,10 +142,10 @@ mapachespim riscv/fibonacci
   ```
   (mapachespim) mem 0x80000000 64
 
-  0x80000000:  17 11 18 00  13 01 01 00  97 02 10 00  93 82 82 ff  |................|
-  0x80000010:  03 a5 02 00  ef 00 40 02  97 02 10 00  93 82 c2 fe  |......@.........|
-  0x80000020:  23 a0 a2 00  93 02 10 00  17 03 19 00  13 03 83 fd  |#...............|
-  0x80000030:  23 30 53 00  6f 00 00 00  63 04 05 04  93 02 10 00  |#0S.o...c.......|
+  0x80000000:  97 02 10 00  93 82 02 00  03 a5 02 00  ef 00 c0 02  |................|
+  0x80000010:  97 02 10 00  93 82 42 ff  23 a0 a2 00  93 08 10 00  |......B.#.......|
+  0x80000020:  73 00 00 00  13 05 a0 00  93 08 b0 00  73 00 00 00  |s...........s...|
+  0x80000030:  93 08 a0 00  73 00 00 00  63 04 05 04  93 02 10 00  |....s...c.......|
   ```
 
 - `list [location]` - Display source code (requires debug symbols) (alias: `l`)
@@ -147,19 +160,32 @@ mapachespim riscv/fibonacci
   (mapachespim) list fibonacci
 
   fibonacci.s:
-     81: #   sp+16: saved a0 (original n value)
-     82: #   Total: 24 bytes
-     83: # ============================================================================
-     84: fibonacci:
-     85:     # Base case 1: if n == 0, return 0
-     86:     beqz    a0, base_case_zero
-     87:
-     88:     # Base case 2: if n == 1, return 1
-     89:     li      t0, 1
-     90:     beq     a0, t0, base_case_one
+     75: #   sp+16: saved ra (return address)
+     76: #   Total: 24 bytes
+     77: # ============================================================================
+     78: fibonacci:
+     79:     # Base case 1: if n == 0, return 0
+     80:     beqz    a0, base_case_zero
+     81:
+     82:     # Base case 2: if n == 1, return 1
+     83:     li      t0, 1
+     84:     beq     a0, t0, base_case_one
   ```
 
   Programs loaded from `.s` files always have source info.
+
+- `disasm [addr|label] [n]` - Disassemble n instructions (default 10) from the PC or the given
+  place (alias: `d`). A `>` marks the PC. On x86-64, instructions are shown in the syntax they
+  were written in, AT&T or Intel (Intel for ELF files without source).
+  For example, with `riscv/fibonacci` loaded:
+  ```
+  (mapachespim) disasm fibonacci 4
+
+  [0x80000038]  beqz a0, 0x48
+  [0x8000003c]  addi t0, zero, 1
+  [0x80000040]  beq a0, t0, 0x48
+  [0x80000044]  addi sp, sp, -0x18
+  ```
 
 ### Breakpoints
 - `break <addr|label>` - Set breakpoint at an address or label (alias: `b`)
@@ -183,18 +209,13 @@ mapachespim riscv/fibonacci
   ```
   (mapachespim) info symbols
 
-  Symbols (11 total):
+  Symbols (6 total):
     0x80000000  _start
-    0x80000034  exit_loop
     0x80000038  fibonacci
     0x80000080  base_case_zero
     0x80000088  base_case_one
     0x80100000  fib_input
     0x80100004  fib_result
-    0x80180000  _stack_bottom
-    0x80181000  _stack_start
-    0x80190000  tohost
-    0x80190040  fromhost
   ```
 
 - `info sections` - List all ELF sections (alias: `info sec`)
@@ -206,8 +227,6 @@ mapachespim riscv/fibonacci
   ----------------------------------------------------------------------
   .text                        0x80000000          144  AX
   .data                        0x80100000            8  WA
-  .bss                         0x80180000         4096  WA
-  .tohost                      0x80190000           72  A
 
   Flags: W=Write, A=Alloc, X=Execute
   Use 'mem <section>' to view section contents (e.g., mem .data)
@@ -236,22 +255,23 @@ Welcome to MapacheSPIM. Type help or ? to list commands, or quickstart for a tut
 (mapachespim) load riscv/fibonacci
 Loaded riscv/fibonacci (RISCV)
 Entry point: 0x0000000080000000
-Source info: fibonacci.s (32 address mappings)
+Source info: fibonacci.s (34 address mappings)
 
 (mapachespim) break fibonacci
 Breakpoint set at fibonacci (0x80000038)
 
 (mapachespim) run
-Breakpoint hit at 0x0000000080000038 after 6 instructions
+Breakpoint hit at 0x0000000080000038 after 4 instructions
 PC = 0x0000000080000038
 
 (mapachespim) step
+fibonacci.s:80: beqz    a0, base_case_zero
 [0x80000038] 0x63040504  beqz a0, 0x48  <fibonacci>
 
 (mapachespim) regs
 
-x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000080000018 ★
-x2  (  sp) = 0x0000000080181000 ★  x3  (  gp) = 0x0000000000000000
+x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000080000010 ★
+x2  (  sp) = 0x0000000083effff8    x3  (  gp) = 0x0000000000000000
 x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000080100000 ★
 x6  (  t1) = 0x0000000000000000    x7  (  t2) = 0x0000000000000000
 x8  (  s0) = 0x0000000000000000    x9  (  s1) = 0x0000000000000000
@@ -273,8 +293,8 @@ pc = 0x000000008000003c
 Breakpoint removed at 0x0000000080000038
 
 (mapachespim) continue
-Program completed (tohost) after 455 instructions
-PC = 0x0000000080000034
+13
+Program exited with code 0 after 458 instructions
 
 (mapachespim) mem fib_input 64
 
@@ -287,28 +307,28 @@ PC = 0x0000000080000034
 Goodbye!
 ```
 
-The last `mem` shows the program's data: `fib_input` (7) in the first word, and the result it
-computed, `fib_result` (13, or `0d` in hex), in the next. Words are stored little-endian, so the
+The program prints its result, 13, and the last `mem` shows its data: `fib_input` (7) in the first
+word, and the result it stored in `fib_result` (13, or `0d` in hex) in the next. Words are stored little-endian, so the
 low byte comes first.
 
-## RISC-V Register ABI Names
+## Register Names
 
-The console shows both numeric (x0-x31) and ABI names:
+`regs` shows each register by its conventional name. What those registers are for, by ISA:
 
-| Reg | ABI Name | Description |
-|-----|----------|-------------|
-| x0  | zero     | Hard-wired zero |
-| x1  | ra       | Return address |
-| x2  | sp       | Stack pointer |
-| x3  | gp       | Global pointer |
-| x4  | tp       | Thread pointer |
-| x5-7 | t0-t2   | Temporaries |
-| x8  | s0/fp    | Saved / frame pointer |
-| x9  | s1       | Saved register |
-| x10-11 | a0-a1 | Function args/return values |
-| x12-17 | a2-a7 | Function arguments |
-| x18-27 | s2-s11 | Saved registers |
-| x28-31 | t3-t6 | Temporaries |
+| Use | RISC-V | MIPS | ARM64 | x86-64 |
+|-----|--------|------|-------|--------|
+| Arguments | `a0`-`a7` | `$a0`-`$a3` | `x0`-`x7` | `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9` |
+| Return value | `a0` | `$v0` | `x0` | `rax` |
+| Return address | `ra` | `$ra` | `x30` (lr) | pushed on the stack by `call` |
+| Stack pointer | `sp` | `$sp` | `sp` | `rsp` |
+| Frame pointer | `s0` (fp) | `$fp` | `x29` | `rbp` |
+| Temporaries (caller-saved) | `t0`-`t6` | `$t0`-`$t9` | `x9`-`x15` | `rax`, `rcx`, `rdx`, `rsi`, `rdi`, `r8`-`r11` |
+| Saved (callee-saved) | `s0`-`s11` | `$s0`-`$s7` | `x19`-`x28` | `rbx`, `rbp`, `r12`-`r15` |
+| Always zero | `zero` | `$zero` | `xzr` | - |
+| Syscall number | `a7` | `$v0` | `x8` | `rax` |
+| Other | | `hi`, `lo` | `nzcv` flags | `rflags` flags |
+
+RISC-V registers can also be written by number (`x0`-`x31`), and `regs` shows both.
 
 ## Command Line Options
 
@@ -338,44 +358,6 @@ echo 7 | mapachespim -e fib.s > output.txt
 - **Enter** on an empty line - Repeat the last command (handy for `step`)
 - **Up/Down arrows** - Command history
 
-## Tips
-
-1. **Setting multiple breakpoints**: Set breakpoints before running
-   ```
-   break 0x80000010
-   break 0x80000100
-   info break
-   run
-   ```
-
-2. **Examining function calls**: Set breakpoint at function entry
-   ```
-   break 0x80000050  # Function entry point
-   run
-   regs              # Check arguments in a0-a7
-   ```
-
-3. **Memory inspection**: Use hex addresses or section names
-   ```
-   mem 0x80000000    # By address
-   mem .text         # Code section
-   mem .data         # Data section
-   mem .rodata       # Read-only data (strings, constants)
-   info sections     # List all available sections
-   ```
-
-4. **Source code viewing**: Requires debug info (automatic when you load a `.s` file)
-   ```
-   list              # Show source around current PC
-   list fibonacci    # Show source around function
-   list 25           # Show source around line 25
-   ```
-
-5. **Single-stepping**: Use `step n` for multiple steps
-   ```
-   step 10           # Execute 10 instructions at once
-   ```
-
 ## Assembling Programs
 
 The simplest way is to `load` your `.s` file; MapacheSPIM assembles it with debug info. To produce
@@ -399,10 +381,10 @@ MapacheSPIM is similar to SPIM but has key differences:
 3. **Delay slots**: On MIPS, the assembler fills each branch and jump delay slot with a `nop` (like
    GNU `as` in its default `.set reorder` mode), and the simulator executes delay slots as real
    hardware does. Write `.set noreorder` to fill delay slots yourself
-4. **Same code as GNU as**: RISC-V and MIPS programs assemble to exactly what GNU `as` produces,
+4. **Same code as GNU as**: programs assemble to exactly what GNU `as` produces,
    so disassembly matches what you see in textbooks and `objdump`. One deliberate exception follows
    SPIM instead: on MIPS, the two-operand `div $t0, $t1` / `divu $t0, $t1` is the real instruction
-   (results in HI and LO), whereas GNU `as` treats it as `div $t0, $t0, $t1`
+   (results in `hi` and `lo`, which `regs` shows), whereas GNU `as` treats it as `div $t0, $t0, $t1`
 5. **Runtime checks**: MIPS `div`/`rem` with three operands trap on division by zero and on
    overflow, as in SPIM, and the console reports "Division by zero"
 6. **Source display**: `list` shows your source code next to the program counter
@@ -420,7 +402,3 @@ MapacheSPIM is similar to SPIM but has key differences:
 **Breakpoint not hit:**
 - Verify address is correct: `mem <addr>`
 - Check program actually reaches that address
-
-**Ctrl-C doesn't work:**
-- Signal handling may take 1-2 instructions
-- Try again if needed

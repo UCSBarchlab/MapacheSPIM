@@ -15,9 +15,9 @@ import sys
 import tempfile
 from pathlib import Path
 from types import FrameType
-from typing import Any, Dict, Generator, List, Optional, Set
+from typing import Any, Dict, Generator, List, Optional, Set, Tuple
 
-from . import Simulator, StopReason
+from . import ISA, Simulator, StopReason
 from .debug_info import SourceInfo, parse_line_info
 from .isa import find_spec, isa_names
 
@@ -55,6 +55,8 @@ class MapacheSPIMConsole(cmd.Cmd):
     regs_base: str
     regs_leading_zeros: str
     source_info: SourceInfo
+    _x86_syntax: Dict[Tuple[str, int], str]
+    _x86_default_att: bool
 
     _ALIASES: Dict[str, str]
 
@@ -96,6 +98,10 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         # Source code information (DWARF debug info)
         self.source_info = SourceInfo()
+
+        # x86-64: which syntax each source line is in, so disassembly matches it
+        self._x86_syntax = {}
+        self._x86_default_att = False
 
         # Set up signal handler for Ctrl-C
         signal.signal(signal.SIGINT, self._handler_sigint)
@@ -223,11 +229,11 @@ class MapacheSPIMConsole(cmd.Cmd):
         self.loaded_source = source
         self._elf_path = elf_path
         # Registers at the entry point are the baseline for ★ change markers
-        self.prev_regs = self.sim.get_all_regs()
+        self.prev_regs = self._reg_snapshot()
         pc = self.sim.get_pc()
         isa_name = self.sim.get_isa_name()
         print(f"Loaded {display_name} ({isa_name})", file=self.stdout)
-        print(f"Entry point: {pc:#018x}", file=self.stdout)
+        print(f"Entry point: {self._hex_word(pc)}", file=self.stdout)
         if not keep_breakpoints:
             self.breakpoints.clear()
 
@@ -244,7 +250,30 @@ class MapacheSPIMConsole(cmd.Cmd):
                 )
             else:
                 print("Debug info present but source files not found", file=self.stdout)
+        self._find_x86_syntax()
         return True
+
+    def _find_x86_syntax(self) -> None:
+        """For x86-64, note whether each source line is AT&T or Intel syntax, so
+        instructions are disassembled in the syntax they were written in.
+        Instructions without a telling source line use the program's usual syntax."""
+        self._x86_syntax = {}
+        self._x86_default_att = False
+        if self.sim.get_isa() != ISA.X86_64:
+            return
+        from .toolchain.x86 import syntax_by_line
+
+        for filename, lines in self.source_info.source_cache.items():
+            for line_num, syntax in syntax_by_line("\n".join(lines)).items():
+                self._x86_syntax[(filename, line_num)] = syntax
+        att_lines = sum(1 for syntax in self._x86_syntax.values() if syntax == "att")
+        self._x86_default_att = att_lines > len(self._x86_syntax) - att_lines
+
+    def _att_syntax_at(self, pc: int) -> bool:
+        """Whether to disassemble the instruction at pc in AT&T syntax (x86-64 only)"""
+        location = self.source_info.get_location(pc)
+        syntax = self._x86_syntax.get(location) if location is not None else None
+        return syntax == "att" if syntax is not None else self._x86_default_att
 
     def _assemble_and_load(
         self,
@@ -404,8 +433,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         Usage:
             step [n]
 
-        Executes n instructions (default 1) and displays the program
-        counter for each step. If a breakpoint is hit, execution stops.
+        Executes n instructions (default 1), showing each one before it
+        runs. If a breakpoint is hit, execution stops.
 
         Arguments:
             n - Number of instructions to execute (optional, default=1)
@@ -418,11 +447,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             step 5          # Execute 5 instructions
             s 10            # Execute 10 instructions (using alias)
 
-        Tips:
-            - Use 'step 1' to carefully trace through code
-            - Use 'step 10' to quickly skip over known-good code
-            - After stepping, use 'regs' to see register changes
-            - Set breakpoints before stepping to stop at key locations
+        Pressing Enter on an empty line repeats the last command, so after
+        one 'step' each Enter steps again. Use 'stepreg' to see the
+        registers after each step.
         """
         if not self._require_program():
             return
@@ -435,17 +462,25 @@ class MapacheSPIMConsole(cmd.Cmd):
             return
 
         # Execute instructions
+        last_location = None
         for i in range(n_steps):
             pc = self.sim.get_pc()
 
             # Check for breakpoint (but skip if this is the first step and we're already at a breakpoint)
             if i > 0 and pc in self.breakpoints:
-                print(f"Breakpoint hit at {pc:#018x}", file=self.stdout)
+                print(f"Breakpoint hit at {self._hex_word(pc)}", file=self.stdout)
                 break
 
             # Show the instruction before executing it, so any output it
             # produces (e.g. a print syscall) appears after it
             self._end_program_output()
+            # The source line, before the first of the instructions it assembled to
+            location = self.source_info.get_location(pc)
+            if location is not None and location != last_location:
+                source_line = self._format_source_line(location)
+                if source_line:
+                    print(source_line, file=self.stdout)
+                last_location = location
             print(self._format_instruction(pc), file=self.stdout)
             self.stdout.flush()
 
@@ -542,7 +577,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             print(f"Interrupted after {result.steps} instructions", file=self.stdout)
         elif result.reason == StopReason.BREAKPOINT:
             print(
-                f"Breakpoint hit at {result.pc:#018x} after {result.steps} instructions",
+                f"Breakpoint hit at {self._hex_word(result.pc)} after {result.steps} instructions",
                 file=self.stdout,
             )
         elif result.reason is not None:
@@ -551,7 +586,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             print(f"Executed {result.steps} instructions (max limit reached)", file=self.stdout)
         self._end_program_output()
         if result.steps > 0 and not self.sim.exited:
-            print(f"PC = {self.sim.get_pc():#018x}", file=self.stdout)
+            print(f"PC = {self._hex_word(self.sim.get_pc())}", file=self.stdout)
 
     def _stop_before(self, pc: int) -> Optional[StopReason]:
         """Stop a run at a breakpoint or when the user pressed Ctrl-C"""
@@ -617,9 +652,9 @@ class MapacheSPIMConsole(cmd.Cmd):
         except Exception as e:
             self.print_error(f"Error reloading {self.loaded_file}: {e}")
             return
-        self.prev_regs = self.sim.get_all_regs()
+        self.prev_regs = self._reg_snapshot()
         print(
-            f"Reset {self.loaded_file}. PC = {self.sim.get_pc():#018x}",
+            f"Reset {self.loaded_file}. PC = {self._hex_word(self.sim.get_pc())}",
             file=self.stdout,
         )
 
@@ -628,7 +663,7 @@ class MapacheSPIMConsole(cmd.Cmd):
     def _format_instruction(self, pc: int) -> str:
         """Format one instruction as '[addr] 0xbytes  disasm  <symbol+off>'"""
         try:
-            text, size = self.sim.disasm_with_size(pc)
+            text, size = self.sim.disasm_with_size(pc, self._att_syntax_at(pc))
             raw = self.sim.read_mem(pc, size)
             instr_hex = "".join(f"{b:02x}" for b in raw)
         except Exception:
@@ -687,36 +722,51 @@ class MapacheSPIMConsole(cmd.Cmd):
             print(f"Error: {detail}", file=self.stdout)
             print(f"  {self._format_instruction(pc)}", file=self.stdout)
             location = self.source_info.get_location(pc)
-            if location:
-                filename, line_num = location
-                lines = self.source_info.get_source_lines(filename, line_num, 1)
-                if lines:
-                    print(f"  {filename}:{line_num}: {lines[0][1].strip()}", file=self.stdout)
+            source_line = self._format_source_line(location) if location else None
+            if source_line:
+                print(f"  {source_line}", file=self.stdout)
+
+    def _format_source_line(self, location: Tuple[str, int]) -> Optional[str]:
+        """Format a source line as 'file.s:12: text', or None if it can't be read"""
+        filename, line_num = location
+        lines = self.source_info.get_source_lines(filename, line_num, 1)
+        if not lines:
+            return None
+        return f"{filename}:{line_num}: {lines[0][1].strip()}"
 
     # --- State Inspection ---
 
+    def _word_bits(self) -> int:
+        """Width of the loaded ISA's registers (32 for MIPS32, else 64)"""
+        return self.sim.spec.word_bits if self.sim.get_isa() is not None else 64
+
+    def _hex_word(self, value: int) -> str:
+        """A register-sized value in full-width hex: 8 digits on 32-bit ISAs, 16 on 64-bit"""
+        return f"{value:#0{self._word_bits() // 4 + 2}x}"
+
+    def _decimal_width(self) -> int:
+        """Characters in the widest signed decimal register value (e.g. -2147483648)"""
+        return len(str(-(1 << (self._word_bits() - 1))))
+
     def _format_reg_value(self, value: int, show_mode: str, leading_zeros_mode: str) -> str:
         """Format a register value according to display settings"""
+        bits = self._word_bits()
+        value &= (1 << bits) - 1
         sign = ""  # only used by signed decimal
-        if show_mode == "hex":
-            # Format as hex with 0x prefix
-            formatted = f"{value:016x}"
-            prefix = "0x"
-        elif show_mode == "decimal":
-            # Signed decimal, since that is how students think of values
-            # like -1 (max 20 digits for 64-bit)
-            bits = self.sim.spec.word_bits if self.sim.get_isa() is not None else 64
+        if show_mode == "decimal":
+            # Signed decimal, since that is how students think of values like -1
             if value & (1 << (bits - 1)):
                 value -= 1 << bits
             sign = "-" if value < 0 else ""
-            formatted = f"{abs(value):0{20 - len(sign)}d}"
+            formatted = f"{abs(value):0{self._decimal_width() - len(sign)}d}"
             prefix = ""
         elif show_mode == "binary":
             # Format as binary with 0b prefix
-            formatted = f"{value:064b}"
+            formatted = f"{value:0{bits}b}"
             prefix = "0b"
         else:
-            formatted = f"{value:016x}"
+            # Format as hex with 0x prefix
+            formatted = f"{value:0{bits // 4}x}"
             prefix = "0x"
 
         # Handle 'default' mode: show for hex/binary, dot for decimal
@@ -740,6 +790,13 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         return sign + prefix + formatted
 
+    def _reg_snapshot(self) -> List[int]:
+        """Every register value 'regs' shows except the PC: the general-purpose
+        registers, then any special registers, then the flags"""
+        flags = self.sim.get_flags()
+        extra = [flags] if flags is not None else []
+        return self.sim.get_all_regs() + self.sim.get_special_regs() + extra
+
     def _change_marker(self) -> str:
         """Marker for changed registers; '*' where the terminal can't show ★"""
         encoding = getattr(self.stdout, "encoding", None) or "utf-8"
@@ -758,8 +815,10 @@ class MapacheSPIMConsole(cmd.Cmd):
         Shows all general-purpose registers with their ABI names plus the
         program counter (PC). Register count and names vary by ISA:
           - RISC-V: 32 registers (x0-x31)
-          - ARM64:  32 registers (x0-x30, sp)
-          - x86-64: 16 registers (rax, rcx, rdx, etc.)
+          - MIPS:   32 registers ($zero-$ra), plus hi and lo (set by mult and div)
+          - ARM64:  32 registers (x0-x30, sp), plus the nzcv flags
+          - x86-64: 16 registers (rax, rcx, rdx, etc.), plus the rflags flags
+                    CF, ZF, SF, and OF
 
         Display format can be controlled with arguments or 'set' command.
 
@@ -788,6 +847,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             - Use 'regs peek' to view without resetting the change baseline
             - Use 'status' to see current ISA
         """
+        if not self._require_program():
+            return
+
         # Parse arguments for temporary overrides and peek mode
         show_mode = self.regs_base
         leading_zeros_mode = self.regs_leading_zeros
@@ -810,62 +872,64 @@ class MapacheSPIMConsole(cmd.Cmd):
                     return
 
         self._print_block_start()
-        regs = self.sim.get_all_regs()
+        regs = self._reg_snapshot()
         pc = self.sim.get_pc()
 
         # Determine the width needed for values based on format
-        if show_mode == "hex":
-            value_width = 18  # 0x + 16 hex digits
-        elif show_mode == "decimal":
-            value_width = 20  # max 20 decimal digits for 64-bit
+        bits = self._word_bits()
+        if show_mode == "decimal":
+            value_width = self._decimal_width()
         elif show_mode == "binary":
-            value_width = 66  # 0b + 64 binary digits
+            value_width = bits + 2  # 0b + digits
         else:
-            value_width = 18
+            value_width = bits // 4 + 2  # 0x + digits
+
+        def star(index: int) -> str:
+            """The change marker for regs[index], if it changed since last shown"""
+            changed = (
+                self.show_reg_changes
+                and self.prev_regs is not None
+                and index < len(self.prev_regs)
+                and self.prev_regs[index] != regs[index]
+            )
+            return f" {self._change_marker()} " if changed else "   "
+
+        # Label each general-purpose register by ISA, e.g. "x5 (t0)" or "rax",
+        # then the special registers (MIPS hi and lo) by name
+        num_regs = self.sim.get_register_count()
+        registers = self.sim.spec.registers
+        labels = []
+        for reg_num in range(num_regs):
+            abi_name = self.sim.get_reg_name(reg_num)
+            if registers.number_prefix:
+                labels.append(f"{registers.number_prefix}{reg_num:<2} ({abi_name:>4})")
+            else:
+                labels.append(f"{abi_name:>3}")
+        labels += [f"{name:>3}" for name in registers.special]
 
         # Format registers in 2 columns (or 1 if binary is too wide)
         cols = 1 if show_mode == "binary" else 2
-        num_regs = self.sim.get_register_count()
-        prefix = self.sim.spec.registers.number_prefix if self.sim.get_isa() is not None else None
-
-        reg_lines = []
-        for i in range(0, num_regs, cols):
+        for i in range(0, len(labels), cols):
             line_parts = []
-            for j in range(cols):
-                if i + j < num_regs:
-                    reg_num = i + j
-                    abi_name = self.sim.get_reg_name(reg_num)
-                    value = regs[reg_num]
-
-                    # Format the value
-                    formatted_value = self._format_reg_value(value, show_mode, leading_zeros_mode)
-
-                    # Check if this register changed with the last instruction
-                    star = (
-                        f" {self._change_marker()} "
-                        if (
-                            self.show_reg_changes
-                            and self.prev_regs is not None
-                            and reg_num < len(self.prev_regs)
-                            and self.prev_regs[reg_num] != value
-                        )
-                        else "   "
-                    )
-
-                    # Format register name based on ISA
-                    if prefix:  # e.g. "x5 (t0)"
-                        label = f"{prefix}{reg_num:<2} ({abi_name:>4})"
-                    else:  # just the name, e.g. "rax"
-                        label = f"{abi_name:>3}"
-                    line_parts.append(f"{label} = {formatted_value:<{value_width}}{star}")
-            reg_lines.append(" ".join(line_parts))
-
-        for line in reg_lines:
-            print(line, file=self.stdout)
+            for index in range(i, min(i + cols, len(labels))):
+                formatted_value = self._format_reg_value(regs[index], show_mode, leading_zeros_mode)
+                line_parts.append(
+                    f"{labels[index]} = {formatted_value:<{value_width}}{star(index)}"
+                )
+            print(" ".join(line_parts), file=self.stdout)
 
         # Format PC
         formatted_pc = self._format_reg_value(pc, show_mode, leading_zeros_mode)
         print(f"\npc = {formatted_pc}", file=self.stdout)
+
+        # The flags, one bit each, e.g. "nzcv: N=0 Z=1 C=1 V=0"
+        if registers.flags is not None:
+            flags = regs[-1]
+            flag_bits = " ".join(
+                f"{name}={(flags >> bit) & 1}" for name, bit in registers.flags.bits
+            )
+            marker = star(len(regs) - 1).rstrip()
+            print(f"{registers.flags.name}: {flag_bits}{marker}", file=self.stdout)
         self._print_block_end()
 
         # Update the snapshot for change tracking (unless peek mode)
@@ -887,12 +951,15 @@ class MapacheSPIMConsole(cmd.Cmd):
             pc              # See new PC value
 
         Tips:
-            - PC increments by 4 for each instruction (32-bit encoding)
+            - PC advances by the size of each instruction (always 4 bytes on
+              RISC-V, MIPS, and ARM64; 1 to 15 bytes on x86-64)
             - Jump/branch instructions change PC non-sequentially
             - Use 'mem <pc_value>' to see instructions at PC
         """
+        if not self._require_program():
+            return
         pc = self.sim.get_pc()
-        print(f"pc = {pc:#018x}", file=self.stdout)
+        print(f"pc = {self._hex_word(pc)}", file=self.stdout)
 
     def do_mem(self, arg: str) -> None:
         """Display memory contents in hex dump format
@@ -1060,7 +1127,9 @@ class MapacheSPIMConsole(cmd.Cmd):
         instr_addr = addr
         for _ in range(count):
             try:
-                disasm, size = self.sim.disasm_with_size(instr_addr)
+                disasm, size = self.sim.disasm_with_size(
+                    instr_addr, self._att_syntax_at(instr_addr)
+                )
             except Exception as e:
                 print(f"[{instr_addr:#010x}]  <error: {e}>", file=self.stdout)
                 break
@@ -1361,9 +1430,9 @@ class MapacheSPIMConsole(cmd.Cmd):
             return
         if addr in self.breakpoints:
             self.breakpoints.remove(addr)
-            print(f"Breakpoint removed at {addr:#018x}", file=self.stdout)
+            print(f"Breakpoint removed at {self._hex_word(addr)}", file=self.stdout)
         else:
-            print(f"No breakpoint at {addr:#018x}", file=self.stdout)
+            print(f"No breakpoint at {self._hex_word(addr)}", file=self.stdout)
 
     def do_clear(self, arg: str) -> None:
         """Clear all breakpoints
@@ -1421,7 +1490,7 @@ class MapacheSPIMConsole(cmd.Cmd):
             isa_name = self.sim.get_isa_name()
             pc = self.sim.get_pc()
             print(f"ISA: {isa_name}", file=self.stdout)
-            print(f"PC: {pc:#018x}", file=self.stdout)
+            print(f"PC: {self._hex_word(pc)}", file=self.stdout)
         print(f"Breakpoints: {len(self.breakpoints)}", file=self.stdout)
         self._print_block_end()
 

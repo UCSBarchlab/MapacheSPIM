@@ -27,20 +27,10 @@
     fib_result:
         .word 0
 
-.section .bss
-    # Stack space (4KB)
-    .align 4
-    _stack_bottom:
-        .space 4096
-    _stack_start:
-
 .section .text
 .globl _start
 
 _start:
-    # Initialize stack pointer (required for recursive calls)
-    la      sp, _stack_start    # sp = top of stack
-
     # Load the input value
     la      t0, fib_input
     lw      a0, 0(t0)           # a0 = n (input argument)
@@ -52,14 +42,18 @@ _start:
     la      t0, fib_result
     sw      a0, 0(t0)           # save result to memory
 
-    # Exit program using HTIF (write to tohost)
-    li      t0, 1               # exit code 1 (success)
-    la      t1, tohost          # load address of tohost
-    sd      t0, 0(t1)           # write to tohost to signal exit
+    # Print result (it is already in a0, the print_int argument)
+    li      a7, 1               # syscall 1 = print_int
+    ecall
 
-exit_loop:
-    # Infinite loop - emulator will detect tohost write and stop
-    j       exit_loop
+    # Print newline
+    li      a0, 10
+    li      a7, 11              # syscall 11 = print_char
+    ecall
+
+    # Exit via syscall
+    li      a7, 10              # syscall 10 = exit
+    ecall
 
 # ============================================================================
 # Function: fibonacci
@@ -76,9 +70,9 @@ exit_loop:
 #   Saved:     ra (return address), s0 (saved register)
 #
 # Stack frame layout (when needed):
-#   sp+0:  saved s0 (saved register for intermediate results)
-#   sp+8:  saved ra (return address)
-#   sp+16: saved a0 (original n value)
+#   sp+0:  saved a0 (original n value)
+#   sp+8:  saved s0 (saved register for intermediate results)
+#   sp+16: saved ra (return address)
 #   Total: 24 bytes
 # ============================================================================
 fibonacci:
@@ -151,12 +145,3 @@ base_case_one:
 # Fibonacci sequence reference:
 # F(0)=0, F(1)=1, F(2)=1, F(3)=2, F(4)=3, F(5)=5, F(6)=8, F(7)=13
 # ============================================================================
-
-# HTIF (Host-Target Interface) section for Sail emulator
-.section .tohost,"aw",@progbits
-.align 6
-.globl tohost
-tohost: .dword 0
-.align 6
-.globl fromhost
-fromhost: .dword 0

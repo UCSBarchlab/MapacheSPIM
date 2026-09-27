@@ -2,6 +2,23 @@
 
 ## Unreleased
 
+### Console
+- `regs` shows MIPS `hi` and `lo`, and the condition flags on ARM64 (`nzcv: N Z C V`) and
+  x86-64 (`rflags: CF ZF SF OF`), with ★ when they change. New `Simulator.get_special_regs()`
+  and `get_flags()`.
+- `regs` and `pc` ask you to load a program first instead of showing an unset machine.
+- `step` shows each source line before the machine instructions it assembled to.
+- MIPS32 registers and addresses are shown at their real width: 8 hex digits (and 32 bits in
+  `regs binary`) instead of 16.
+- x86-64 instructions are disassembled in the syntax they were written in, AT&T or Intel, by
+  `step`, `disasm`, and error messages (Intel for ELF files without source).
+
+### Examples and docs
+- The RISC-V `fibonacci` and `matrix_multiply` examples exit with the exit syscall, like the
+  other ISAs, instead of the HTIF `tohost` mechanism; `fibonacci` now prints its result.
+- Removed the out-of-date `examples/arm/README.md`. The Console Guide has a register table for
+  all four ISAs in place of the RISC-V-only one.
+
 ### Code structure
 - Each ISA is described once, in `mapachespim/isa.py`; the simulator, disassembler, ELF loader and
   writer, assembler, console, and command-line tools all read their ISA-specific facts from it.

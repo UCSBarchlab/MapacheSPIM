@@ -523,6 +523,20 @@ class UnicornSimulator:
         """All general-purpose register values, by register number"""
         return [self.get_reg(i) for i in range(self.get_register_count())]
 
+    def get_special_regs(self) -> List[int]:
+        """Values of the ISA's other registers (e.g. MIPS hi and lo), in the
+        order of ``spec.registers.special``"""
+        if self._uc is None:
+            return []
+        return [self._uc.reg_read(reg) for reg in self._engine.special_regs]
+
+    def get_flags(self) -> Optional[int]:
+        """The condition-code register (e.g. x86 rflags, ARM64 nzcv), or None if
+        the ISA has none; ``spec.registers.flags`` says which bits are which"""
+        if self._uc is None or self._engine.flags_reg is None:
+            return None
+        return self._uc.reg_read(self._engine.flags_reg)
+
     # --- Memory ---
 
     def read_mem(self, addr: int, length: int) -> bytes:
@@ -548,12 +562,13 @@ class UnicornSimulator:
 
     # --- Disassembly ---
 
-    def disasm_with_size(self, addr: int) -> Tuple[str, int]:
+    def disasm_with_size(self, addr: int, att: bool = False) -> Tuple[str, int]:
         """
         Disassemble the instruction at ``addr`` and return its size in bytes
 
         Callers that walk a range of instructions must advance by the size,
-        since x86-64 instructions vary in length.
+        since x86-64 instructions vary in length. On x86-64, ``att`` selects
+        AT&T syntax instead of Intel syntax.
         """
         if self._disasm is None:
             raise RuntimeError("Simulator not initialized")
@@ -561,14 +576,14 @@ class UnicornSimulator:
         size = self._disasm.max_size
         while size > 0:
             try:
-                return self._disasm.disassemble(self.read_mem(addr, size), addr)
+                return self._disasm.disassemble(self.read_mem(addr, size), addr, att)
             except RuntimeError:
                 size -= 1
-        return self._disasm.disassemble(b"", addr)
+        return self._disasm.disassemble(b"", addr, att)
 
-    def disasm(self, addr: int) -> str:
-        """Disassemble the instruction at ``addr``"""
-        return self.disasm_with_size(addr)[0]
+    def disasm(self, addr: int, att: bool = False) -> str:
+        """Disassemble the instruction at ``addr`` (in AT&T syntax on x86-64 if ``att``)"""
+        return self.disasm_with_size(addr, att)[0]
 
     # --- Symbols and sections ---
 
