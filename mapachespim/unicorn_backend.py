@@ -562,12 +562,13 @@ class UnicornSimulator:
 
     # --- Disassembly ---
 
-    def disasm_with_size(self, addr: int) -> Tuple[str, int]:
+    def disasm_with_size(self, addr: int, att: bool = False) -> Tuple[str, int]:
         """
         Disassemble the instruction at ``addr`` and return its size in bytes
 
         Callers that walk a range of instructions must advance by the size,
-        since x86-64 instructions vary in length.
+        since x86-64 instructions vary in length. On x86-64, ``att`` selects
+        AT&T syntax instead of Intel syntax.
         """
         if self._disasm is None:
             raise RuntimeError("Simulator not initialized")
@@ -575,14 +576,14 @@ class UnicornSimulator:
         size = self._disasm.max_size
         while size > 0:
             try:
-                return self._disasm.disassemble(self.read_mem(addr, size), addr)
+                return self._disasm.disassemble(self.read_mem(addr, size), addr, att)
             except RuntimeError:
                 size -= 1
-        return self._disasm.disassemble(b"", addr)
+        return self._disasm.disassemble(b"", addr, att)
 
-    def disasm(self, addr: int) -> str:
-        """Disassemble the instruction at ``addr``"""
-        return self.disasm_with_size(addr)[0]
+    def disasm(self, addr: int, att: bool = False) -> str:
+        """Disassemble the instruction at ``addr`` (in AT&T syntax on x86-64 if ``att``)"""
+        return self.disasm_with_size(addr, att)[0]
 
     # --- Symbols and sections ---
 

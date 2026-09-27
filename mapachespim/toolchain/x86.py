@@ -602,6 +602,44 @@ def _looks_att(ops_text: str) -> bool:
     return "%" in ops_text or "$" in ops_text or ops_text.lstrip().startswith("*")
 
 
+def _is_att(mnemonic: str, ops_text: str, syntax: str) -> bool:
+    """Whether an instruction is read as AT&T syntax (otherwise Intel)."""
+    if syntax != "auto":
+        return syntax == "att"
+    # A size suffix ("imulq d0") only exists in AT&T syntax.
+    return _looks_att(ops_text) or not ops_text or _split_mnemonic(mnemonic)[1] is not None
+
+
+def syntax_by_line(source: str) -> Dict[int, str]:
+    """
+    The syntax, "att" or "intel", that each instruction in x86-64 source is
+    written in, keyed by line number, as the assembler reads it (following
+    .att_syntax / .intel_syntax, else per instruction).
+
+    Instructions that read the same in both syntaxes are left out: those
+    without operands, and those whose operands are only labels or numbers
+    (like "jmp loop") where no directive says which syntax is meant.
+    """
+    from .directives import DirectiveParser, LineType
+
+    parser = DirectiveParser("x86_64")
+    syntaxes: Dict[int, str] = {}
+    for section in parser.parse(source).values():
+        for line in section.lines:
+            if line.line_type != LineType.INSTRUCTION or not line.instruction:
+                continue
+            parts = line.instruction.strip().split(None, 1)
+            if len(parts) < 2:
+                continue
+            att = _is_att(parts[0].lower(), parts[1], line.syntax)
+            if line.syntax == "auto" and not att:
+                operands = _split(parts[1])
+                if not any("[" in op or _reg_or_none(op) is not None for op in operands):
+                    continue
+            syntaxes[line.line_number] = "att" if att else "intel"
+    return syntaxes
+
+
 def encode_instruction(
     text: str,
     ctx: Context,
@@ -619,10 +657,7 @@ def encode_instruction(
     if mnemonic in _NO_OPERANDS and not ops_text:
         return _NO_OPERANDS[mnemonic]
 
-    att = syntax == "att" or (syntax == "auto" and (_looks_att(ops_text) or not ops_text))
-    if syntax == "auto" and not att and _split_mnemonic(mnemonic)[1] is not None:
-        # A size suffix ("imulq d0") only exists in AT&T syntax.
-        att = True
+    att = _is_att(mnemonic, ops_text, syntax)
     base, suffix = _split_mnemonic(mnemonic) if att else (mnemonic, None)
     is_branch = base in ("jmp", "call") or (base.startswith("j") and base[1:] in CONDITIONS)
     raw = _split(ops_text) if ops_text else []

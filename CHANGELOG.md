@@ -7,6 +7,11 @@
   x86-64 (`rflags: CF ZF SF OF`), with ★ when they change. New `Simulator.get_special_regs()`
   and `get_flags()`.
 - `regs` and `pc` ask you to load a program first instead of showing an unset machine.
+- `step` shows each source line before the machine instructions it assembled to.
+- MIPS32 registers and addresses are shown at their real width: 8 hex digits (and 32 bits in
+  `regs binary`) instead of 16.
+- x86-64 instructions are disassembled in the syntax they were written in, AT&T or Intel, by
+  `step`, `disasm`, and error messages (Intel for ELF files without source).
 
 ### Examples and docs
 - The RISC-V `fibonacci` and `matrix_multiply` examples exit with the exit syscall, like the

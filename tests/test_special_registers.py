@@ -38,14 +38,14 @@ _start:
 def test_mips_hi_lo_after_mult(tmp_path):
     console, out = run_regs(tmp_path, MIPS_MULT_DIV, 3)
     assert console.sim.get_special_regs() == [0, 42]
-    assert " lo = 0x000000000000002a ★" in out
+    assert " lo = 0x0000002a ★" in out
 
 
 def test_mips_hi_lo_after_div(tmp_path):
     console, out = run_regs(tmp_path, MIPS_MULT_DIV, 5)
     assert console.sim.get_special_regs() == [2, 3]  # remainder, quotient
-    assert " hi = 0x0000000000000002 ★" in out
-    assert " lo = 0x0000000000000003 ★" in out
+    assert " hi = 0x00000002 ★" in out
+    assert " lo = 0x00000003 ★" in out
 
 
 @pytest.mark.parametrize(

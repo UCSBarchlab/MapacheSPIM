@@ -100,9 +100,11 @@ fibonacci.s:
    84:     beq     a0, t0, base_case_one
 
 (mapachespim) step
+fibonacci.s:80: beqz    a0, base_case_zero
 [0x80000038] 0x63040504  beqz a0, 0x48  <fibonacci>
 
 (mapachespim) step
+fibonacci.s:83: li      t0, 1
 [0x8000003c] 0x93021000  addi t0, zero, 1  <fibonacci+4>
 
 (mapachespim) regs
@@ -202,6 +204,7 @@ The standalone assembler writes an ELF file if you want one: `mapachespim-as -g 
 ### Enhanced Step Display
 
 Every step shows:
+- The source line, when a new one starts (`fibonacci.s:83: li t0, 1`)
 - The address (`0x80000030`)
 - The instruction bytes (`0x13050005`)
 - The disassembly (`addi x10, x0, 0x5`)
@@ -290,7 +293,8 @@ relaxation (x86-64 short and long jumps). This is checked continuously by random
 tests that assemble hundreds of thousands of instructions with both and compare the results.
 
 x86-64 accepts both AT&T syntax (`movq $1, %rax`) and Intel syntax (`mov rax, 1`), detected per
-instruction, as well as the `.intel_syntax` / `.att_syntax` directives.
+instruction, as well as the `.intel_syntax` / `.att_syntax` directives. `step` and `disasm` show
+each instruction in the syntax it was written in.
 
 Loading an ELF file detects its ISA automatically.
 

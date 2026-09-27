@@ -47,7 +47,8 @@ mapachespim riscv/fibonacci
   ```
 
 ### Execution
-- `step [n]` - Execute 1 or n instructions (alias: `s`)
+- `step [n]` - Execute 1 or n instructions (alias: `s`). Each source line is shown before the
+  machine instructions it assembled to (a pseudo-instruction like `la` may become several).
   ```
   (mapachespim) step       # Execute 1 instruction
   (mapachespim) step 10    # Execute 10 instructions
@@ -173,6 +174,19 @@ mapachespim riscv/fibonacci
 
   Programs loaded from `.s` files always have source info.
 
+- `disasm [addr|label] [n]` - Disassemble n instructions (default 10) from the PC or the given
+  place (alias: `d`). A `>` marks the PC. On x86-64, instructions are shown in the syntax they
+  were written in, AT&T or Intel (Intel for ELF files without source).
+  For example, with `riscv/fibonacci` loaded:
+  ```
+  (mapachespim) disasm fibonacci 4
+
+  [0x80000038]  beqz a0, 0x48
+  [0x8000003c]  addi t0, zero, 1
+  [0x80000040]  beq a0, t0, 0x48
+  [0x80000044]  addi sp, sp, -0x18
+  ```
+
 ### Breakpoints
 - `break <addr|label>` - Set breakpoint at an address or label (alias: `b`)
   ```
@@ -251,6 +265,7 @@ Breakpoint hit at 0x0000000080000038 after 4 instructions
 PC = 0x0000000080000038
 
 (mapachespim) step
+fibonacci.s:80: beqz    a0, base_case_zero
 [0x80000038] 0x63040504  beqz a0, 0x48  <fibonacci>
 
 (mapachespim) regs

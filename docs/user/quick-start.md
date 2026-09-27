@@ -76,15 +76,17 @@ The `>` marks the line the program counter (PC) is on. Step through a few instru
 
 ```
 (mapachespim) step 3
+hello_asm.s:61: la      a0, hello_msg   # la = "Load Address" - puts address of hello_msg into a0
 [0x80000000] 0x17051000  auipc a0, 0x100  <_start>
 [0x80000004] 0x13050500  mv a0, a0  <_start+4>
+hello_asm.s:62: li      a7, 4           # li = "Load Immediate" - puts the value 4 into a7
 [0x80000008] 0x93084000  addi a7, zero, 4  <_start+8>
 ```
 
-Each line shows the address, the instruction's bytes, the instruction, and where it is relative to
-the nearest label. Notice that the single `la` in the source became two machine instructions
-(`auipc` and `addi`, which the disassembler shows as `mv` because its immediate is 0): `la` is a
-*pseudo-instruction*.
+Each source line is followed by the machine instructions it became. Each instruction shows its
+address, its bytes, the instruction, and where it is relative to the nearest label. Notice that the
+single `la` in the source became two machine instructions (`auipc` and `addi`, which the
+disassembler shows as `mv` because its immediate is 0): `la` is a *pseudo-instruction*.
 
 Run the rest of the program:
 
