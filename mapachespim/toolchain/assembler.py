@@ -38,9 +38,11 @@ def _lookup(values: Dict[str, int]) -> Callable[[str], int]:
 
 class _RelaxView(Mapping[str, int]):
     """
-    Label lookup during one x86 relaxation pass, the way GNU as sees it:
-    labels already passed have their new address, labels ahead have their
-    old address shifted by the growth so far (``stretch``).
+    Label lookup during one layout pass, the way GNU as sees it: labels
+    already passed have their new address, labels ahead have their old
+    address, shifted by the growth so far (``stretch``) for x86's generic
+    relaxation and unshifted for instruction sizing (as RISC-V's branch
+    relaxation does).
     """
 
     def __init__(
@@ -467,7 +469,11 @@ class Assembler:
                         line, addr, _RelaxView(data_labels, labels, new_labels, stretch)
                     )
                     grew = grew or grown
-                    size = self._target.size(line, addr, known)
+                    # As in GNU's relax_segment, labels already passed this
+                    # pass have their new address, labels ahead their old one
+                    size = self._target.size(
+                        line, addr, _RelaxView(data_labels, labels, new_labels, 0)
+                    )
                     if grown:
                         stretch += size - 2
                     addr += size

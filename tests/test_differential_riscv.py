@@ -157,6 +157,16 @@ def test_branches():
     assert_same(program(lines, labels, rng))
 
 
+def test_branch_relaxation_sees_labels_like_gnu():
+    """Deciding whether a branch reaches its label, GNU as uses this layout
+    pass's address for labels already passed and the previous pass's for
+    labels ahead. Using the previous pass's address for both relaxes an
+    extra branch in this program (found by the 50x fuzz run)."""
+    rng = random.Random(4)
+    lines = [f"beq a0, a1, L{rng.randrange(4)}" for _ in range(1600)]
+    assert_same(program(lines, 4, rng))
+
+
 def test_jumps():
     rng = random.Random(6)
     labels = 8
