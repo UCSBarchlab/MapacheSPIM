@@ -824,7 +824,7 @@ class UnicornSimulator:
         except UcError as e:
             # Prefer the specific description recorded by the unmapped-memory
             # hook (it includes the faulting address) over Unicorn's message.
-            detail = self._last_error or _describe_uc_error(e)
+            detail = self._last_error or self._describe_trap(pc) or _describe_uc_error(e)
             self._last_error = f"{detail} (at PC=0x{pc:x})"
             # Unicorn may leave PC anywhere after a fault; keep it on the
             # faulting instruction so the user can inspect it.
@@ -840,6 +840,35 @@ class UnicornSimulator:
             return StepResult.SYSCALL
 
         return StepResult.OK
+
+    def _describe_trap(self, pc: int) -> Optional[str]:
+        """Explain a trap raised by a breakpoint instruction at ``pc``, if any.
+
+        Assemblers use these for runtime checks: MIPS div/rem expand to
+        code that executes 'break 7' on division by zero and 'break 6' on
+        overflow, as SPIM and GNU as do.
+        """
+        try:
+            word = self.read_mem(pc, 4)
+        except RuntimeError:
+            return None
+        if self._isa == ISA.MIPS:
+            instr = int.from_bytes(word, "big")
+            if instr & 0xFC00003F == 0x0000000D:  # break
+                code = (instr >> 16) & 0x3FF
+                if code == 7:
+                    return "Division by zero"
+                if code == 6:
+                    return "Integer overflow in division (-2147483648 / -1)"
+                return f"Break instruction executed (break {code})"
+        elif self._isa == ISA.RISCV:
+            if int.from_bytes(word, "little") == 0x00100073:
+                return "ebreak instruction executed"
+        elif self._isa == ISA.ARM:
+            instr = int.from_bytes(word, "little")
+            if instr & 0xFFE0001F == 0xD4200000:  # brk #imm
+                return f"brk instruction executed (brk #{(instr >> 5) & 0xFFFF})"
+        return None
 
     def run(self, max_steps: Optional[int] = None) -> int:
         """

@@ -230,3 +230,56 @@ class TestConsole(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestAssemblerDirectives(unittest.TestCase):
+    """Directive bugs found by comparing against GNU as."""
+
+    def assemble(self, source, isa="riscv64"):
+        from mapachespim.toolchain import assemble
+
+        return assemble(source, isa=isa)
+
+    def section(self, result, name):
+        from io import BytesIO
+
+        from elftools.elf.elffile import ELFFile
+
+        found = ELFFile(BytesIO(result.elf_bytes)).get_section_by_name(name)
+        return found.data() if found is not None else None
+
+    def test_undefined_symbol_in_data_is_an_error(self):
+        """Unknown values in .word used to become 0 silently."""
+        result = self.assemble(".text\n_start: nop\n.data\nx: .word no_such_label\n")
+        self.assertFalse(result.success)
+        self.assertIn("Line 4", result.errors[0])
+        self.assertIn("no_such_label", result.errors[0])
+
+    def test_bad_directive_values_are_errors(self):
+        for line in (".space oops", ".align", ".word 1 +", '.ascii "\\x"', ".word 1/0"):
+            with self.subTest(line=line):
+                result = self.assemble(f".text\n_start: nop\n.data\n{line}\n")
+                self.assertFalse(result.success, line)
+
+    def test_label_in_data(self):
+        result = self.assemble(".text\n_start: nop\n.data\na: .word 7\nptr: .word a\n")
+        self.assertTrue(result.success, result.errors)
+        data = self.section(result, ".data")
+        self.assertEqual(int.from_bytes(data[4:8], "little"), result.symbols["a"])
+
+    def test_custom_section_contents_are_kept(self):
+        """Custom sections got addresses but were not written to the ELF."""
+        result = self.assemble('.text\n_start: nop\n.section .mydata\nv: .word 0x1234\n')
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(self.section(result, ".mydata"), (0x1234).to_bytes(4, "little"))
+
+    def test_mips_data_is_big_endian_without_isa_directive(self):
+        result = self.assemble(".text\n_start: nop\n.data\nx: .word 0x11223344\n", "mips32")
+        self.assertEqual(self.section(result, ".data"), bytes.fromhex("11223344"))
+
+    def test_set_noreorder(self):
+        result = self.assemble(
+            ".set noreorder\n.text\n_start:\n  b _start\n  addiu $t0, $t0, 1\n", "mips32"
+        )
+        self.assertTrue(result.success, result.errors)
+        self.assertEqual(len(self.section(result, ".text")), 8)  # no delay-slot nop added

@@ -24,11 +24,32 @@ instruction is 4 bytes, matching what the simulator's disassembler shows.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
-from .expr import Context, EncodeError, parse_int, sign_extend, split_operands
+from .expr import (
+    Context,
+    EncodeError,
+    ExpressionError,
+    UndefinedSymbol,
+    evaluate,
+    parse_int,
+    sign_extend,
+    split_operands,
+)
 
 INSTR_SIZE = 4
+
+# %hi() operands must be buildable with lui+addi, i.e. signed 32-bit on RV64
+_HI_RANGE = (-(1 << 31), (1 << 31) - 1)
+
+
+def _known(labels: Dict[str, int]) -> Callable[[str], int]:
+    def resolve(name: str) -> int:
+        if name in labels:
+            return labels[name]
+        raise UndefinedSymbol(name)
+
+    return resolve
 
 
 class RISCVEncodeError(EncodeError):
@@ -237,28 +258,39 @@ def _parse_csr(text: str, ctx: Context) -> int:
 
 
 def _li_sequence(rd: int, value: int) -> List[int]:
-    """Instruction words that load a 64-bit constant into rd."""
+    """Instruction words that load a 64-bit constant into rd (same as GNU as)."""
     value = sign_extend(value, 64)
     if -2048 <= value <= 2047:
-        return [_i(0x13, 0, rd, 0, value)]  # addi rd, x0, value
-    if -(1 << 31) <= value < (1 << 31):
-        lo = sign_extend(value & 0xFFF, 12)
-        hi = ((value - lo) >> 12) & 0xFFFFF
-        words = [_u(0x37, rd, hi)]  # lui
-        if lo:
-            words.append(_i(0x1B, 0, rd, rd, lo))  # addiw keeps it 32-bit sign-extended
+        return [_i(0x13, 0, rd, 0, value)]  # li is an alias of addi rd, zero, value
+    return _load_const(rd, value)
+
+
+def _load_const(rd: int, value: int) -> List[int]:
+    """Port of load_const() from GNU as (binutils gas/config/tc-riscv.c)."""
+    lower = sign_extend(value, 12)
+    # GNU computes this in 64-bit arithmetic, which can wrap (e.g. for
+    # 0x7fffffffffffffff), and later shifts it as a signed int64
+    upper = sign_extend(value - lower, 64)
+
+    if not -(1 << 31) <= value < (1 << 31):
+        # Reduce to a signed 32-bit constant using SLLI and ADDI
+        shift = 12
+        while not (upper >> shift) & 1:
+            shift += 1
+        words = _load_const(rd, upper >> shift)
+        words.append((shift << 20) | (rd << 15) | (1 << 12) | (rd << 7) | 0x13)  # slli
+        if lower:
+            words.append(_i(0x13, 0, rd, rd, lower))  # addi
         return words
-    # 64-bit: build the upper bits recursively, then shift in 12 bits at a time
-    lo = sign_extend(value & 0xFFF, 12)
-    upper = (value - lo) >> 12
-    shift = 12
-    while upper and not upper & 1 and shift < 60:
-        upper >>= 1
-        shift += 1
-    words = _li_sequence(rd, upper)
-    words.append(((shift & 0x3F) << 20) | (rd << 15) | (1 << 12) | (rd << 7) | 0x13)  # slli
-    if lo:
-        words.append(_i(0x13, 0, rd, rd, lo))
+
+    # LUI and/or ADDIW build a sign-extended 32-bit constant
+    words = []
+    hi_reg = 0
+    if upper:
+        words.append(_u(0x37, rd, (upper & 0xFFFFFFFF) >> 12))  # lui
+        hi_reg = rd
+    if lower or not hi_reg:
+        words.append(_i(0x1B, 0, rd, hi_reg, lower))  # addiw
     return words
 
 
@@ -285,9 +317,26 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         if value is not None:
             return value
         if not ctx.strict:
-            ctx.eval(text)  # still validate the expression's syntax
-            return 0  # sizing pass: labels may not be resolved yet
+            # Sizing pass: use labels placed so far; others count as in range
+            try:
+                return evaluate(text, _known(ctx.labels), ctx._function) - pc
+            except UndefinedSymbol:
+                return 0
+            except ExpressionError as e:
+                raise RISCVEncodeError(str(e))
         return ctx.eval(text) - pc
+
+    def branch(funct3: int, rs1: int, rs2: int, target: str) -> List[int]:
+        """A conditional branch, relaxed like GNU as when out of range.
+
+        A target beyond +/-4KB becomes the inverted branch over a jal:
+            beq a0, a1, far   ->   bne a0, a1, 8
+                                   jal zero, far
+        """
+        offset = target_offset(target)
+        if -4096 <= offset < 4096 or parse_int(target) is not None:
+            return [_b(funct3, rs1, rs2, offset)]
+        return [_b(funct3 ^ 1, rs1, rs2, 8), _j(0, offset - 4)]
 
     if m in R_TYPE:
         _expect(ops, 3, f"{m} rd, rs1, rs2")
@@ -353,28 +402,19 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
 
     if m in BRANCHES:
         _expect(ops, 3, f"{m} rs1, rs2, label")
-        return [
-            _b(BRANCHES[m], parse_register(ops[0]), parse_register(ops[1]), target_offset(ops[2]))
-        ]
+        return branch(BRANCHES[m], parse_register(ops[0]), parse_register(ops[1]), ops[2])
 
     if m in SWAP_BRANCHES:
         _expect(ops, 3, f"{m} rs1, rs2, label")
         real = SWAP_BRANCHES[m]
-        return [
-            _b(
-                BRANCHES[real],
-                parse_register(ops[1]),
-                parse_register(ops[0]),
-                target_offset(ops[2]),
-            )
-        ]
+        return branch(BRANCHES[real], parse_register(ops[1]), parse_register(ops[0]), ops[2])
 
     if m in ZERO_BRANCHES:
         _expect(ops, 2, f"{m} rs, label")
         real, reg_second = ZERO_BRANCHES[m]
         rs = parse_register(ops[0])
         rs1, rs2 = (0, rs) if reg_second else (rs, 0)
-        return [_b(BRANCHES[real], rs1, rs2, target_offset(ops[1]))]
+        return branch(BRANCHES[real], rs1, rs2, ops[1])
 
     if m == "lui":
         _expect(ops, 2, "lui rd, imm")
@@ -483,14 +523,18 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         return [_i(0x67, 0, 0, parse_register(ops[0]), 0)]
 
     if m in ("call", "tail"):
-        _expect(ops, 1, f"{m} label")
-        link = 1 if m == "call" else 0
-        offset = target_offset(ops[0])
-        if -(1 << 20) <= offset < (1 << 20) and m == "call":
-            return [_j(link, offset)]
-        # Far call/tail: auipc t1 (or ra), then jalr
-        scratch = 1 if m == "call" else 6
-        hi, lo = _pcrel_pair(pc + offset, pc)
+        # As in GNU as, always auipc + jalr so any address is reachable:
+        #   call [rd,] label -> auipc rd, hi; jalr rd, lo(rd)     (rd = ra)
+        #   tail label       -> auipc t1, hi; jalr zero, lo(t1)
+        if m == "call" and len(ops) == 2:
+            link = scratch = parse_register(ops[0])
+            target = ops[1]
+        else:
+            _expect(ops, 1, f"{m} label")
+            link = 1 if m == "call" else 0
+            scratch = 1 if m == "call" else 6
+            target = ops[0]
+        hi, lo = _pcrel_pair(pc + target_offset(target), pc)
         return [_u(0x17, scratch, hi), _i(0x67, 0, link, scratch, lo)]
 
     if m in ("csrr", "csrw", "csrs", "csrc"):
@@ -532,7 +576,11 @@ def encode(text: str, address: int, labels: Dict[str, int]) -> bytes:
         RISCVEncodeError: If the instruction is invalid.
     """
     mnemonic, ops = _split_instruction(text)
-    words = _encode(mnemonic, ops, Context(address, labels, strict=True, error=RISCVEncodeError))
+    words = _encode(
+        mnemonic,
+        ops,
+        Context(address, labels, strict=True, error=RISCVEncodeError, hi_range=_HI_RANGE),
+    )
     return b"".join(w.to_bytes(4, "little") for w in words)
 
 
@@ -547,15 +595,11 @@ def instruction_size(text: str, labels: Dict[str, int], address: int = 0) -> int
     targets, handled here).
     """
     mnemonic, ops = _split_instruction(text)
-    if mnemonic == "call":
-        # Near calls are a single jal; programs large enough to need a far
-        # call do not fit in the simulator's default memory anyway.
-        return INSTR_SIZE
-    if mnemonic == "tail":
-        return 2 * INSTR_SIZE
     try:
         words = _encode(
-            mnemonic, ops, Context(address, labels, strict=False, error=RISCVEncodeError)
+            mnemonic,
+            ops,
+            Context(address, labels, strict=False, error=RISCVEncodeError, hi_range=_HI_RANGE),
         )
     except RISCVEncodeError:
         return INSTR_SIZE  # the real error is reported by encode()

@@ -14,7 +14,13 @@ from mapachespim.toolchain import Assembler
 from mapachespim.toolchain.riscv import RISCVEncodeError, encode, instruction_size
 
 PC = 0x80000000
-LABELS = {"target": PC + 0x40, "back": PC - 0x20, "msg": 0x80100010, "CONST": 42}
+LABELS = {
+    "target": PC + 0x40,
+    "back": PC - 0x20,
+    "msg": 0x80100010,
+    "CONST": 42,
+    "SMALL": 0x12345678,
+}
 
 _cs = Cs(CS_ARCH_RISCV, CS_MODE_RISCV64)
 
@@ -104,7 +110,7 @@ class TestInstructionForms(unittest.TestCase):
         ("jalr ra, 8(t0)", "jalr ra, t0, 8"),
         # Upper immediates
         ("lui a0, 0x12345", "lui a0, 0x12345"),
-        ("lui a0, %hi(msg)", "lui a0, 0x80100"),
+        ("lui a0, %hi(SMALL)", "lui a0, 0x12345"),
         ("addi a0, a0, %lo(msg)", "addi a0, a0, 0x10"),
         ("auipc a0, 1", "auipc a0, 1"),
         # System
@@ -137,7 +143,6 @@ class TestInstructionForms(unittest.TestCase):
         ("j target", "j 0x40"),
         ("jr ra", "ret"),
         ("ret", "ret"),
-        ("call target", "jal 0x40"),
     ]
 
     def test_forms(self):
@@ -147,6 +152,15 @@ class TestInstructionForms(unittest.TestCase):
                 self.assertEqual(len(code), 4)
                 self.assertEqual(disasm(code), [expected])
                 self.assertEqual(instruction_size(source, LABELS), 4)
+
+    def test_call_and_tail_use_auipc_jalr(self):
+        # Like GNU as: always two instructions, so any address is reachable
+        self.assertEqual(disasm(encode("call target", PC, LABELS)), ["auipc ra, 0", "jalr ra, ra, 0x40"])
+        self.assertEqual(disasm(encode("tail target", PC, LABELS)), ["auipc t1, 0", "jalr zero, t1, 0x40"])
+
+    def test_far_branch_is_relaxed(self):
+        far = {"far": PC + 0x10000}
+        self.assertEqual(disasm(encode("beq a0, a1, far", PC, far)), ["bne a0, a1, 8", "j 0xfffc"])
 
     def test_la_is_pc_relative(self):
         code = encode("la a0, msg", PC, LABELS)
@@ -174,6 +188,7 @@ class TestErrors(unittest.TestCase):
         ("beq a0, a1, nowhere", "undefined symbol"),
         ("slli a0, a0, 64", "out of range"),
         ("ecall a0", "takes no operands"),
+        ("lui a0, %hi(msg)", "out of range"),
     ]
 
     def test_errors(self):

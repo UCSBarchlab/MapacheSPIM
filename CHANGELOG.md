@@ -33,8 +33,21 @@
 - Loading a program starts from a fresh machine state and may switch ISA.
 
 ### Assembler
-- RISC-V `li` handles all 64-bit constants; `.equ` constants can be used as instruction operands;
-  `add a0, a1, 5` is accepted as `addi`.
+- The built-in RISC-V and MIPS assemblers now produce byte-for-byte the same code as GNU `as`,
+  verified by randomized differential tests against GNU binutils (run in CI). This changed some
+  pseudo-instruction expansions to GNU's: RISC-V `call`/`tail` are always `auipc`+`jalr`, `li` uses
+  GNU's algorithm; MIPS `la` is `lui`+`addiu`, and compare-branches, `abs`, `mul`/`div`/`rem` with
+  constants follow GNU. Out-of-range RISC-V branches are relaxed like GNU does.
+- MIPS `div`/`rem`/`divu`/`remu` with three operands now trap on division by zero and overflow
+  (as SPIM and GNU do), reported as "Division by zero"; `.set noreorder` is supported.
+- Fixed: `.align n` meant n bytes instead of 2^n on RISC-V/MIPS/ARM; MIPS data was little-endian
+  when the ISA came from `--isa`/`load prog.s mips32`; labels in `.word` etc. became 0; `\xNN` in
+  strings produced two bytes; custom sections were not written to the ELF; invalid values in data
+  directives were silently ignored; MIPS `.half`/`.word` are now auto-aligned like GNU `as`; `break`
+  codes were encoded in the wrong field.
+- Expressions follow GNU `as` rules (operators, precedence, octal `010`, `'c'` literals); `.`, and
+  `name = expression` (e.g. `len = . - msg`) are supported.
+- RISC-V `.equ` constants can be used as instruction operands; `add a0, a1, 5` is accepted as `addi`.
 - Debug info for big-endian targets (MIPS) was written in the wrong byte order, so source-level
   debugging never worked for MIPS.
 - `.isa riscv64  # comment` is recognized.

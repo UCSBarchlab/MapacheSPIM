@@ -321,8 +321,15 @@ MapacheSPIM is similar to SPIM but has key differences:
 1. **Several ISAs**: RISC-V (RV64IM), MIPS32, ARM64, and x86-64, all with the same commands and syscalls
 2. **Real executables**: Programs are assembled to ELF files, so the same binaries work with other tools
 3. **Delay slots**: On MIPS, the assembler fills each branch and jump delay slot with a `nop` (like
-   GNU `as` in its default mode), and the simulator executes delay slots as real hardware does
-4. **Source display**: `list` shows your source code next to the program counter
+   GNU `as` in its default `.set reorder` mode), and the simulator executes delay slots as real
+   hardware does. Write `.set noreorder` to fill delay slots yourself
+4. **Same code as GNU as**: RISC-V and MIPS programs assemble to exactly what GNU `as` produces,
+   so disassembly matches what you see in textbooks and `objdump`. One deliberate exception follows
+   SPIM instead: on MIPS, the two-operand `div $t0, $t1` / `divu $t0, $t1` is the real instruction
+   (results in HI and LO), whereas GNU `as` treats it as `div $t0, $t0, $t1`
+5. **Runtime checks**: MIPS `div`/`rem` with three operands trap on division by zero and on
+   overflow, as in SPIM, and the console reports "Division by zero"
+6. **Source display**: `list` shows your source code next to the program counter
 
 ## Troubleshooting
 

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from types import ModuleType
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 try:
     import keystone
@@ -29,11 +29,22 @@ except Exception as e:
     keystone = None
 
 from . import mips, riscv
-from .directives import DirectiveParser, LineType, SectionData
+from .directives import DOT_LABEL_PREFIX, DirectiveParser, LineType, ParsedLine, SectionData
 from .dwarf import DWARFv2Builder
 from .elf_builder import STB_GLOBAL, STB_LOCAL, STT_FUNC, STT_NOTYPE, ELFBuilder, Section, Symbol
-from .expr import EncodeError
+from .expr import EncodeError, ExpressionError, UndefinedSymbol, evaluate
 from .memory_map import get_layout
+
+
+def _lookup(values: Dict[str, int]) -> Callable[[str], int]:
+    """Symbol resolver over a dict, raising UndefinedSymbol for unknown names."""
+
+    def resolve(name: str) -> int:
+        if name in values:
+            return values[name]
+        raise UndefinedSymbol(name)
+
+    return resolve
 
 
 @dataclass
@@ -170,6 +181,8 @@ class Assembler:
         self._config = self.ISA_CONFIG[isa_lower]
         self._layout = get_layout(isa_lower)
         self._ks = None
+        # Replaced for each assemble() call; also used by the layout passes
+        self._parser = DirectiveParser(isa=isa_lower)
 
         # RISC-V and MIPS use built-in encoders; ARM64 and x86-64 need Keystone
         if self._config["arch"] is None:
@@ -189,6 +202,64 @@ class Assembler:
             self._ks = keystone.Ks(self._config["arch"], self._config["mode"])
         except keystone.KsError as e:
             raise RuntimeError(f"Failed to initialize Keystone for {isa}: {e}")
+
+    @staticmethod
+    def _resolve_constants(
+        pending: Dict[str, Tuple[str, int]],
+        constants: Dict[str, int],
+        labels: Dict[str, int],
+    ) -> bool:
+        """Evaluate pending constants whose symbols are now known.
+
+        Resolved entries move from ``pending`` to ``constants``. Returns True
+        if any were resolved.
+        """
+        resolved_any = False
+        progress = True
+        while progress and pending:
+            progress = False
+            for name, (expression, _line) in list(pending.items()):
+                try:
+                    constants[name] = evaluate(expression, _lookup({**constants, **labels}))
+                except ExpressionError:
+                    continue  # still waiting for a symbol (errors reported later)
+                del pending[name]
+                progress = resolved_any = True
+        return resolved_any
+
+    def _text_directive_bytes(
+        self, line: ParsedLine, addr: int, base: int, labels: Dict[str, int], strict: bool
+    ) -> bytes:
+        """Bytes a data or alignment directive in .text produces at ``addr``.
+
+        Alignment padding in RISC-V code is made of nop instructions, as GNU
+        as does (MIPS's nop is all zeros, the default fill).
+        """
+        values = {**labels, ".": addr}
+
+        def resolve(name: str) -> int:
+            if name in values:
+                return values[name]
+            if strict:
+                raise UndefinedSymbol(name)
+            return 0
+
+        data = self._parser.data_bytes(
+            line.directive or "", line.directive_args, resolve, offset=addr - base
+        )
+        if data is None:
+            return b""
+        is_align = line.directive in ("align", "balign", "p2align")
+        explicit_fill = len(line.directive_args) > 1 and line.directive_args[1]
+        if is_align and not explicit_fill and data and len(data) % 4 == 0 and self._is_riscv:
+            data = (0x00000013).to_bytes(4, "little") * (len(data) // 4)
+        return data
+
+    def _line_options(self, line: ParsedLine) -> Dict[str, Any]:
+        """Per-line encoder options (MIPS: .set reorder / noreorder)."""
+        if self.isa in ("mips32", "mips"):
+            return {"reorder": line.reorder}
+        return {}
 
     @property
     def _is_riscv(self) -> bool:
@@ -225,7 +296,8 @@ class Assembler:
         result = AssemblyResult(isa=self.isa, source_filename=source_filename)
 
         # Parse source
-        parser = DirectiveParser()
+        parser = DirectiveParser(isa=self.isa)
+        self._parser = parser
         sections = parser.parse(source)
 
         result.errors.extend(parser.errors)
@@ -270,18 +342,33 @@ class Assembler:
             for label_name, offset in sect_data.labels.items():
                 all_labels[label_name] = base + offset
 
-        # Calculate .text section label positions
-        # Pass all_labels (which now contains data section labels) for pseudo-instruction sizing
         # .equ/.set constants can be used as instruction operands but are
-        # not addresses, so they are kept out of the ELF symbol table
+        # not addresses, so they are kept out of the ELF symbol table.
+        # Constants that refer to labels (e.g. "len = . - msg") are resolved
+        # as soon as the labels they use have addresses.
         constants = dict(parser.constants)
+        pending = dict(parser.deferred_constants)
+        self._resolve_constants(pending, constants, all_labels)
 
+        # Calculate .text section label positions, using the data labels and
+        # constants for pseudo-instruction sizing
         text_section = sections.get(".text")
         if text_section:
             text_labels = self._calculate_text_labels(
                 text_section, self._layout.text_base, {**constants, **all_labels}
             )
             all_labels.update(text_labels)
+            if pending and self._resolve_constants(pending, constants, all_labels):
+                # Constants that needed code labels may change code size
+                text_labels = self._calculate_text_labels(
+                    text_section, self._layout.text_base, {**constants, **all_labels}
+                )
+                all_labels.update(text_labels)
+        for name, (expression, line_number) in pending.items():
+            try:
+                evaluate(expression, _lookup({**constants, **all_labels}))
+            except ExpressionError as e:
+                result.errors.append(f"Line {line_number}: {name}: {e}")
 
         # Pass 2: Assemble .text section with all labels known
         debug_lines: List[Tuple[int, int]] = []
@@ -299,8 +386,27 @@ class Assembler:
             if not result.errors:
                 text_section.data = bytearray(code)
 
+        # Fill in data values that refer to labels (e.g. ".word array")
+        symbol_values = {**constants, **all_labels}
+        for sect_name, sect_data in sections.items():
+            if sect_name == ".text":
+                continue
+            for fixup in sect_data.fixups:
+                try:
+                    value = evaluate(fixup.expression, _lookup(symbol_values))
+                except ExpressionError as e:
+                    result.errors.append(f"Line {fixup.line_number}: {e}")
+                    continue
+                mask = (1 << (8 * fixup.size)) - 1
+                sect_data.data[fixup.offset : fixup.offset + fixup.size] = (value & mask).to_bytes(
+                    fixup.size, fixup.byteorder
+                )
+
         if result.errors:
             return result
+
+        # Internal labels standing in for '.' are not real symbols
+        all_labels = {k: v for k, v in all_labels.items() if not k.startswith(DOT_LABEL_PREFIX)}
 
         # Build ELF
         entry_addr = all_labels.get(entry_symbol, self._layout.text_base)
@@ -308,8 +414,10 @@ class Assembler:
 
         builder = ELFBuilder(self.isa, entry=entry_addr)
 
-        # Add sections
-        for sect_name in [".text", ".data", ".rodata", ".bss"]:
+        # Add sections (standard ones first, then any custom sections)
+        ordered = [n for n in (".text", ".data", ".rodata", ".bss") if n in sections]
+        ordered += [n for n in sections if n not in ordered]
+        for sect_name in ordered:
             if sect_name in sections:
                 sect_data = sections[sect_name]
                 if sect_data.data or sect_name == ".text":
@@ -444,7 +552,16 @@ class Assembler:
                 if line.label:
                     new_labels[line.label] = addr
                 if line.line_type == LineType.INSTRUCTION and line.instruction:
-                    addr += self._builtin_encoder.instruction_size(line.instruction, known, addr)
+                    addr += self._builtin_encoder.instruction_size(
+                        line.instruction, known, addr, **self._line_options(line)
+                    )
+                elif line.line_type == LineType.DIRECTIVE:
+                    try:
+                        addr += len(
+                            self._text_directive_bytes(line, addr, base_addr, known, strict=False)
+                        )
+                    except ExpressionError:
+                        pass  # reported when the section is assembled
             if new_labels == labels:
                 break
             labels = new_labels
@@ -758,6 +875,19 @@ class Assembler:
             if line.label:
                 label_addrs[line.label] = current_addr
 
+            # Data and alignment directives in code (built-in encoders only)
+            if line.line_type == LineType.DIRECTIVE and self._builtin_encoder is not None:
+                try:
+                    data = self._text_directive_bytes(
+                        line, current_addr, base_addr, labels, strict=True
+                    )
+                except ExpressionError as e:
+                    errors.append(f"Line {line.line_number}: .{line.directive}: {e}")
+                    continue
+                code.extend(data)
+                current_addr += len(data)
+                continue
+
             # Skip non-instructions
             if line.line_type != LineType.INSTRUCTION or not line.instruction:
                 continue
@@ -772,7 +902,9 @@ class Assembler:
             encoder = self._builtin_encoder
             if encoder is not None:
                 try:
-                    encoding = encoder.encode(instr, current_addr, labels)
+                    encoding = encoder.encode(
+                        instr, current_addr, labels, **self._line_options(line)
+                    )
                 except EncodeError as e:
                     errors.append(f"Line {line.line_number}: {e} - {line.instruction}")
                     continue

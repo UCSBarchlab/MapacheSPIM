@@ -77,5 +77,36 @@ jobs:
           mapachespim -e ex/mips/fibonacci/fibonacci.s
           printf 'load riscv/fibonacci\nbreak fibonacci\nrun\nregs\nlist\nquit\n' | mapachespim
 
+      - name: Install GNU binutils for the assembler differential tests
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils-riscv64-linux-gnu binutils-mips-linux-gnu
+
       - name: Run tests
         run: python -m pytest tests/ --tb=short
+
+  assembler-fuzz:
+    # The built-in RISC-V and MIPS assemblers must produce byte-identical
+    # output to GNU as. This runs the randomized comparison much deeper
+    # than the regular test job.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install GNU binutils
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq binutils-riscv64-linux-gnu binutils-mips-linux-gnu
+
+      - name: Install package
+        run: pip install -e ".[dev]"
+
+      - name: Compare with GNU as (50x fuzz scale)
+        env:
+          MAPACHESPIM_FUZZ_SCALE: "50"
+        run: python -m pytest tests/test_differential_riscv.py tests/test_differential_mips.py tests/test_differential_data.py --tb=short

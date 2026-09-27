@@ -76,7 +76,9 @@ class TestInstructionForms(unittest.TestCase):
         ("sw $ra, 4($sp)", ["sw $ra, 4($sp)"]),
         ("sb $t0, 0($a0)", ["sb $t0, ($a0)"]),
         ("sh $t0, 0($a0)", ["sh $t0, ($a0)"]),
-        ("lw $t0, msg", ["lui $at, 0x1000", "lw $t0, 0x24($at)"]),
+        # Like GNU as, a load uses its own destination as the temporary
+        ("lw $t0, msg", ["lui $t0, 0x1000", "lw $t0, 0x24($t0)"]),
+        ("sw $t0, msg", ["lui $at, 0x1000", "sw $t0, 0x24($at)"]),
         ("syscall", ["syscall"]),
         ("break", ["break"]),
         ("nop", ["nop"]),
@@ -101,13 +103,16 @@ class TestInstructionForms(unittest.TestCase):
         ("li $t0, 0xffff", ["ori $t0, $zero, 0xffff"]),
         ("li $t0, 0x10000", ["lui $t0, 1"]),
         ("li $t0, 0x12345678", ["lui $t0, 0x1234", "ori $t0, $t0, 0x5678"]),
-        ("la $a0, msg", ["lui $a0, 0x1000", "ori $a0, $a0, 0x24"]),
+        ("la $a0, msg", ["lui $a0, 0x1000", "addiu $a0, $a0, 0x24"]),
         ("not $t0, $t1", ["not $t0, $t1"]),
         ("neg $t0, $t1", ["neg $t0, $t1"]),
         ("blt $t0, $t1, target", ["slt $at, $t0, $t1", "bnez $at, 0x400040", "nop"]),
         ("bgt $t0, $t1, target", ["slt $at, $t1, $t0", "bnez $at, 0x400040", "nop"]),
-        ("div $t0, $t1, $t2", ["div $zero, $t1, $t2", "mflo $t0"]),
-        ("rem $t0, $t1, $t2", ["div $zero, $t1, $t2", "mfhi $t0"]),
+        ("div $t0, $t1", ["div $zero, $t0, $t1"]),  # SPIM: the real instruction
+        ("div $zero, $t1, $t2", ["div $zero, $t1, $t2"]),
+        ("div $t0, $t1, 1", ["move $t0, $t1"]),
+        ("rem $t0, $t1, 1", ["move $t0, $zero"]),
+        ("mul $t0, $t1, 7", ["addiu $at, $zero, 7", "mult $t1, $at", "mflo $t0"]),
     ]
 
     def test_forms(self):
@@ -196,6 +201,26 @@ class TestExecution(unittest.TestCase):
                     )
                     self.assertEqual(sim.get_reg(self.T2), int(check(a, b)))
 
+    def test_division_traps(self):
+        """div/rem check for division by zero and overflow, as SPIM does."""
+        for source, regs, expected in [
+            ("div $t2, $t0, $t1", {8: 7, 9: 0}, "Division by zero"),
+            ("rem $t2, $t0, $t1", {8: 7, 9: 0}, "Division by zero"),
+            ("divu $t2, $t0, $t1", {8: 7, 9: 0}, "Division by zero"),
+            ("div $t2, $t0, $t1", {8: -0x80000000, 9: -1}, "overflow"),
+        ]:
+            with self.subTest(source=source, regs=regs):
+                sim = Simulator(ISA.MIPS)
+                code = encode(source, PC, {})
+                sim.write_mem(PC, code)
+                sim.set_pc(PC)
+                for reg, value in regs.items():
+                    sim.set_reg(reg, value & 0xFFFFFFFF)
+                for _ in range(len(code) // 4):
+                    if sim.check_termination(sim.step())[0]:
+                        break
+                self.assertIn(expected, sim.last_error or "")
+
     def test_div_rem_abs(self):
         sim = run_snippet(
             """
@@ -230,8 +255,8 @@ class TestProgram(unittest.TestCase):
         """
         result = Assembler("mips32").assemble(source)
         self.assertTrue(result.success, result.errors)
-        # msg is at 0x10000000, so la is just lui (1) + blt (3) + li (2)
-        self.assertEqual(result.symbols["skip"] - result.symbols["_start"], 24)
+        # la (lui + addiu) + blt (slt, bnez, nop) + li (lui + ori)
+        self.assertEqual(result.symbols["skip"] - result.symbols["_start"], 28)
 
 
 if __name__ == "__main__":

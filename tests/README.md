@@ -14,6 +14,16 @@ Tests that assemble ARM64 or x86-64 code need the optional Keystone library; whe
 installed (e.g. Apple Silicon), they are reported as skipped rather than failed. Everything else,
 including all RISC-V and MIPS assembler tests, runs on every platform.
 
+**Assembler differential tests** compare the built-in RISC-V and MIPS assemblers with GNU `as`
+byte for byte, using randomized programs. They need the GNU cross binutils and are skipped without
+them:
+
+```bash
+sudo apt install binutils-riscv64-linux-gnu binutils-mips-linux-gnu
+python -m pytest tests/test_differential_*.py
+MAPACHESPIM_FUZZ_SCALE=50 python -m pytest tests/test_differential_*.py   # much deeper
+```
+
 **Run individual suites:**
 
 ```bash

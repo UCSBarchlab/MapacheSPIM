@@ -23,7 +23,15 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Tuple
 
-from .expr import Context, EncodeError, parse_int, sign_extend, split_operands
+from .expr import (
+    Context,
+    EncodeError,
+    ExpressionError,
+    evaluate,
+    parse_int,
+    sign_extend,
+    split_operands,
+)
 
 INSTR_SIZE = 4
 NOP = 0x00000000
@@ -112,7 +120,8 @@ ALU_IMM: Dict[str, Tuple[int, bool]] = {
 }  # fmt: skip
 # Register-form mnemonics that take an immediate third operand (like GNU as)
 IMM_FORMS: Dict[str, str] = {
-    "add": "addi", "addu": "addiu", "slt": "slti", "sltu": "sltiu",
+    "add": "addi", "addu": "addiu", "sub": "addi", "subu": "addiu",
+    "slt": "slti", "sltu": "sltiu",
     "and": "andi", "or": "ori", "xor": "xori",
 }  # fmt: skip
 
@@ -174,20 +183,39 @@ def _li(rt: int, value: int) -> List[int]:
     return words
 
 
-def _la(rt: int, address: int) -> List[int]:
-    """Load an address: lui, plus ori when the low half is non-zero."""
-    address &= 0xFFFFFFFF
-    words = [_i(0x0F, 0, rt, address >> 16)]
-    if address & 0xFFFF:
-        words.append(_i(0x0D, rt, rt, address & 0xFFFF))
-    return words
-
-
 def _hi_lo(address: int) -> Tuple[int, int]:
-    """Split an address for lui + signed 16-bit offset."""
+    """Split an address into %hi (for lui) and %lo (a signed 16-bit offset)."""
     lo = sign_extend(address, 16)
     hi = ((address - lo) >> 16) & 0xFFFF
     return hi, lo
+
+
+def _uses_symbols(text: str) -> bool:
+    """True if an operand expression refers to any symbol (label or constant)."""
+    found = False
+
+    def resolve(name: str) -> int:
+        nonlocal found
+        found = True
+        return 0
+
+    try:
+        evaluate(text, resolve, lambda name, value: value)
+    except ExpressionError:
+        return True
+    return found
+
+
+def _move(rd: int, rs: int) -> int:
+    return _r(rs, 0, rd, 0, ALU3["or"])  # move rd, rs = or rd, rs, $zero
+
+
+def _neg(rd: int, rs: int) -> int:
+    return _r(0, rs, rd, 0, ALU3["sub"])  # neg rd, rs = sub rd, $zero, rs
+
+
+def _break(code1: int = 0, code2: int = 0) -> int:
+    return (code1 << 16) | (code2 << 6) | 0x0D
 
 
 # ---------------------------------------------------------------------------
@@ -195,9 +223,16 @@ def _hi_lo(address: int) -> Tuple[int, int]:
 # ---------------------------------------------------------------------------
 
 
-def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
+def _encode(mnemonic: str, ops: List[str], ctx: Context, reorder: bool = True) -> List[int]:
+    """Encode one instruction or pseudo-instruction as a list of words.
+
+    With ``reorder`` (GNU as's default ".set reorder"), a nop is placed in
+    the delay slot of each branch and jump written in the source. With
+    ".set noreorder", the programmer fills delay slots themselves.
+    """
     m = mnemonic
     pc = ctx.address
+    slot = [NOP] if reorder else []
 
     def branch_offset(text: str, at: int) -> int:
         """Word offset from the delay slot of a branch at address `at`."""
@@ -220,31 +255,53 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
             raise MIPSEncodeError(f"jump target 0x{target:x} is outside the current 256MB region")
         return (target >> 2) & 0x03FFFFFF
 
-    # --- no-operand ---
-    if m in ("nop", "syscall", "break", "eret"):
-        if m == "nop":
-            return [NOP]
-        if m == "eret":
-            return [0x42000018]
-        code = 0
-        if ops:
-            _expect(ops, 1, f"{m} [code]")
-            code = ctx.eval(ops[0]) & 0xFFFFF
-        return [(code << 6) | (0x0C if m == "syscall" else 0x0D)]
+    def is_reg_or_bare_name(text: str) -> bool:
+        t = text.strip()
+        return t.startswith("$") or (t.lower() in REGISTERS and not t.isdigit())
 
-    # --- R-type ---
+    def value_of(text: str) -> int:
+        return ctx.eval(text) & 0xFFFFFFFF
+
+    # --- no-operand ---
+    if m == "nop":
+        _expect(ops, 0, "nop")
+        return [NOP]
+    if m == "eret":
+        return [0x42000018]
+    if m == "syscall":
+        code = ctx.eval(ops[0]) & 0xFFFFF if ops else 0
+        if len(ops) > 1:
+            raise MIPSEncodeError("expected syscall [code]")
+        return [(code << 6) | 0x0C]
+    if m == "break":
+        if len(ops) > 2:
+            raise MIPSEncodeError("expected break [code[, code]]")
+        codes = [ctx.eval(o) & 0x3FF for o in ops]
+        return [_break(*codes)]
+
+    # --- three-register ALU (also accepting an immediate, like GNU as) ---
     if m in ALU3:
         _expect(ops, 3, f"{m} $rd, $rs, $rt")
-        bare_register_name = ops[2].lower() in REGISTERS and not ops[2].isdigit()
-        if m in IMM_FORMS and not ops[2].startswith("$") and not bare_register_name:
-            return _encode(IMM_FORMS[m], ops, ctx)
+        if m in IMM_FORMS and not is_reg_or_bare_name(ops[2]):
+            rd, rs = parse_register(ops[0]), parse_register(ops[1])
+            imm_op = IMM_FORMS[m]
+            opcode, is_signed = ALU_IMM[imm_op]
+            # Constants are 32-bit: 0xffffffff means -1 to a signed field
+            imm = sign_extend(value_of(ops[2]), 32) if is_signed else value_of(ops[2])
+            if m in ("sub", "subu"):
+                imm = -imm  # subtracting is adding the negated value
+            fits = -0x8000 <= imm <= 0x7FFF if is_signed else 0 <= imm <= 0xFFFF
+            if fits:
+                return [_i(opcode, rs, rd, imm)]
+            # Too large for the immediate field: build it in $at
+            return _li(AT, ctx.eval(ops[2])) + [_r(rs, AT, rd, 0, ALU3[m])]
         rd, rs, rt = (parse_register(o) for o in ops)
         return [_r(rs, rt, rd, 0, ALU3[m])]
 
     if m in SHIFT_IMM:
         _expect(ops, 3, f"{m} $rd, $rt, shamt")
         if _is_register(ops[2]):
-            return _encode(m + "v", ops, ctx)
+            return _encode(m + "v", ops, ctx, reorder)
         shamt = ctx.eval(ops[2])
         if not 0 <= shamt <= 31:
             raise MIPSEncodeError(f"shift amount {shamt} out of range (0 to 31)")
@@ -255,25 +312,43 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         rd, rt, rs = (parse_register(o) for o in ops)
         return [_r(rs, rt, rd, 0, SHIFT_VAR[m])]
 
-    if m in MULDIV:
-        if len(ops) == 3 and m in ("div", "divu"):
-            # Three-operand pseudo form: quotient into rd
-            rd = parse_register(ops[0])
-            return [
-                _r(parse_register(ops[1]), parse_register(ops[2]), 0, 0, MULDIV[m]),
-                _r(0, 0, rd, 0, 0x12),
-            ]
-        _expect(ops, 2, f"{m} $rs, $rt")
+    # --- multiply and divide ---
+    if m in MULDIV and len(ops) == 2:
+        # The real instruction; results in HI/LO. (SPIM semantics: GNU as
+        # instead expands 'div $s, $t' to 'div $s, $s, $t'.)
         return [_r(parse_register(ops[0]), parse_register(ops[1]), 0, 0, MULDIV[m])]
 
-    if m in ("rem", "remu"):
+    if m in ("div", "divu", "rem", "remu"):
         _expect(ops, 3, f"{m} $rd, $rs, $rt")
-        rd = parse_register(ops[0])
-        funct = MULDIV["div" if m == "rem" else "divu"]
-        return [
-            _r(parse_register(ops[1]), parse_register(ops[2]), 0, 0, funct),
-            _r(0, 0, rd, 0, 0x10),
-        ]
+        rd, rs = parse_register(ops[0]), parse_register(ops[1])
+        signed_op = m in ("div", "rem")
+        funct = MULDIV["div" if signed_op else "divu"]
+        result = HILO_TO["mflo" if m in ("div", "divu") else "mfhi"]
+        if _is_register(ops[2]):
+            rt = parse_register(ops[2])
+            if rd == 0 and m in ("div", "divu"):
+                return [_r(rs, rt, 0, 0, funct)]  # 'div $zero, $s, $t' is the real instruction
+            # Trap on division by zero (break 7), and for signed division on
+            # overflow of -2^31 / -1 (break 6), as GNU as and SPIM do
+            words = [_i(0x05, rt, 0, 2), _r(rs, rt, 0, 0, funct), _break(7)]
+            if signed_op:
+                words += [
+                    _i(0x09, 0, AT, -1),  # li $at, -1
+                    _i(0x05, rt, AT, 4),  # bne $rt, $at, done
+                    _i(0x0F, 0, AT, 0x8000),  # lui $at, 0x8000 (delay slot)
+                    _i(0x05, rs, AT, 2),  # bne $rs, $at, done
+                    NOP,
+                    _break(6),
+                ]
+            return words + [_r(0, 0, rd, 0, result)]
+        divisor = sign_extend(value_of(ops[2]), 32)
+        if divisor == 0:
+            return [_break(7)]
+        if divisor == 1 or (divisor == -1 and signed_op):
+            if m in ("rem", "remu"):
+                return [_move(rd, 0)]  # the remainder is always 0
+            return [_move(rd, rs)] if divisor == 1 else [_neg(rd, rs)]
+        return _li(AT, divisor) + [_r(rs, AT, 0, 0, funct), _r(0, 0, rd, 0, result)]
 
     if m in HILO_TO:
         _expect(ops, 1, f"{m} $rd")
@@ -288,8 +363,11 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         rd, rs = parse_register(ops[0]), parse_register(ops[1])
         if _is_register(ops[2]):
             return [_r(rs, parse_register(ops[2]), rd, 0, 0x02, opcode=0x1C)]
-        # mul by constant: load it into $at first
-        return _li(AT, ctx.eval(ops[2])) + [_r(rs, AT, rd, 0, 0x02, opcode=0x1C)]
+        # By a constant: li $at, value; mult $rs, $at; mflo $rd
+        return _li(AT, ctx.eval(ops[2])) + [
+            _r(rs, AT, 0, 0, MULDIV["mult"]),
+            _r(0, 0, rd, 0, HILO_TO["mflo"]),
+        ]
 
     if m in SPECIAL2_ACC:
         _expect(ops, 2, f"{m} $rs, $rt")
@@ -302,10 +380,10 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         rd, rs = parse_register(ops[0]), parse_register(ops[1])
         return [_r(rs, rd, rd, 0, 0x20 if m == "clz" else 0x21, opcode=0x1C)]
 
-    # --- jumps (each followed by a delay-slot nop) ---
+    # --- jumps ---
     if m == "jr":
         _expect(ops, 1, "jr $rs")
-        return [_r(parse_register(ops[0]), 0, 0, 0, 0x08), NOP]
+        return [_r(parse_register(ops[0]), 0, 0, 0, 0x08)] + slot
 
     if m == "jalr":
         if len(ops) == 1:
@@ -313,65 +391,153 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         else:
             _expect(ops, 2, "jalr [$rd,] $rs")
             rd, rs = parse_register(ops[0]), parse_register(ops[1])
-        return [_r(rs, 0, rd, 0, 0x09), NOP]
+        if rd == rs:
+            raise MIPSEncodeError(
+                "jalr: source and destination must be different registers"
+                + (" (the destination defaults to $ra)" if len(ops) == 1 else "")
+            )
+        return [_r(rs, 0, rd, 0, 0x09)] + slot
 
     if m in ("j", "jal"):
         _expect(ops, 1, f"{m} label")
         if m == "j" and _is_register(ops[0]):
-            return _encode("jr", ops, ctx)
+            return _encode("jr", ops, ctx, reorder)
         opcode = 0x02 if m == "j" else 0x03
-        return [(opcode << 26) | jump_target(ops[0]), NOP]
+        return [(opcode << 26) | jump_target(ops[0])] + slot
 
     # --- branches ---
+    def compare_branch(op: str, a: int, b_text: str, target: str) -> List[int]:
+        """blt/bge/bgt/ble[u] a, b, target, following GNU as's macro rules
+        (tc-mips.c M_BLT, M_BLTI, ...), including its special cases for 0,
+        1, and the extreme values."""
+        unsigned = op.endswith("u")
+        kind = op[:3]  # blt, bge, bgt, ble
+        bne, beq = BRANCH2["bne"], BRANCH2["beq"]
+        sl = "sltu" if unsigned else "slt"
+
+        if _is_register(b_text):
+            b = parse_register(b_text)
+            if kind in ("blt", "bge"):  # a < b, a >= b
+                taken_if_less = kind == "blt"
+                if b == 0:
+                    if unsigned:
+                        return never() if taken_if_less else always(target)
+                    return [_i(0x01, a, 0 if taken_if_less else 1, off(target))] + slot  # bltz/bgez
+                if a == 0:
+                    if unsigned:
+                        return [_i(bne if taken_if_less else beq, 0, b, off(target))] + slot
+                    return [
+                        _i(0x07 if taken_if_less else 0x06, b, 0, off(target))
+                    ] + slot  # bgtz/blez
+                words = [_r(a, b, AT, 0, ALU3[sl])]
+                opcode = bne if taken_if_less else beq
+            else:  # a > b, a <= b
+                taken_if_greater = kind == "bgt"
+                if b == 0:
+                    if unsigned:
+                        return [_i(bne if taken_if_greater else beq, a, 0, off(target))] + slot
+                    return [_i(0x07 if taken_if_greater else 0x06, a, 0, off(target))] + slot
+                if a == 0:
+                    if unsigned:
+                        return never() if taken_if_greater else always(target)
+                    return [
+                        _i(0x01, b, 0 if taken_if_greater else 1, off(target))
+                    ] + slot  # bltz/bgez
+                words = [_r(b, a, AT, 0, ALU3[sl])]
+                opcode = bne if taken_if_greater else beq
+            return words + [_i(opcode, AT, 0, offset_after(words, target))] + slot
+
+        # Immediate operand (compared as a 32-bit value)
+        v = sign_extend(value_of(b_text), 32)
+        if kind == "bgt":  # a > v  ==  a >= v+1
+            if (unsigned and (a == 0 or v == -1)) or (not unsigned and v >= 0x7FFFFFFF):
+                return never()
+            v, kind = v + 1, "bge"
+        elif kind == "ble":  # a <= v  ==  a < v+1
+            if (unsigned and (a == 0 or v == -1)) or (not unsigned and v >= 0x7FFFFFFF):
+                return always(target)
+            v, kind = v + 1, "blt"
+
+        if kind == "blt":
+            if unsigned and v == 0:
+                return never()
+            if unsigned and v == 1:
+                return [_i(beq, a, 0, off(target))] + slot  # a < 1  ==  a == 0
+            if not unsigned and v in (0, 1):
+                return [
+                    _i(0x01, a, 0, off(target)) if v == 0 else _i(0x06, a, 0, off(target))
+                ] + slot
+            opcode = bne
+        else:  # bge
+            if unsigned and v == 0 or (not unsigned and v == -0x80000000):
+                return always(target)
+            if unsigned and v == 1:
+                return [_i(bne, a, 0, off(target))] + slot  # a >= 1  ==  a != 0
+            if not unsigned and v in (0, 1):
+                return [
+                    _i(0x01, a, 1, off(target)) if v == 0 else _i(0x07, a, 0, off(target))
+                ] + slot
+            opcode = beq
+        # $at = (a < v)
+        if -0x8000 <= v <= 0x7FFF:
+            words = [_i(0x0B if unsigned else 0x0A, a, AT, v)]  # slti[u] $at, a, v
+        else:
+            words = _li(AT, v) + [_r(a, AT, AT, 0, ALU3[sl])]
+        return words + [_i(opcode, AT, 0, offset_after(words, target))] + slot
+
+    def off(target: str) -> int:
+        return branch_offset(target, pc)
+
+    def offset_after(words: List[int], target: str) -> int:
+        return branch_offset(target, pc + 4 * len(words))
+
+    def always(target: str) -> List[int]:
+        return [_i(0x04, 0, 0, branch_offset(target, pc))] + slot  # b target
+
+    def never() -> List[int]:
+        return [NOP]  # a branch that is never taken (GNU emits a nop)
+
     if m in BRANCH2:
         _expect(ops, 3, f"{m} $rs, $rt, label")
         rs = parse_register(ops[0])
         if _is_register(ops[1]):
-            return [_i(BRANCH2[m], rs, parse_register(ops[1]), branch_offset(ops[2], pc)), NOP]
-        # Compare against a constant via $at
-        words = _li(AT, ctx.eval(ops[1]))
-        at = pc + 4 * len(words)
-        return words + [_i(BRANCH2[m], rs, AT, branch_offset(ops[2], at)), NOP]
+            return [_i(BRANCH2[m], rs, parse_register(ops[1]), branch_offset(ops[2], pc))] + slot
+        value = value_of(ops[1])
+        if value == 0:
+            return [_i(BRANCH2[m], rs, 0, branch_offset(ops[2], pc))] + slot
+        words = _li(AT, value)
+        return words + [_i(BRANCH2[m], rs, AT, offset_after(words, ops[2]))] + slot
 
     if m in BRANCH1:
         _expect(ops, 2, f"{m} $rs, label")
         opcode, rt = BRANCH1[m]
-        return [_i(opcode, parse_register(ops[0]), rt, branch_offset(ops[1], pc)), NOP]
+        rs = parse_register(ops[0])
+        if m in ("bltzal", "bgezal") and rs == 31:
+            raise MIPSEncodeError(f"{m}: the source register must not be $ra (it is overwritten)")
+        return [_i(opcode, rs, rt, branch_offset(ops[1], pc))] + slot
 
     if m in ("beqz", "bnez"):
         _expect(ops, 2, f"{m} $rs, label")
         opcode = BRANCH2["beq" if m == "beqz" else "bne"]
-        return [_i(opcode, parse_register(ops[0]), 0, branch_offset(ops[1], pc)), NOP]
+        return [_i(opcode, parse_register(ops[0]), 0, branch_offset(ops[1], pc))] + slot
 
     if m in ("b", "bal"):
         _expect(ops, 1, f"{m} label")
         if m == "b":
-            return [_i(0x04, 0, 0, branch_offset(ops[0], pc)), NOP]  # beq $0, $0
-        return [_i(0x01, 0, 0x11, branch_offset(ops[0], pc)), NOP]  # bgezal $0
+            return always(ops[0])
+        return [_i(0x01, 0, 0x11, branch_offset(ops[0], pc))] + slot  # bgezal $0
 
     if m in COMPARE_BRANCHES:
         _expect(ops, 3, f"{m} $rs, $rt, label")
-        slt, swap, if_set = COMPARE_BRANCHES[m]
-        rs = parse_register(ops[0])
-        words = []
-        if _is_register(ops[1]):
-            rt = parse_register(ops[1])
-        else:
-            words = _li(AT, ctx.eval(ops[1]))
-            rt = AT
-        a, b = (rt, rs) if swap else (rs, rt)
-        words.append(_r(a, b, AT, 0, ALU3[slt]))
-        at = pc + 4 * len(words)
-        opcode = BRANCH2["bne" if if_set else "beq"]
-        return words + [_i(opcode, AT, 0, branch_offset(ops[2], at)), NOP]
+        return compare_branch(m, parse_register(ops[0]), ops[1], ops[2])
 
     # --- immediates ---
     if m in ALU_IMM:
         _expect(ops, 3, f"{m} $rt, $rs, imm")
-        opcode, signed = ALU_IMM[m]
+        opcode, is_signed = ALU_IMM[m]
         rt, rs = parse_register(ops[0]), parse_register(ops[1])
         imm = ctx.eval(ops[2])
-        imm = _signed16(imm) if signed else _unsigned16(imm)
+        imm = _signed16(imm) if is_signed else _unsigned16(imm)
         return [_i(opcode, rs, rt, imm)]
 
     if m == "lui":
@@ -386,17 +552,35 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         opcode = LOADS[m] if m in LOADS else STORES[m]
         _expect(ops, 2, f"{m} $rt, offset($rs)")
         rt = parse_register(ops[0])
-        if _MEM_RE.match(ops[1].strip()):
-            offset, base = _parse_mem(ops[1], ctx)
-            return [_i(opcode, base, rt, offset)]
-        # 'lw $t0, label' -> lui $at, %hi(label); lw $t0, %lo(label)($at)
-        hi, lo = _hi_lo(ctx.eval(ops[1]))
-        return [_i(0x0F, 0, AT, hi), _i(opcode, AT, rt, lo)]
+        operand = ops[1].strip()
+        match = _MEM_RE.match(operand)
+        if match:
+            offset_text, base = match.group(1).strip(), parse_register(match.group(2))
+        else:
+            offset_text, base = operand, 0
+        offset = ctx.eval(offset_text) if offset_text else 0
+        # A plain offset that fits (or an explicit %lo(...)) is one instruction
+        if (
+            not offset_text
+            or offset_text.startswith("%")
+            or (not _uses_symbols(offset_text) and -0x8000 <= offset <= 0x7FFF)
+        ):
+            return [_i(opcode, base, rt, _signed16(offset, "offset"))]
+        # Otherwise: lui tmp, %hi(addr); [addu tmp, tmp, base]; op rt, %lo(addr)(tmp)
+        # A load can use its own destination as tmp; stores and the partial
+        # loads lwl/lwr must use $at
+        partial = m in ("lwl", "lwr")
+        tmp = rt if (m in LOADS and not partial and rt not in (0, base)) else AT
+        hi, lo = _hi_lo(offset)
+        words = [_i(0x0F, 0, tmp, hi)]
+        if base:
+            words.append(_r(tmp, base, tmp, 0, ALU3["addu"]))
+        return words + [_i(opcode, tmp, rt, lo)]
 
     # --- data movement pseudo-instructions ---
     if m == "move":
         _expect(ops, 2, "move $rd, $rs")
-        return [_r(parse_register(ops[1]), 0, parse_register(ops[0]), 0, ALU3["or"])]
+        return [_move(parse_register(ops[0]), parse_register(ops[1]))]
 
     if m == "li":
         _expect(ops, 2, "li $rt, imm")
@@ -404,7 +588,11 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
 
     if m == "la":
         _expect(ops, 2, "la $rt, label")
-        return _la(parse_register(ops[0]), ctx.eval(ops[1]))
+        rt = parse_register(ops[0])
+        if not _uses_symbols(ops[1]):
+            return _li(rt, ctx.eval(ops[1]))  # a plain number: same as li
+        hi, lo = _hi_lo(ctx.eval(ops[1]))
+        return [_i(0x0F, 0, rt, hi), _i(0x09, rt, rt, lo)]  # lui; addiu
 
     if m == "not":
         _expect(ops, 2, "not $rd, $rs")
@@ -418,12 +606,9 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
     if m == "abs":
         _expect(ops, 2, "abs $rd, $rs")
         rd, rs = parse_register(ops[0]), parse_register(ops[1])
-        # sra $at, rs, 31; xor rd, rs, $at; subu rd, rd, $at
-        return [
-            _r(0, rs, AT, 31, 0x03),
-            _r(rs, AT, rd, 0, ALU3["xor"]),
-            _r(rd, AT, rd, 0, ALU3["subu"]),
-        ]
+        # bgez $rs, done; move $rd, $rs (delay slot); neg $rd, $rs; done:
+        delay = NOP if rd == rs else _move(rd, rs)
+        return [_i(0x01, rs, 1, 2), delay, _neg(rd, rs)]
 
     raise MIPSEncodeError(f"unknown instruction '{mnemonic}'")
 
@@ -439,7 +624,7 @@ def _context(address: int, labels: Dict[str, int], strict: bool) -> Context:
     return Context(address, labels, strict=strict, error=MIPSEncodeError, lo_bits=16)
 
 
-def encode(text: str, address: int, labels: Dict[str, int]) -> bytes:
+def encode(text: str, address: int, labels: Dict[str, int], reorder: bool = True) -> bytes:
     """
     Encode one MIPS instruction (or pseudo-instruction) to big-endian machine code.
 
@@ -449,11 +634,13 @@ def encode(text: str, address: int, labels: Dict[str, int]) -> bytes:
         MIPSEncodeError: If the instruction is invalid.
     """
     mnemonic, ops = _split_instruction(text)
-    words = _encode(mnemonic, ops, _context(address, labels, strict=True))
+    words = _encode(mnemonic, ops, _context(address, labels, strict=True), reorder)
     return b"".join(w.to_bytes(4, "big") for w in words)
 
 
-def instruction_size(text: str, labels: Dict[str, int], address: int = 0) -> int:
+def instruction_size(
+    text: str, labels: Dict[str, int], address: int = 0, reorder: bool = True
+) -> int:
     """
     Size in bytes that ``encode`` will produce, for the label-layout pass.
 
@@ -463,7 +650,7 @@ def instruction_size(text: str, labels: Dict[str, int], address: int = 0) -> int
     """
     mnemonic, ops = _split_instruction(text)
     try:
-        words = _encode(mnemonic, ops, _context(address, labels, strict=False))
+        words = _encode(mnemonic, ops, _context(address, labels, strict=False), reorder)
     except MIPSEncodeError:
         return INSTR_SIZE  # the real error is reported by encode()
     return len(words) * INSTR_SIZE

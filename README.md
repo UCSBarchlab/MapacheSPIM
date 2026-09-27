@@ -256,8 +256,8 @@ syscalls, and a matching set of example programs:
 
 | ISA | Examples | Assembling `.s` files |
 |-----|----------|-----------------------|
-| RISC-V 64-bit (RV64IM) | `examples/riscv/` | Built in, works everywhere |
-| MIPS32 (big-endian) | `examples/mips/` | Built in, works everywhere |
+| RISC-V 64-bit (RV64IM) | `examples/riscv/` | Built in, works everywhere\* |
+| MIPS32 (big-endian) | `examples/mips/` | Built in, works everywhere\* |
 | ARM64 (AArch64) | `examples/arm/` | Uses [Keystone](https://www.keystone-engine.org/) |
 | x86-64 (AT&T or Intel syntax) | `examples/x86_64/` | Uses [Keystone](https://www.keystone-engine.org/) |
 
@@ -266,6 +266,11 @@ has no prebuilt package for ARM machines such as Apple Silicon Macs, so it is no
 default; you can still run and debug ARM64 and x86-64 programs (including all the bundled examples), and
 can try `pip install 'mapachespim[keystone]'` to build Keystone from source (this needs CMake and a C++
 compiler).
+
+\* The built-in RISC-V and MIPS assemblers produce byte-for-byte the same machine code as GNU `as`
+(the standard assembler used in textbooks and courses), including its pseudo-instruction expansions,
+data directives, and branch relaxation. This is checked continuously by randomized differential tests
+that assemble hundreds of thousands of instructions with both and compare the results.
 
 Loading an ELF file detects its ISA automatically.
 
