@@ -86,13 +86,18 @@ Breakpoint hit at 0x0000000080000038 after 6 instructions
 PC = 0x0000000080000038
 
 (mapachespim) list
+
 fibonacci.s:
+   81: #   sp+16: saved a0 (original n value)
+   82: #   Total: 24 bytes
+   83: # ============================================================================
    84: fibonacci:
    85:     # Base case 1: if n == 0, return 0
    86>     beqz    a0, base_case_zero  # <-- PC: 0x80000038
    87:
    88:     # Base case 2: if n == 1, return 1
    89:     li      t0, 1
+   90:     beq     a0, t0, base_case_one
 
 (mapachespim) step
 [0x80000038] 0x63040504  beqz a0, 0x48  <fibonacci>
@@ -105,9 +110,19 @@ fibonacci.s:
 x0  (zero) = 0x0000000000000000    x1  (  ra) = 0x0000000080000018 ★
 x2  (  sp) = 0x0000000080181000 ★  x3  (  gp) = 0x0000000000000000
 x4  (  tp) = 0x0000000000000000    x5  (  t0) = 0x0000000000000001 ★
-...
+x6  (  t1) = 0x0000000000000000    x7  (  t2) = 0x0000000000000000
+x8  (  s0) = 0x0000000000000000    x9  (  s1) = 0x0000000000000000
 x10 (  a0) = 0x0000000000000007 ★  x11 (  a1) = 0x0000000000000000
-...
+x12 (  a2) = 0x0000000000000000    x13 (  a3) = 0x0000000000000000
+x14 (  a4) = 0x0000000000000000    x15 (  a5) = 0x0000000000000000
+x16 (  a6) = 0x0000000000000000    x17 (  a7) = 0x0000000000000000
+x18 (  s2) = 0x0000000000000000    x19 (  s3) = 0x0000000000000000
+x20 (  s4) = 0x0000000000000000    x21 (  s5) = 0x0000000000000000
+x22 (  s6) = 0x0000000000000000    x23 (  s7) = 0x0000000000000000
+x24 (  s8) = 0x0000000000000000    x25 (  s9) = 0x0000000000000000
+x26 ( s10) = 0x0000000000000000    x27 ( s11) = 0x0000000000000000
+x28 (  t3) = 0x0000000000000000    x29 (  t4) = 0x0000000000000000
+x30 (  t5) = 0x0000000000000000    x31 (  t6) = 0x0000000000000000
 
 pc = 0x0000000080000040
 
@@ -150,7 +165,9 @@ _start:
 (mapachespim) load hello.s
 Assembled hello.s (1096 bytes)
 Loaded hello.s (RISCV)
-...
+Entry point: 0x0000000080000000
+Source info: hello.s (5 address mappings)
+
 (mapachespim) run
 Hello, world!
 Program exited with code 0 after 6 instructions
