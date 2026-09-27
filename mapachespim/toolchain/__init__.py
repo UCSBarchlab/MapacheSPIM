@@ -9,13 +9,14 @@ Supports: RISC-V 64-bit, ARM64, x86-64, MIPS32
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Optional, Union
 
-from .assembler import Assembler
+from ..isa import isa_names
+from ..memory_map import MemoryLayout
+from .assembler import Assembler, AssemblyResult
+from .directives import find_isa_directive
 from .elf_builder import ELFBuilder
-from .memory_map import MEMORY_LAYOUTS, MemoryLayout
 
 __all__ = [
     "assemble",
@@ -24,36 +25,7 @@ __all__ = [
     "Assembler",
     "ELFBuilder",
     "MemoryLayout",
-    "MEMORY_LAYOUTS",
 ]
-
-
-@dataclass
-class AssemblyResult:
-    """Result of an assembly operation."""
-
-    elf_bytes: bytes
-    """The assembled ELF file as bytes."""
-
-    symbols: Dict[str, int] = field(default_factory=dict)
-    """Map of symbol names to addresses."""
-
-    errors: List[str] = field(default_factory=list)
-    """List of error messages (empty if successful)."""
-
-    warnings: List[str] = field(default_factory=list)
-    """List of warning messages."""
-
-    isa: str = ""
-    """The ISA used for assembly."""
-
-    entry_point: int = 0
-    """Entry point address."""
-
-    @property
-    def success(self) -> bool:
-        """Return True if assembly succeeded (no errors)."""
-        return len(self.errors) == 0 and len(self.elf_bytes) > 0
 
 
 def assemble(
@@ -150,7 +122,7 @@ def assemble_file(
 
     # If ISA not specified via flag, check for .isa directive in source
     if isa is None:
-        isa = _detect_isa_from_directive(source)
+        isa = find_isa_directive(source)
         if isa is None:
             return AssemblyResult(
                 elf_bytes=b"",
@@ -177,39 +149,9 @@ def assemble_file(
     return result
 
 
-def _detect_isa_from_directive(source: str) -> Optional[str]:
-    """
-    Look for .isa directive in source code.
-
-    Returns the ISA if found, None otherwise.
-    """
-    from .directives import DirectiveParser
-
-    # Quick scan for .isa directive without full parse
-    for line in source.splitlines():
-        line = line.strip()
-        # Skip empty lines and comments
-        if not line or line.startswith("#") or line.startswith("//") or line.startswith(";"):
-            continue
-        # Check for .isa directive
-        if line.lower().startswith(".isa"):
-            parts = line.split()
-            if len(parts) >= 2:
-                # First token only, so a trailing comment is ignored
-                isa_value = parts[1].lower().replace("-", "_")
-                if isa_value in DirectiveParser.VALID_ISAS:
-                    return isa_value
-        # Stop after first non-empty, non-comment, non-.isa line
-        # (the .isa directive should be at the top of the file)
-        if not line.startswith("."):
-            break
-
-    return None
-
-
 def _isa_not_specified_error() -> str:
     """Generate helpful error message when ISA is not specified."""
-    return """ISA not specified
+    return f"""ISA not specified
 
 Please specify the target architecture using one of:
 
@@ -219,4 +161,4 @@ Please specify the target architecture using one of:
   2. File directive (add at start of file):
      .isa riscv64
 
-Supported ISAs: arm64, mips32, riscv64, x86_64"""
+Supported ISAs: {", ".join(sorted(isa_names()))}"""

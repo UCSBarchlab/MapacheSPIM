@@ -19,7 +19,7 @@ from typing import Dict, List, Tuple
 from mapachespim.toolchain import assemble
 from mapachespim.toolchain.assembler import Assembler
 from mapachespim.toolchain.directives import DirectiveParser, LineType
-from mapachespim.toolchain.memory_map import get_layout
+from mapachespim.memory_map import get_layout
 
 
 

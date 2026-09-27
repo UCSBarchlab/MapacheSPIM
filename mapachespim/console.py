@@ -14,188 +14,11 @@ import sys
 import tempfile
 from pathlib import Path
 from types import FrameType
-from typing import Any, Dict, Generator, List, Optional, Set, Tuple
+from typing import Any, Dict, Generator, List, Optional, Set
 
-from . import Simulator
-
-try:
-    from elftools.elf.elffile import ELFFile
-
-    ELFTOOLS_AVAILABLE = True
-except ImportError:
-    ELFTOOLS_AVAILABLE = False
-
-
-class SourceInfo:
-    """Cached source code information from DWARF debug info"""
-
-    addr_to_line: Dict[int, Tuple[str, int]]
-    source_cache: Dict[str, List[str]]
-    has_debug_info: bool
-    _sorted_addrs: List[int]  # Cached sorted address list for binary search
-
-    def __init__(self) -> None:
-        self.addr_to_line = {}  # address -> (filename, line_number)
-        self.source_cache = {}  # filename -> list of source lines
-        self.has_debug_info = False
-        self._sorted_addrs = []
-
-    def _build_sorted_addrs(self) -> None:
-        """Build sorted address list for efficient lookup"""
-        if not self._sorted_addrs and self.addr_to_line:
-            self._sorted_addrs = sorted(self.addr_to_line.keys())
-
-    def get_location(self, addr: int) -> Optional[Tuple[str, int]]:
-        """Get source location for an address.
-
-        Returns (filename, line_num) or None.
-
-        For addresses within multi-instruction pseudo-ops (like 'la' which expands
-        to auipc+addi), finds the nearest address <= the query address. This is
-        standard debugger behavior - showing the source line that started the
-        current instruction sequence.
-        """
-        # Try exact match first (fast path)
-        if addr in self.addr_to_line:
-            return self.addr_to_line[addr]
-
-        # Build sorted address list if needed
-        self._build_sorted_addrs()
-
-        if not self._sorted_addrs:
-            return None
-
-        # Binary search for largest address <= addr
-        import bisect
-
-        idx = bisect.bisect_right(self._sorted_addrs, addr) - 1
-
-        if idx >= 0:
-            nearest_addr = self._sorted_addrs[idx]
-            return self.addr_to_line[nearest_addr]
-
-        return None
-
-    def get_source_lines(
-        self, filename: str, start_line: int, count: int = 10
-    ) -> Optional[List[Tuple[int, str]]]:
-        """Get source lines from cached file. Returns list of (line_num, text)"""
-        if filename not in self.source_cache:
-            return None
-
-        lines = self.source_cache[filename]
-        result: List[Tuple[int, str]] = []
-
-        # Adjust to 0-indexed
-        start_idx = max(0, start_line - 1)
-        end_idx = min(len(lines), start_idx + count)
-
-        for i in range(start_idx, end_idx):
-            result.append((i + 1, lines[i]))
-
-        return result
-
-
-def _parse_dwarf_line_info(elf_path: str, source_dirs: Optional[List[Path]] = None) -> SourceInfo:
-    """Parse DWARF debug info and return SourceInfo object
-
-    Source files are looked up relative to the current directory, the ELF's
-    directory, and any extra ``source_dirs``.
-    """
-    source_info = SourceInfo()
-
-    if not ELFTOOLS_AVAILABLE:
-        return source_info
-
-    try:
-        with open(elf_path, "rb") as f:
-            elf = ELFFile(f)
-
-            if not elf.has_dwarf_info():
-                return source_info
-
-            dwarf_info = elf.get_dwarf_info()
-            source_info.has_debug_info = True
-
-            # Parse line programs from all compilation units
-            for CU in dwarf_info.iter_CUs():
-                line_program = dwarf_info.line_program_for_CU(CU)
-                if not line_program:
-                    continue
-
-                # Get file entry table
-                file_entries = line_program["file_entry"]
-
-                # Version-specific delta for file indexing
-                if line_program["version"] < 5:
-                    delta = 1
-                else:
-                    delta = 0
-
-                # Iterate through line program entries
-                prev_state = None
-                for entry in line_program.get_entries():
-                    if entry.state is None:
-                        continue
-
-                    state = entry.state
-                    if not state.end_sequence:
-                        # Map this address to source location
-                        if state.file > 0 and state.file <= len(file_entries) + delta:
-                            file_entry = file_entries[state.file - delta]
-                            filename = (
-                                file_entry.name.decode("utf-8")
-                                if isinstance(file_entry.name, bytes)
-                                else file_entry.name
-                            )
-
-                            # Store mapping
-                            source_info.addr_to_line[state.address] = (filename, state.line)
-
-                            # Cache source file content if not already cached
-                            if filename not in source_info.source_cache:
-                                _load_source_file(source_info, filename, elf_path, source_dirs)
-
-                    prev_state = state
-
-            return source_info
-
-    except Exception:
-        # If DWARF parsing fails, just return empty source info
-        return source_info
-
-
-def _load_source_file(
-    source_info: SourceInfo,
-    filename: str,
-    elf_path: str,
-    source_dirs: Optional[List[Path]] = None,
-) -> None:
-    """Try to load source file contents into cache"""
-    # Extra directories (e.g. where an assembled .s file lives) come first
-    search_paths = []
-    for directory in source_dirs or []:
-        search_paths += [directory / filename, directory / Path(filename).name]
-
-    # Then relative to the current directory and the ELF location
-    elf_dir = Path(elf_path).parent
-    search_paths += [
-        Path(filename),  # Absolute or relative to CWD
-        elf_dir / filename,  # Relative to ELF
-        elf_dir / Path(filename).name,  # Just filename in ELF dir
-    ]
-
-    for path in search_paths:
-        try:
-            if path.exists() and path.is_file():
-                with open(path) as f:
-                    source_info.source_cache[filename] = f.read().splitlines()
-                return
-        except Exception:
-            continue
-
-    # If we couldn't find the file, store empty list
-    source_info.source_cache[filename] = []
+from . import Simulator, StopReason
+from .debug_info import SourceInfo, parse_line_info
+from .isa import find_spec, isa_names
 
 
 def _chunk_list(lst: List[Any], n: int) -> Generator[List[Any], None, None]:
@@ -409,7 +232,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         # Parse DWARF debug information
         source_dirs = [source.parent] if source is not None else None
-        self.source_info = _parse_dwarf_line_info(elf_path, source_dirs)
+        self.source_info = parse_line_info(elf_path, source_dirs)
         if self.source_info.has_debug_info:
             num_files = len(self.source_info.source_cache)
             if num_files > 0:
@@ -432,8 +255,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         """Assemble a source file (with debug info) and load the result"""
         from .toolchain import assemble_file
 
-        valid_isas = ("riscv64", "arm64", "x86_64", "mips32")
-        if isa is not None and isa.lower() not in valid_isas:
+        valid_isas = isa_names()
+        if isa is not None and find_spec(isa) is None:
             self.print_error(f'Error: Unknown ISA "{isa}". Use one of: {", ".join(valid_isas)}')
             return False
 
@@ -546,10 +369,13 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         wanted = arg.strip().lower() or None
         if wanted is not None and wanted not in ISA_DIRS:
-            self.print_error(
-                f'Error: Unknown ISA "{arg.strip()}". Use one of: {", ".join(ISA_DIRS)}'
-            )
-            return
+            spec = find_spec(wanted)
+            if spec is None:
+                self.print_error(
+                    f'Error: Unknown ISA "{arg.strip()}". Use one of: {", ".join(ISA_DIRS)}'
+                )
+                return
+            wanted = spec.examples_dir
 
         examples = [e for e in list_examples() if wanted is None or e.isa == wanted]
         if not examples:
@@ -632,7 +458,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
             result = self.sim.step()
             should_terminate, reason = self.sim.check_termination(result)
-            if should_terminate:
+            if should_terminate and reason is not None:
                 self._report_stop(reason, pc)
                 break
 
@@ -718,46 +544,35 @@ class MapacheSPIMConsole(cmd.Cmd):
         # Run with breakpoint/interrupt checking
         self._running = True
         self._interrupted = False
-        steps_executed = 0
-        stopped = False
-
         try:
-            while max_steps == 0 or steps_executed < max_steps:
-                # Check for interrupt
-                if self._interrupted:
-                    self._interrupted = False
-                    self._end_program_output()
-                    print(f"Interrupted after {steps_executed} instructions", file=self.stdout)
-                    stopped = True
-                    break
-
-                # Check for breakpoint (but skip on first iteration to allow continuing from a breakpoint)
-                pc = self.sim.get_pc()
-                if steps_executed > 0 and pc in self.breakpoints:
-                    self._end_program_output()
-                    print(
-                        f"Breakpoint hit at {pc:#018x} after {steps_executed} instructions",
-                        file=self.stdout,
-                    )
-                    stopped = True
-                    break
-
-                result = self.sim.step()
-                steps_executed += 1
-
-                should_terminate, reason = self.sim.check_termination(result)
-                if should_terminate:
-                    self._report_stop(reason, pc, steps_executed)
-                    stopped = True
-                    break
+            result = self.sim.run_until(max_steps or None, stop_before=self._stop_before)
         finally:
             self._running = False
 
         self._end_program_output()
-        if max_steps > 0 and steps_executed >= max_steps and not stopped:
-            print(f"Executed {steps_executed} instructions (max limit reached)", file=self.stdout)
-        if steps_executed > 0 and not self.sim.exited:
+        if result.reason == StopReason.INTERRUPTED:
+            self._interrupted = False
+            print(f"Interrupted after {result.steps} instructions", file=self.stdout)
+        elif result.reason == StopReason.BREAKPOINT:
+            print(
+                f"Breakpoint hit at {result.pc:#018x} after {result.steps} instructions",
+                file=self.stdout,
+            )
+        elif result.reason is not None:
+            self._report_stop(result.reason, result.pc, result.steps)
+        else:
+            print(f"Executed {result.steps} instructions (max limit reached)", file=self.stdout)
+        self._end_program_output()
+        if result.steps > 0 and not self.sim.exited:
             print(f"PC = {self.sim.get_pc():#018x}", file=self.stdout)
+
+    def _stop_before(self, pc: int) -> Optional[StopReason]:
+        """Stop a run at a breakpoint or when the user pressed Ctrl-C"""
+        if self._interrupted:
+            return StopReason.INTERRUPTED
+        if pc in self.breakpoints:
+            return StopReason.BREAKPOINT
+        return None
 
     def do_continue(self, arg: str) -> None:
         """Continue execution after hitting a breakpoint
@@ -833,13 +648,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         except Exception:
             text, instr_hex = "<invalid address>", "????????"
 
-        sym, offset = self.sim.addr_to_symbol(pc)
-        if sym and offset == 0:
-            suffix = f"  <{sym}>"
-        elif sym:
-            suffix = f"  <{sym}+{offset}>"
-        else:
-            suffix = ""
+        symbol = self.sim.symbols.describe(pc)
+        suffix = f"  {symbol}" if symbol else ""
         return f"[{pc:#010x}] 0x{instr_hex}  {text}{suffix}"
 
     def _end_program_output(self) -> None:
@@ -857,17 +667,17 @@ class MapacheSPIMConsole(cmd.Cmd):
             return True
         return False
 
-    def _report_stop(self, reason: Optional[str], pc: int, steps: Optional[int] = None) -> None:
+    def _report_stop(self, reason: StopReason, pc: int, steps: Optional[int] = None) -> None:
         """Print why execution stopped (exit, error, ...)"""
         self._end_program_output()
         after = f" after {steps} instructions" if steps is not None else ""
-        if reason == "syscall_exit":
+        if reason == StopReason.EXIT:
             print(f"Program exited with code {self.sim.exit_code}{after}", file=self.stdout)
-        elif reason == "halt":
+        elif reason == StopReason.HALT:
             print(f"Program halted{after}", file=self.stdout)
-        elif reason == "tohost":
+        elif reason == StopReason.TOHOST:
             print(f"Program completed (tohost){after}", file=self.stdout)
-        elif reason == "error":
+        elif reason == StopReason.ERROR:
             detail = self.sim.last_error or "Execution error"
             print(f"Error: {detail}", file=self.stdout)
             print(f"  {self._format_instruction(pc)}", file=self.stdout)
@@ -890,7 +700,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         elif show_mode == "decimal":
             # Signed decimal, since that is how students think of values
             # like -1 (max 20 digits for 64-bit)
-            bits = 32 if self._is_32bit() else 64
+            bits = self.sim.spec.word_bits if self.sim.get_isa() is not None else 64
             if value & (1 << (bits - 1)):
                 value -= 1 << bits
             sign = "-" if value < 0 else ""
@@ -933,12 +743,6 @@ class MapacheSPIMConsole(cmd.Cmd):
         except (UnicodeEncodeError, LookupError):
             return "*"
         return "★"
-
-    def _is_32bit(self) -> bool:
-        """True if the loaded ISA has 32-bit registers"""
-        from . import ISA
-
-        return self.sim is not None and self.sim.get_isa() == ISA.MIPS
 
     def do_regs(self, arg: str) -> None:
         """Display all registers
@@ -1017,12 +821,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         # Format registers in 2 columns (or 1 if binary is too wide)
         cols = 1 if show_mode == "binary" else 2
         num_regs = self.sim.get_register_count()
-        isa = self.sim.get_isa()
-
-        # Determine register display format based on ISA
-        from . import ISA
-
-        use_x_prefix = isa in (ISA.RISCV, ISA.ARM)
+        prefix = self.sim.spec.registers.number_prefix if self.sim.get_isa() is not None else None
 
         reg_lines = []
         for i in range(0, num_regs, cols):
@@ -1049,13 +848,11 @@ class MapacheSPIMConsole(cmd.Cmd):
                     )
 
                     # Format register name based on ISA
-                    if use_x_prefix:
-                        line_parts.append(
-                            f"x{reg_num:<2} ({abi_name:>4}) = {formatted_value:<{value_width}}{star}"
-                        )
-                    else:
-                        # x86-64: just show the register name (no x prefix)
-                        line_parts.append(f"{abi_name:>3} = {formatted_value:<{value_width}}{star}")
+                    if prefix:  # e.g. "x5 (t0)"
+                        label = f"{prefix}{reg_num:<2} ({abi_name:>4})"
+                    else:  # just the name, e.g. "rax"
+                        label = f"{abi_name:>3}"
+                    line_parts.append(f"{label} = {formatted_value:<{value_width}}{star}")
             reg_lines.append(" ".join(line_parts))
 
         for line in reg_lines:
@@ -1150,44 +947,24 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         # Check if it's a section name (starts with .)
         if addr_or_section.startswith("."):
-            if not ELFTOOLS_AVAILABLE:
-                self.print_error(
-                    "Error: pyelftools not available. Install with: pip install pyelftools"
-                )
-                return
-
             if not self.loaded_file:
                 self.print_error("Error: No program loaded.")
                 return
 
-            # Look up section
-            try:
-                assert self._elf_path is not None  # set whenever loaded_file is
-                with open(self._elf_path, "rb") as f:
-                    elf = ELFFile(f)
-                    section = elf.get_section_by_name(addr_or_section)
-                    if not section:
-                        self.print_error(
-                            f'Error: Section "{addr_or_section}" not found. Use "info sections" to see available sections.'
-                        )
-                        return
-
-                    addr = section["sh_addr"]
-                    section_size = section["sh_size"]
-
-                    if addr == 0:
-                        self.print_error(
-                            f'Error: Section "{addr_or_section}" is not loaded in memory (address is 0).'
-                        )
-                        return
-
-                    # Limit length to section size if not specified
-                    if len(parts) == 1:  # No length given
-                        length = min(length, section_size)
-
-            except Exception as e:
-                self.print_error(f"Error reading section: {e}")
+            section = self.sim.find_section(addr_or_section)
+            if section is None:
+                self.print_error(
+                    f'Error: Section "{addr_or_section}" not found. Use "info sections" to see available sections.'
+                )
                 return
+            if section.address == 0:
+                self.print_error(
+                    f'Error: Section "{addr_or_section}" is not loaded in memory (address is 0).'
+                )
+                return
+            addr = section.address
+            if len(parts) == 1:  # No length given: at most the whole section
+                length = min(length, section.size)
         else:
             # Parse as address or symbol name
             parsed = self._parse_address(addr_or_section)
@@ -1347,10 +1124,6 @@ class MapacheSPIMConsole(cmd.Cmd):
         """
         if not self.loaded_file:
             self.print_error('Error: No program loaded. Use "load <file>" first.')
-            return
-
-        if not ELFTOOLS_AVAILABLE:
-            self.print_error("Error: pyelftools not available.")
             return
 
         if not self.source_info.has_debug_info:
@@ -1531,14 +1304,8 @@ class MapacheSPIMConsole(cmd.Cmd):
                 self._print_block_start()
                 print("Breakpoints:", file=self.stdout)
                 for i, addr in enumerate(sorted(self.breakpoints), 1):
-                    # Try to show symbol name if available
-                    sym, offset = self.sim.addr_to_symbol(addr)
-                    if sym and offset == 0:
-                        print(f"  {i}. {addr:#010x}  <{sym}>", file=self.stdout)
-                    elif sym:
-                        print(f"  {i}. {addr:#010x}  <{sym}+{offset}>", file=self.stdout)
-                    else:
-                        print(f"  {i}. {addr:#010x}", file=self.stdout)
+                    symbol = self.sim.symbols.describe(addr)
+                    print(f"  {i}. {addr:#010x}  {symbol}".rstrip(), file=self.stdout)
                 self._print_block_end()
         elif arg == "symbols" or arg == "sym":
             if not self.loaded_file:
@@ -1564,53 +1331,25 @@ class MapacheSPIMConsole(cmd.Cmd):
                 print("No program loaded.", file=self.stdout)
                 return
 
-            if not ELFTOOLS_AVAILABLE:
-                self.print_error(
-                    "Error: pyelftools not available. Install with: pip install pyelftools"
-                )
-                return
-
-            try:
-                assert self._elf_path is not None  # set whenever loaded_file is
-                with open(self._elf_path, "rb") as f:
-                    elf = ELFFile(f)
-
-                    self._print_block_start()
-                    print("ELF Sections:", file=self.stdout)
-                    print(f"{'Name':<20} {'Address':>18} {'Size':>12}  {'Flags'}", file=self.stdout)
-                    print("-" * 70, file=self.stdout)
-
-                    for section in elf.iter_sections():
-                        name = section.name
-                        addr = section["sh_addr"]
-                        size = section["sh_size"]
-                        flags = section["sh_flags"]
-
-                        # Decode flags
-                        flag_str = ""
-                        if flags & 0x1:  # SHF_WRITE
-                            flag_str += "W"
-                        if flags & 0x2:  # SHF_ALLOC
-                            flag_str += "A"
-                        if flags & 0x4:  # SHF_EXECINSTR
-                            flag_str += "X"
-
-                        # Only show allocated sections (those loaded in memory)
-                        if addr > 0:
-                            print(
-                                f"{name:<20} {addr:#18x} {size:>12}  {flag_str}", file=self.stdout
-                            )
-
-                    print(file=self.stdout)
-                    print("Flags: W=Write, A=Alloc, X=Execute", file=self.stdout)
+            self._print_block_start()
+            print("ELF Sections:", file=self.stdout)
+            print(f"{'Name':<20} {'Address':>18} {'Size':>12}  {'Flags'}", file=self.stdout)
+            print("-" * 70, file=self.stdout)
+            # Only sections loaded in memory are of interest
+            for section in self.sim.get_sections():
+                if section.address > 0:
                     print(
-                        "Use 'mem <section>' to view section contents (e.g., mem .data)",
+                        f"{section.name:<20} {section.address:#18x} {section.size:>12}  "
+                        f"{section.flag_letters}",
                         file=self.stdout,
                     )
-                    self._print_block_end()
-
-            except Exception as e:
-                self.print_error(f"Error reading ELF sections: {e}")
+            print(file=self.stdout)
+            print("Flags: W=Write, A=Alloc, X=Execute", file=self.stdout)
+            print(
+                "Use 'mem <section>' to view section contents (e.g., mem .data)",
+                file=self.stdout,
+            )
+            self._print_block_end()
         else:
             self.print_error("Usage: info [breakpoints|symbols|sections]")
 
@@ -2122,33 +1861,23 @@ def _execute(
         return 1
 
     sim = console.sim
-    steps = 0
-    pc = sim.get_pc()
-    reason: Optional[str] = None
-    while steps < max_steps:
-        pc = sim.get_pc()
-        result = sim.step()
-        steps += 1
-        done, reason = sim.check_termination(result)
-        if done:
-            break
-    else:
-        reason = None
+    result = sim.run_until(max_steps)
+    reason = result.reason
 
     # Diagnostics go to stderr so stdout contains only the program's output
     if sim.output_needs_newline:
         sys.stdout.flush()
         print(file=sys.stderr)
     if verbose:
-        print(f"Program completed in {steps} steps", file=sys.stderr)
+        print(f"Program completed in {result.steps} steps", file=sys.stderr)
 
-    if reason == "syscall_exit":
+    if reason == StopReason.EXIT:
         return sim.exit_code or 0
-    if reason in ("halt", "tohost"):
+    if reason in (StopReason.HALT, StopReason.TOHOST):
         return 0
-    if reason == "error":
+    if reason == StopReason.ERROR:
         print(f"Error: {sim.last_error or 'execution error'}", file=sys.stderr)
-        print(f"  {console._format_instruction(pc)}", file=sys.stderr)
+        print(f"  {console._format_instruction(result.pc)}", file=sys.stderr)
         return 1
     print(
         f"Error: program did not exit within {max_steps} instructions "
@@ -2175,7 +1904,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--isa",
-        choices=["riscv64", "arm64", "x86_64", "mips32"],
+        choices=isa_names(),
         help="ISA of an assembly file without an .isa directive",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")

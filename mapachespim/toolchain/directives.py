@@ -12,17 +12,12 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Callable, Dict, List, Literal, Optional, Tuple
 
+from ..isa import AsmDialect, canonical_isa, find_spec, isa_names
 from .expr import ExpressionError, UndefinedSymbol, evaluate
 
+__all__ = ["DirectiveParser", "ParsedLine", "SectionData", "canonical_isa", "find_isa_directive"]
+
 ALIGN_DIRECTIVES = ("align", "balign", "p2align")
-
-_ISA_ALIASES = {"riscv": "riscv64", "aarch64": "arm64", "x64": "x86_64", "mips": "mips32"}
-
-
-def canonical_isa(isa: str) -> str:
-    """The canonical name for an ISA or one of its aliases (e.g. mips -> mips32)."""
-    isa = isa.lower().replace("-", "_")
-    return _ISA_ALIASES.get(isa, isa)
 
 
 # Other directives that emit bytes (besides the DATA_SIZES ones)
@@ -62,13 +57,13 @@ class ParsedLine:
     """Arguments to the directive."""
 
     instruction: Optional[str] = None
+    """Instruction mnemonic and operands."""
 
     reorder: bool = True
     """MIPS: whether the assembler fills delay slots (.set reorder, the default)."""
 
     syntax: str = "auto"
     """x86-64: "att", "intel", or "auto" (from .att_syntax / .intel_syntax)."""
-    """Instruction mnemonic and operands."""
 
 
 @dataclass
@@ -163,14 +158,8 @@ class DirectiveParser:
         "mips1", "mips2", "volatile", "novolatile", "move", "nomove",
     }  # fmt: skip
 
-    # Valid ISA values for .isa directive
-    VALID_ISAS = {"riscv64", "arm64", "x86_64", "mips32"}
-
-    # Big-endian ISAs (default is little-endian)
-    BIG_ENDIAN_ISAS = {"mips32"}
-
-    # ISAs whose GNU assembler aligns .half/.word/.dword automatically
-    AUTO_ALIGN_ISAS = {"mips32"}
+    # Valid ISA values for .isa directive (aliases are accepted too)
+    VALID_ISAS = frozenset(isa_names())
 
     def __init__(self, isa: Optional[str] = None) -> None:
         """
@@ -202,19 +191,24 @@ class DirectiveParser:
     def _effective_isa(self) -> Optional[str]:
         return self.target_isa or self.isa
 
+    @property
+    def _dialect(self) -> AsmDialect:
+        """GNU as behaviors of the target ISA (the defaults if it is not known yet)."""
+        spec = find_spec(self._effective_isa or "")
+        return spec.asm if spec is not None else AsmDialect()
+
     def _get_endianness(self) -> Literal["little", "big"]:
         """Return byte order for data directives based on ISA."""
-        if self._effective_isa in self.BIG_ENDIAN_ISAS:
-            return "big"
-        return "little"
+        spec = find_spec(self._effective_isa or "")
+        return spec.byteorder if spec is not None else "little"
 
     def data_size(self, directive: str) -> Optional[int]:
         """Bytes per value for a data directive like .word, or None.
 
         As in GNU as, .word (and .value) is 2 bytes on x86 but 4 elsewhere.
         """
-        if self._effective_isa == "x86_64" and directive in ("word", "value"):
-            return 2
+        if directive in ("word", "value"):
+            return self._dialect.word_size
         return DATA_SIZES.get(directive)
 
     def alignment(self, directive: str, value: int) -> int:
@@ -223,7 +217,7 @@ class DirectiveParser:
         As in GNU as, .align takes a power of two on RISC-V, MIPS, and ARM,
         but a byte count on x86.
         """
-        if directive == "balign" or (directive == "align" and self._effective_isa == "x86_64"):
+        if directive == "balign" or (directive == "align" and self._dialect.align_in_bytes):
             return value
         return 1 << value
 
@@ -402,14 +396,12 @@ class DirectiveParser:
 
     def _set_isa_from_line(self, line: str) -> None:
         """Notice '.isa' early, since comment rules depend on the ISA."""
-        stripped = line.strip()
-        if stripped.lower().startswith(".isa") and len(stripped.split()) > 1:
-            value = stripped.split()[1].lower().replace("-", "_")
-            if value in self.VALID_ISAS:
-                self.isa = value
+        value = _isa_directive_value(line)
+        if value is not None:
+            self.isa = value
 
     def _split_line(self, line: str, in_block: bool) -> Tuple[List[str], bool]:
-        arm = self._effective_isa == "arm64"
+        hash_only_at_start = self._dialect.hash_comments_only_at_line_start
         pieces: List[str] = []
         current: List[str] = []
         i = 0
@@ -457,7 +449,7 @@ class DirectiveParser:
                 break
             if ch == "#":
                 at_line_start = not pieces and not "".join(current).strip()
-                if not arm or at_line_start:
+                if not hash_only_at_start or at_line_start:
                     break
             if ch == ";":
                 pieces.append("".join(current))
@@ -634,14 +626,14 @@ class DirectiveParser:
                     f"(one of: {', '.join(sorted(self.VALID_ISAS))})"
                 )
                 return
-            isa_value = args[0].lower().replace("-", "_")
-            if isa_value not in self.VALID_ISAS:
+            spec = find_spec(args[0])
+            if spec is None:
                 self.errors.append(
                     f"Line {parsed.line_number}: Invalid ISA '{args[0]}'. "
                     f"Valid options: {', '.join(sorted(self.VALID_ISAS))}"
                 )
                 return
-            self.isa = isa_value
+            self.isa = spec.name
             return
 
         # Section directives
@@ -699,7 +691,7 @@ class DirectiveParser:
         # Like GNU as for MIPS, align .half/.word/.dword to their size, and
         # move labels that were waiting for this data along with it
         size = self.data_size(directive or "")
-        if size is not None and size > 1 and self._effective_isa in self.AUTO_ALIGN_ISAS:
+        if size is not None and size > 1 and self._dialect.auto_align_data:
             padding = (size - section.current_offset % size) % size
             if padding:
                 section.data.extend(b"\x00" * padding)
@@ -813,3 +805,39 @@ class DirectiveParser:
                 instructions.append((line.line_number, line.instruction, line.label))
 
         return instructions
+
+
+def emits_data(line: ParsedLine) -> bool:
+    """Whether ``line`` is a data directive such as .byte or .fill."""
+    directive = line.directive or ""
+    return line.line_type == LineType.DIRECTIVE and (
+        directive in DATA_SIZES or directive in BYTE_DIRECTIVES or directive == "value"
+    )
+
+
+def _isa_directive_value(line: str) -> Optional[str]:
+    """The canonical ISA named by an '.isa' directive on this line, if valid."""
+    parts = line.split()
+    if len(parts) < 2 or parts[0].lower() != ".isa":
+        return None
+    # First token only, so a trailing comment is ignored
+    spec = find_spec(parts[1])
+    return spec.name if spec is not None else None
+
+
+def find_isa_directive(source: str) -> Optional[str]:
+    """The ISA named by an '.isa' directive at the top of ``source``, if any.
+
+    Only the leading comments and directives are searched: the directive
+    belongs at the start of the file.
+    """
+    for line in source.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith(("#", "//", ";")):
+            continue
+        value = _isa_directive_value(stripped)
+        if value is not None:
+            return value
+        if not stripped.startswith("."):
+            break
+    return None

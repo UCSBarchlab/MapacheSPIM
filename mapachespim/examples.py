@@ -14,13 +14,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional
 
+from .isa import ISA_SPECS
+
 # ISA directory name -> display name, in the order examples are listed
-ISA_DIRS = {
-    "riscv": "RISC-V 64-bit",
-    "mips": "MIPS32",
-    "arm": "ARM64",
-    "x86_64": "x86-64",
-}
+ISA_DIRS = {spec.examples_dir: spec.display_name for spec in ISA_SPECS}
 
 SOURCE_SUFFIXES = (".s", ".S", ".asm")
 
@@ -54,7 +51,7 @@ def examples_dir() -> Optional[Path]:
     """Directory containing the bundled examples, or None if unavailable."""
     package_dir = Path(__file__).resolve().parent
     for candidate in (package_dir / "examples", package_dir.parent / "examples"):
-        if (candidate / "riscv").is_dir():
+        if (candidate / ISA_SPECS[0].examples_dir).is_dir():
             return candidate
     return None
 

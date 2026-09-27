@@ -201,8 +201,8 @@ class TestMemoryAccess(unittest.TestCase):
 
     def test_write_and_read_memory(self):
         """Test writing then reading memory"""
-        # Write to a safe location (high memory)
-        addr = 0x83F00000
+        # Write to the (mapped, unused) start of the data area
+        addr = self.sim.layout.data_base
         test_data = b'\x01\x02\x03\x04\x05\x06\x07\x08'
 
         self.sim.write_mem(addr, test_data)
@@ -212,7 +212,7 @@ class TestMemoryAccess(unittest.TestCase):
 
     def test_write_string_to_memory(self):
         """Test writing string (auto-converts to bytes)"""
-        addr = 0x83F00000
+        addr = self.sim.layout.data_base
         test_str = "Hello"
 
         self.sim.write_mem(addr, test_str)

@@ -7,25 +7,22 @@ Assembles source code into machine code for RISC-V, ARM64, x86-64, and MIPS32.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from types import ModuleType
-from typing import Any, Callable, Dict, Iterator, List, Mapping, Optional, Set, Tuple
+from typing import Callable, Dict, Iterator, List, Mapping, Optional, Tuple
 
-from . import arm64, mips, riscv, x86
+from ..isa import get_spec
 from .directives import (
     ALIGN_DIRECTIVES,
-    BYTE_DIRECTIVES,
-    DATA_SIZES,
     INTERNAL_LABEL_PREFIXES,
-    POOL_LABEL_PREFIX,
     DirectiveParser,
     LineType,
     ParsedLine,
     SectionData,
+    emits_data,
 )
 from .dwarf import DWARFv2Builder
 from .elf_builder import STB_GLOBAL, STB_LOCAL, STT_FUNC, STT_NOTYPE, ELFBuilder, Section, Symbol
 from .expr import EncodeError, ExpressionError, UndefinedSymbol, evaluate
-from .memory_map import get_layout
+from .targets import Target, target_for
 
 
 def _lookup(values: Dict[str, int]) -> Callable[[str], int]:
@@ -110,8 +107,10 @@ class Assembler:
     Multi-architecture assembler.
 
     Each ISA has a pure-Python encoder (riscv.py, mips.py, arm64.py,
-    x86.py) that produces the same bytes as GNU as, plus a shared directive
-    parser for GNU-as compatible source files.
+    x86.py) that produces the same bytes as GNU as, driven through a
+    :class:`~mapachespim.toolchain.targets.Target`, plus a shared directive
+    parser for GNU-as compatible source files. This class is the
+    ISA-independent part: layout, label resolution, and ELF output.
 
     Example:
         >>> asm = Assembler("riscv64")
@@ -127,37 +126,6 @@ class Assembler:
         True
     """
 
-    # ISA configuration mapping
-    ISA_CONFIG: Dict[str, Dict[str, Any]] = {
-        "riscv64": {
-            "instr_size": 4,
-        },
-        "riscv": {
-            "instr_size": 4,
-        },
-        "arm64": {
-            "instr_size": 4,
-        },
-        "aarch64": {
-            "instr_size": 4,
-        },
-        "x86_64": {
-            "instr_size": None,  # Variable length
-        },
-        "x86-64": {
-            "instr_size": None,
-        },
-        "x64": {
-            "instr_size": None,
-        },
-        "mips32": {
-            "instr_size": 4,
-        },
-        "mips": {
-            "instr_size": 4,
-        },
-    }
-
     def __init__(self, isa: str):
         """
         Initialize assembler for a specific ISA.
@@ -168,86 +136,12 @@ class Assembler:
         Raises:
             ValueError: If ISA is not supported.
         """
-        isa_lower = isa.lower().replace("-", "_")
-        if isa_lower not in self.ISA_CONFIG:
-            valid = sorted(set(k for k in self.ISA_CONFIG.keys() if "_" not in k))
-            raise ValueError(f"Unknown ISA: {isa!r}. Valid: {', '.join(valid)}")
-
-        self.isa = isa_lower
-        self._config = self.ISA_CONFIG[isa_lower]
-        self._layout = get_layout(isa_lower)
+        self.spec = get_spec(isa)
+        self.isa = self.spec.name
+        self._layout = self.spec.layout
         # Replaced for each assemble() call; also used by the layout passes
-        self._parser = DirectiveParser(isa=isa_lower)
-        self._long_jumps: Set[int] = set()  # x86 jumps that need rel32
-        self._align_after_data: Set[int] = set()  # x86 code alignment after data
-        self._absolute_symbols: Set[str] = set()  # names of .equ constants
-
-    @staticmethod
-    def _add_literal_pools(section: SectionData) -> None:
-        """Turn ARM64 'ldr x0, =value' into loads from a literal pool.
-
-        As in GNU as, each load reads a pool entry placed at the next
-        .ltorg/.pool directive or at the end of the section. Within a pool,
-        equal values share one entry; 4-byte entries come first, then 8-byte
-        entries, each group aligned to its size.
-        """
-        lines: List[ParsedLine] = []
-        pool: Dict[Tuple[object, ...], Tuple[str, str, int]] = {}  # key -> (label, expr, size)
-        counter = 0
-
-        def dump(line_number: int) -> None:
-            for size in (4, 8):
-                entries = [(label, expr) for label, expr, sz in pool.values() if sz == size]
-                if not entries:
-                    continue
-                lines.append(
-                    ParsedLine(
-                        line_number,
-                        LineType.DIRECTIVE,
-                        "",
-                        directive="balign",
-                        directive_args=[str(size), "0"],  # zeros, not nops
-                    )
-                )
-                for label, expr in entries:
-                    lines.append(
-                        ParsedLine(
-                            line_number,
-                            LineType.DIRECTIVE,
-                            "",
-                            label=label,
-                            directive="word" if size == 4 else "dword",
-                            directive_args=[expr],
-                        )
-                    )
-            pool.clear()
-
-        last_line = 0
-        for line in section.lines:
-            last_line = line.line_number
-            if line.line_type == LineType.INSTRUCTION and line.instruction:
-                found = arm64.literal_load(line.instruction)
-                if found is not None:
-                    mnemonic, rt, expr = found
-                    try:
-                        size = arm64.literal_size(mnemonic, rt)
-                    except EncodeError as e:
-                        raise EncodeError(f"Line {line.line_number}: {e}")
-                    value = arm64.constant_value(expr)
-                    key: Tuple[object, ...] = (
-                        ("value", value & ((1 << (8 * size)) - 1), size)
-                        if value is not None
-                        else ("expr", expr.replace(" ", ""), size)
-                    )
-                    if key not in pool:
-                        counter += 1
-                        pool[key] = (f"{POOL_LABEL_PREFIX}{counter}", expr, size)
-                    line.instruction = f"{mnemonic} {rt}, {pool[key][0]}"
-            lines.append(line)
-            if line.line_type == LineType.DIRECTIVE and line.directive in ("ltorg", "pool"):
-                dump(line.line_number)
-        dump(last_line)
-        section.lines = lines
+        self._parser = DirectiveParser(isa=self.isa)
+        self._target: Target = target_for(self.isa, self._parser)
 
     @staticmethod
     def _resolve_constants(
@@ -272,26 +166,6 @@ class Assembler:
                 del pending[name]
                 progress = resolved_any = True
         return resolved_any
-
-    @staticmethod
-    def _alignments_after_data(section: Optional[SectionData]) -> Set[int]:
-        """Alignment directives in code whose last preceding item is data.
-
-        GNU as pads x86 code with a one-byte nop first in that case, since
-        the data might be an incomplete instruction.
-        """
-        found: Set[int] = set()
-        after_data = False
-        for line in section.lines if section else []:
-            if line.line_type == LineType.INSTRUCTION and line.instruction:
-                after_data = False
-            elif line.line_type == LineType.DIRECTIVE:
-                if line.directive in ALIGN_DIRECTIVES:
-                    if after_data:
-                        found.add(id(line))
-                elif Assembler._emits_data(line):
-                    after_data = True
-        return found
 
     def _text_directive_bytes(
         self, line: ParsedLine, addr: int, base: int, labels: Dict[str, int], strict: bool
@@ -318,53 +192,11 @@ class Assembler:
         is_align = line.directive in ALIGN_DIRECTIVES
         args = line.directive_args
         explicit_fill = len(args) > 1 and bool(args[1])
-        if self._builtin_encoder is x86 and explicit_fill:
-            # GNU as treats a fill of 0x90 (nop) like no fill: best nops
-            explicit_fill = evaluate(args[1], resolve) & 0xFF != 0x90
+        if explicit_fill:
+            explicit_fill = self._target.is_explicit_fill(evaluate(args[1], resolve))
         if not is_align or explicit_fill or not data:
             return data
-        # Pad code with nops, as GNU as does (MIPS's nop is all zeros)
-        if self._is_riscv:
-            # As GNU as's riscv_make_nops: a zero byte if odd, at most one
-            # 2-byte c.nop, then 4-byte nops
-            head = bytes(len(data) % 2) + (b"\x01\x00" if len(data) % 4 >= 2 else b"")
-            data = head + (0x00000013).to_bytes(4, "little") * (len(data) // 4)
-        elif self._builtin_encoder is arm64:
-            misaligned = len(data) % 4
-            data = bytes(misaligned) + (0xD503201F).to_bytes(4, "little") * (len(data) // 4)
-        elif self._builtin_encoder is x86:
-            data = x86.nop_padding(len(data), id(line) in self._align_after_data)
-        return data
-
-    def _line_options(self, line: ParsedLine) -> Dict[str, Any]:
-        """Per-line encoder options (MIPS: .set reorder / noreorder; x86-64:
-        syntax, which symbols are constants, and jump size)."""
-        if self.isa in ("mips32", "mips"):
-            return {"reorder": line.reorder}
-        if self._builtin_encoder is x86:
-            return {
-                "syntax": line.syntax,
-                "absolute_symbols": self._absolute_symbols,
-                "long_jump": id(line) in self._long_jumps,
-            }
-        return {}
-
-    def _instruction_padding(self, addr: int, after_data: bool) -> int:
-        """Zero bytes GNU as puts before an instruction at ``addr``.
-
-        ARM64 aligns an instruction to 4 bytes when it directly follows data
-        (GNU as does this when switching from data to code; an alignment
-        directive in between counts as code).
-        """
-        return -addr % 4 if after_data and self._builtin_encoder is arm64 else 0
-
-    @staticmethod
-    def _emits_data(line: ParsedLine) -> bool:
-        """Whether ``line`` is a data directive such as .byte or .fill."""
-        directive = line.directive or ""
-        return line.line_type == LineType.DIRECTIVE and (
-            directive in DATA_SIZES or directive in BYTE_DIRECTIVES or directive == "value"
-        )
+        return self._target.code_padding(len(data), line)
 
     def _is_real_alignment(self, line: ParsedLine, labels: Dict[str, int]) -> bool:
         """Whether ``line`` aligns to more than 1 byte (even if it inserts
@@ -376,21 +208,6 @@ class Assembler:
         except (ExpressionError, IndexError):
             return False
         return self._parser.alignment(line.directive or "", value) > 1
-
-    @property
-    def _is_riscv(self) -> bool:
-        return self.isa in ("riscv64", "riscv")
-
-    @property
-    def _builtin_encoder(self) -> ModuleType:
-        """The pure-Python encoder module for this ISA."""
-        if self._is_riscv:
-            return riscv
-        if self.isa in ("mips32", "mips"):
-            return mips
-        if self.isa in ("arm64", "aarch64"):
-            return arm64
-        return x86
 
     def assemble(
         self,
@@ -416,15 +233,12 @@ class Assembler:
         # Parse source
         parser = DirectiveParser(isa=self.isa)
         self._parser = parser
-        self._long_jumps = set()
+        self._target = target_for(self.isa, parser)
         sections = parser.parse(source)
-        self._absolute_symbols = set(parser.constants) | set(parser.deferred_constants)
-        self._align_after_data = self._alignments_after_data(sections.get(".text"))
-        if self.isa in ("arm64", "aarch64") and ".text" in sections:
-            try:
-                self._add_literal_pools(sections[".text"])
-            except EncodeError as e:
-                result.errors.append(str(e))
+        try:
+            self._target.prepare(sections)
+        except EncodeError as e:
+            result.errors.append(str(e))
 
         result.errors.extend(parser.errors)
         result.warnings.extend(parser.warnings)
@@ -545,36 +359,26 @@ class Assembler:
         # Add sections (standard ones first, then any custom sections)
         ordered = [n for n in (".text", ".data", ".rodata", ".bss") if n in sections]
         ordered += [n for n in sections if n not in ordered]
+        section_index: Dict[str, int] = {}  # ELF section header index
         for sect_name in ordered:
-            if sect_name in sections:
-                sect_data = sections[sect_name]
-                if sect_data.data or sect_name == ".text":
-                    base = section_bases.get(sect_name, self._layout.text_base)
-                    builder.add_section(
-                        Section(
-                            name=sect_name,
-                            data=bytes(sect_data.data),
-                            address=base,
-                        )
-                    )
+            sect_data = sections[sect_name]
+            if sect_data.data or sect_name == ".text":
+                base = section_bases.get(sect_name, self._layout.text_base)
+                builder.add_section(
+                    Section(name=sect_name, data=bytes(sect_data.data), address=base)
+                )
+                section_index[sect_name] = len(builder.sections)
 
-        # Add symbols
+        # Add symbols, each in the section that defines it
         for name, addr in all_labels.items():
-            is_global = name in parser.global_symbols
-            # Determine section index (simplified)
-            section_idx = 1  # Assume .text is section 1
-            for i, (sn, _) in enumerate(sections.items()):
-                if sn == ".text":
-                    section_idx = i + 1
-                    break
-
+            defined_in = next((n for n, d in sections.items() if name in d.labels), "")
             builder.add_symbol(
                 Symbol(
                     name=name,
                     address=addr,
                     sym_type=STT_FUNC if name == entry_symbol else STT_NOTYPE,
-                    binding=STB_GLOBAL if is_global else STB_LOCAL,
-                    section_index=section_idx,
+                    binding=STB_GLOBAL if name in parser.global_symbols else STB_LOCAL,
+                    section_index=section_index.get(defined_in, 0),
                 )
             )
 
@@ -589,7 +393,7 @@ class Assembler:
 
             # Determine address size and instruction length
             addr_size = 8 if self._layout.is_64bit else 4
-            min_instr_len = self._config.get("instr_size") or 1
+            min_instr_len = self.spec.min_instruction_size
 
             # Build DWARF sections
             dwarf = DWARFv2Builder(
@@ -657,28 +461,13 @@ class Assembler:
                     if line.label in labels:
                         stretch = addr - labels[line.label]
                 if line.line_type == LineType.INSTRUCTION and line.instruction:
-                    addr += self._instruction_padding(addr, after_data)
+                    addr += self._target.padding_before_instruction(addr, after_data)
                     after_data = False
-                    # x86 jumps start short (rel8) and grow to rel32 once, for
-                    # good, when the target is out of range (GNU's relaxation)
-                    if (
-                        self._builtin_encoder is x86
-                        and id(line) not in self._long_jumps
-                        and x86.is_relaxable(line.instruction)
-                        and not x86.short_jump_fits(
-                            line.instruction,
-                            addr,
-                            _RelaxView(data_labels, labels, new_labels, stretch),
-                        )
-                    ):
-                        self._long_jumps.add(id(line))
-                        grew = True
-                        grown = True
-                    else:
-                        grown = False
-                    size = self._builtin_encoder.instruction_size(
-                        line.instruction, known, addr, **self._line_options(line)
+                    grown = self._target.can_relax and self._target.relax(
+                        line, addr, _RelaxView(data_labels, labels, new_labels, stretch)
                     )
+                    grew = grew or grown
+                    size = self._target.size(line, addr, known)
                     if grown:
                         stretch += size - 2
                     addr += size
@@ -689,7 +478,7 @@ class Assembler:
                         )
                     except ExpressionError:
                         pass  # reported when the section is assembled
-                    if self._emits_data(line):
+                    if emits_data(line):
                         after_data = True
                     elif self._is_real_alignment(line, known):
                         after_data = False
@@ -734,7 +523,7 @@ class Assembler:
                     continue
                 code.extend(data)
                 current_addr += len(data)
-                if self._emits_data(line):
+                if emits_data(line):
                     after_data = True
                 elif self._is_real_alignment(line, labels):
                     after_data = False
@@ -744,7 +533,7 @@ class Assembler:
             if line.line_type != LineType.INSTRUCTION or not line.instruction:
                 continue
 
-            padding = self._instruction_padding(current_addr, after_data)
+            padding = self._target.padding_before_instruction(current_addr, after_data)
             after_data = False
             code.extend(bytes(padding))
             current_addr += padding
@@ -752,12 +541,8 @@ class Assembler:
             # Record debug line info before assembling
             debug_lines.append((current_addr, line.line_number))
 
-            instr = line.instruction
-
             try:
-                encoding = self._builtin_encoder.encode(
-                    instr, current_addr, labels, **self._line_options(line)
-                )
+                encoding = self._target.encode(line, current_addr, labels)
             except EncodeError as e:
                 errors.append(f"Line {line.line_number}: {e} - {line.instruction}")
                 continue
@@ -791,6 +576,6 @@ class Assembler:
             ValueError: If assembly fails.
         """
         try:
-            return bytes(self._builtin_encoder.encode(instr, address, {}))
+            return bytes(self._target.encoder.encode(instr, address, {}))
         except EncodeError as e:
             raise ValueError(f"Assembly error: {e}")

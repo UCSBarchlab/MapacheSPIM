@@ -3,14 +3,13 @@ ISA-specific memory layouts for MapacheSPIM.
 
 Each ISA has different conventional memory layouts for bare-metal programs.
 The assembler places sections at these addresses and the simulator uses the
-same values for its default memory map and initial stack pointer, so this
-module is the single source of truth for both.
+same values for its default memory map and initial stack pointer. Each
+layout is attached to its ISA in :mod:`mapachespim.isa`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict
 
 
 @dataclass(frozen=True)
@@ -97,26 +96,13 @@ MIPS32_LAYOUT = MemoryLayout(
     is_little_endian=False,  # MIPS is big-endian in MapacheSPIM
 )
 
-# Map of ISA names to layouts
-MEMORY_LAYOUTS: Dict[str, MemoryLayout] = {
-    "riscv64": RISCV64_LAYOUT,
-    "riscv": RISCV64_LAYOUT,  # Alias
-    "arm64": ARM64_LAYOUT,
-    "aarch64": ARM64_LAYOUT,  # Alias
-    "x86_64": X86_64_LAYOUT,
-    "x86-64": X86_64_LAYOUT,  # Alias
-    "x64": X86_64_LAYOUT,  # Alias
-    "mips32": MIPS32_LAYOUT,
-    "mips": MIPS32_LAYOUT,  # Alias
-}
-
 
 def get_layout(isa: str) -> MemoryLayout:
     """
     Get the memory layout for an ISA.
 
     Args:
-        isa: ISA name (e.g., "riscv64", "arm64", "x86_64", "mips32")
+        isa: ISA name or alias (e.g., "riscv64", "arm64", "x86_64", "mips32")
 
     Returns:
         MemoryLayout for the specified ISA.
@@ -124,8 +110,6 @@ def get_layout(isa: str) -> MemoryLayout:
     Raises:
         ValueError: If ISA is not recognized.
     """
-    isa_lower = isa.lower().replace("-", "_")
-    if isa_lower not in MEMORY_LAYOUTS:
-        valid = sorted(set(MEMORY_LAYOUTS.keys()))
-        raise ValueError(f"Unknown ISA: {isa!r}. Valid options: {', '.join(valid)}")
-    return MEMORY_LAYOUTS[isa_lower]
+    from .isa import get_spec  # the registry imports this module
+
+    return get_spec(isa).layout

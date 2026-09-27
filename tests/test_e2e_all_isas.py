@@ -19,7 +19,7 @@ from io import StringIO
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from mapachespim import create_simulator, detect_elf_isa, ISA, StepResult
+from mapachespim import create_simulator, detect_elf_isa, ISA, StepResult, StopReason
 from mapachespim.console import MapacheSPIMConsole
 
 
@@ -594,211 +594,57 @@ class TestAllProgramsComplete(unittest.TestCase):
 
 
 class TestGuessGameAllISAs(unittest.TestCase):
-    """Test guess_game interactive program on all ISAs.
+    """Test the interactive guess_game example on all ISAs.
 
-    The guess_game is an interactive number guessing game that:
-    1. Prints welcome messages
-    2. Reads user input (syscall 5 = read_int)
-    3. Compares guess to secret number (42)
-    4. Exits when correct
-
-    Since it's interactive, we test:
-    - Program loads and starts correctly
-    - Required symbols exist
-    - Program reaches input syscall
-    - With correct input injected, completes successfully
+    The program prints a banner, reads guesses with the read_int syscall,
+    says whether each is too high or too low, and exits when the guess is
+    the secret number (42). Input comes from ``sim.stdin`` and output goes
+    to ``sim.stdout``, so the real syscall path is exercised on every ISA.
     """
 
-    GUESS_GAME_EXAMPLES = [
-        ("examples/riscv/guess_game/guess_game", "RISCV"),
-        ("examples/arm/guess_game/guess_game", "ARM"),
-        ("examples/x86_64/guess_game/guess_game", "X86_64"),
-        ("examples/mips/guess_game/guess_game", "MIPS"),
-    ]
+    ISAS = ["riscv", "arm", "x86_64", "mips"]
 
-    def _get_syscall_regs(self, isa_name: str):
-        """Get syscall register mappings for ISA."""
-        if isa_name == "X86_64":
-            return (0, 7, 0)  # rax=syscall#, rdi=arg0, return in rax
-        elif isa_name == "MIPS":
-            return (2, 4, 2)  # $v0=syscall#, $a0=arg0, return in $v0
-        elif isa_name == "ARM":
-            return (8, 0, 0)  # x8=syscall#, x0=arg0, return in x0
-        else:  # RISCV
-            return (17, 10, 10)  # a7=syscall#, a0=arg0, return in a0
-
-    def _run_with_input(self, sim, input_value: int, isa_name: str, max_steps: int = 5000):
-        """Run program, injecting input when read_int syscall is hit.
-
-        Note: We handle syscalls manually instead of using check_termination()
-        because check_termination() calls _handle_syscall() which uses input().
-        """
-        syscall_reg, _, result_reg = self._get_syscall_regs(isa_name)
-
-        for step in range(max_steps):
-            result = sim.step()
-
-            if result == StepResult.SYSCALL:
-                syscall_num = sim.get_reg(syscall_reg)
-                if syscall_num == 5:  # read_int - inject our value
-                    # For ARM64, result_reg is 0 (x0) which is writable
-                    if isa_name == "ARM":
-                        sim._uc.reg_write(sim._config.get_gpr_reg(result_reg), input_value)
-                    else:
-                        sim.set_reg(result_reg, input_value)
-                elif syscall_num == 10 or syscall_num == 93:  # exit
-                    return step + 1, "syscall_exit"
-                # For other syscalls (like print_string), let them pass
-                # They don't need handling since we're not checking output
-
-            elif result == StepResult.HALT:
-                return step + 1, "halt"
-            elif result == StepResult.ERROR:
-                return step + 1, "error"
-
-        return max_steps, "timeout"
-
-    def test_riscv_guess_game_loads(self):
-        """RISC-V guess_game loads and has required symbols"""
-        elf = Path("examples/riscv/guess_game/guess_game")
+    def _play(self, isa: str, guesses):
+        elf = Path(f"examples/{isa}/guess_game/guess_game")
         if not elf.exists():
             self.skipTest(f"Not found: {elf}")
-
         sim = create_simulator(str(elf))
-        symbols = sim.get_symbols()
+        sim.stdin = StringIO("".join(f"{g}\n" for g in guesses))
+        sim.stdout = StringIO()
+        result = sim.run_until(20000)
+        return sim, result, sim.stdout.getvalue()
 
-        # Verify required symbols exist
-        self.assertIn("secret", symbols, "Should have 'secret' symbol")
-        self.assertIn("welcome", symbols, "Should have 'welcome' symbol")
-        self.assertIn("_start", symbols, "Should have '_start' symbol")
+    def test_guess_game_loads(self):
+        """guess_game loads and has the symbols it uses"""
+        for isa in self.ISAS:
+            with self.subTest(isa=isa):
+                elf = Path(f"examples/{isa}/guess_game/guess_game")
+                if not elf.exists():
+                    self.skipTest(f"Not found: {elf}")
+                symbols = create_simulator(str(elf)).get_symbols()
+                self.assertIn("secret", symbols)
+                self.assertIn("welcome", symbols)
 
-    def test_arm_guess_game_loads(self):
-        """ARM64 guess_game loads and has required symbols"""
-        elf = Path("examples/arm/guess_game/guess_game")
-        if not elf.exists():
-            self.skipTest(f"Not found: {elf}")
+    def test_correct_guess(self):
+        """The game exits cleanly after a correct first guess"""
+        for isa in self.ISAS:
+            with self.subTest(isa=isa):
+                sim, result, output = self._play(isa, [42])
+                self.assertEqual(result.reason, StopReason.EXIT, sim.last_error)
+                self.assertEqual(sim.exit_code, 0)
+                self.assertIn("NUMBER GUESSING GAME", output)
+                self.assertIn("CORRECT", output)
+                self.assertIn("1 try!", output)
 
-        sim = create_simulator(str(elf))
-        symbols = sim.get_symbols()
-
-        self.assertIn("secret", symbols, "Should have 'secret' symbol")
-        self.assertIn("welcome", symbols, "Should have 'welcome' symbol")
-
-    def test_x86_guess_game_loads(self):
-        """x86-64 guess_game loads and has required symbols"""
-        elf = Path("examples/x86_64/guess_game/guess_game")
-        if not elf.exists():
-            self.skipTest(f"Not found: {elf}")
-
-        sim = create_simulator(str(elf))
-        symbols = sim.get_symbols()
-
-        self.assertIn("secret", symbols, "Should have 'secret' symbol")
-        self.assertIn("welcome", symbols, "Should have 'welcome' symbol")
-
-    def test_mips_guess_game_loads(self):
-        """MIPS guess_game loads and has required symbols"""
-        elf = Path("examples/mips/guess_game/guess_game")
-        if not elf.exists():
-            self.skipTest(f"Not found: {elf}")
-
-        sim = create_simulator(str(elf))
-        symbols = sim.get_symbols()
-
-        self.assertIn("secret", symbols, "Should have 'secret' symbol")
-        self.assertIn("welcome", symbols, "Should have 'welcome' symbol")
-
-    def test_riscv_guess_game_correct_guess(self):
-        """RISC-V guess_game completes when correct answer (42) is given"""
-        elf = Path("examples/riscv/guess_game/guess_game")
-        if not elf.exists():
-            self.skipTest(f"Not found: {elf}")
-
-        sim = create_simulator(str(elf))
-        steps, reason = self._run_with_input(sim, 42, "RISCV")
-
-        self.assertIn(reason, ["exit", "syscall_exit"],
-            f"RISC-V guess_game should exit cleanly with correct answer, got {reason}")
-        self.assertLess(steps, 5000,
-            f"RISC-V guess_game should complete quickly with correct answer")
-
-    def test_arm_guess_game_correct_guess(self):
-        """ARM64 guess_game completes when correct answer (42) is given"""
-        elf = Path("examples/arm/guess_game/guess_game")
-        if not elf.exists():
-            self.skipTest(f"Not found: {elf}")
-
-        sim = create_simulator(str(elf))
-        steps, reason = self._run_with_input(sim, 42, "ARM")
-
-        self.assertIn(reason, ["exit", "syscall_exit"],
-            f"ARM64 guess_game should exit cleanly with correct answer, got {reason}")
-        self.assertLess(steps, 5000,
-            f"ARM64 guess_game should complete quickly with correct answer")
-
-    def test_x86_guess_game_correct_guess(self):
-        """x86-64 guess_game completes when correct answer (42) is given"""
-        elf = Path("examples/x86_64/guess_game/guess_game")
-        if not elf.exists():
-            self.skipTest(f"Not found: {elf}")
-
-        sim = create_simulator(str(elf))
-        steps, reason = self._run_with_input(sim, 42, "X86_64")
-
-        self.assertIn(reason, ["exit", "syscall_exit"],
-            f"x86-64 guess_game should exit cleanly with correct answer, got {reason}")
-        self.assertLess(steps, 5000,
-            f"x86-64 guess_game should complete quickly with correct answer")
-
-    def test_mips_guess_game_correct_guess(self):
-        """MIPS guess_game completes when correct answer (42) is given"""
-        elf = Path("examples/mips/guess_game/guess_game")
-        if not elf.exists():
-            self.skipTest(f"Not found: {elf}")
-
-        sim = create_simulator(str(elf))
-        steps, reason = self._run_with_input(sim, 42, "MIPS")
-
-        self.assertIn(reason, ["exit", "syscall_exit"],
-            f"MIPS guess_game should exit cleanly with correct answer, got {reason}")
-        self.assertLess(steps, 5000,
-            f"MIPS guess_game should complete quickly with correct answer")
-
-    def test_riscv_guess_game_wrong_then_right(self):
-        """RISC-V guess_game handles wrong guess then correct"""
-        elf = Path("examples/riscv/guess_game/guess_game")
-        if not elf.exists():
-            self.skipTest(f"Not found: {elf}")
-
-        sim = create_simulator(str(elf))
-        syscall_reg, _, result_reg = self._get_syscall_regs("RISCV")
-
-        guesses = [10, 42]  # Wrong, then correct
-        guess_idx = 0
-
-        for step in range(10000):
-            result = sim.step()
-
-            if result == StepResult.SYSCALL:
-                syscall_num = sim.get_reg(syscall_reg)
-                if syscall_num == 5:  # read_int
-                    if guess_idx < len(guesses):
-                        sim.set_reg(result_reg, guesses[guess_idx])
-                        guess_idx += 1
-                    else:
-                        sim.set_reg(result_reg, 42)  # Fallback
-                elif syscall_num == 10 or syscall_num == 93:  # exit
-                    break
-                # Other syscalls (print_string, etc.) - continue execution
-
-            elif result == StepResult.HALT:
-                break
-            elif result == StepResult.ERROR:
-                self.fail("RISC-V guess_game encountered an error")
-        else:
-            self.fail("RISC-V guess_game should complete with two guesses")
-
-        self.assertEqual(guess_idx, 2, "Should have used exactly 2 guesses")
+    def test_wrong_then_right(self):
+        """Wrong guesses get hints; the game counts the tries"""
+        for isa in self.ISAS:
+            with self.subTest(isa=isa):
+                sim, result, output = self._play(isa, [10, 90, 42])
+                self.assertEqual(result.reason, StopReason.EXIT, sim.last_error)
+                self.assertIn("Too low", output)
+                self.assertIn("Too high", output)
+                self.assertIn("3 tries!", output)
 
 
 class TestComprehensiveISACoverage(unittest.TestCase):

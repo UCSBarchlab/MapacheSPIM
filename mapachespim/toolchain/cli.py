@@ -17,25 +17,24 @@ import sys
 from pathlib import Path
 
 from .. import __version__
+from ..isa import ISA_SPECS, isa_names
 
 
 def main(args: list[str] | None = None) -> int:
     """Main entry point for mapachespim-as CLI."""
+    supported = "\n".join(f"    {spec.name:<8} - {spec.display_name}" for spec in ISA_SPECS)
     parser = argparse.ArgumentParser(
         prog="mapachespim-as",
         description="Assemble source files to ELF executables",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
+        epilog=f"""
 Examples:
     mapachespim-as program.s -o program.elf --isa riscv64
     mapachespim-as hello.s --isa arm64 -g  # With debug info
     mapachespim-as test.s  # Auto-detect ISA from source
 
 Supported ISAs:
-    riscv64  - RISC-V 64-bit
-    arm64    - ARM AArch64
-    x86_64   - Intel/AMD 64-bit
-    mips32   - MIPS 32-bit (big-endian)
+{supported}
 """,
     )
 
@@ -56,7 +55,7 @@ Supported ISAs:
     parser.add_argument(
         "--isa",
         type=str,
-        choices=["riscv64", "arm64", "x86_64", "mips32"],
+        choices=isa_names(),
         default=None,
         help="Target ISA (auto-detected if not specified)",
     )
