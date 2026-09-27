@@ -67,6 +67,7 @@ class SourceInfo:
 
         # Binary search for largest address <= addr
         import bisect
+
         idx = bisect.bisect_right(self._sorted_addrs, addr) - 1
 
         if idx >= 0:
@@ -213,8 +214,7 @@ class MapacheSPIMConsole(cmd.Cmd):
     """
 
     intro: str = (
-        "Welcome to MapacheSPIM. Type help or ? to list commands, "
-        "or quickstart for a tutorial.\n"
+        "Welcome to MapacheSPIM. Type help or ? to list commands, or quickstart for a tutorial.\n"
     )
     prompt: str = "(mapachespim) "
 
@@ -449,7 +449,9 @@ class MapacheSPIMConsole(cmd.Cmd):
                 print(f"Error: {source.name} does not say which ISA it is for.", file=self.stdout)
                 print("Add a line like this at the top of the file:", file=self.stdout)
                 print("    .isa riscv64", file=self.stdout)
-                print(f"or give the ISA when loading:  load {display_name} riscv64", file=self.stdout)
+                print(
+                    f"or give the ISA when loading:  load {display_name} riscv64", file=self.stdout
+                )
                 print(f"(ISAs: {', '.join(valid_isas)})", file=self.stdout)
             else:
                 print(f"Error: could not assemble {source.name}:", file=self.stdout)
@@ -543,7 +545,9 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         wanted = arg.strip().lower() or None
         if wanted is not None and wanted not in ISA_DIRS:
-            self.print_error(f'Error: Unknown ISA "{arg.strip()}". Use one of: {", ".join(ISA_DIRS)}')
+            self.print_error(
+                f'Error: Unknown ISA "{arg.strip()}". Use one of: {", ".join(ISA_DIRS)}'
+            )
             return
 
         examples = [e for e in list_examples() if wanted is None or e.isa == wanted]
@@ -561,7 +565,7 @@ class MapacheSPIMConsole(cmd.Cmd):
                 print(f"{ISA_DIRS[example.isa]}:", file=self.stdout)
             print(f"  {example.short_name:<24} {example.description}", file=self.stdout)
         print(file=self.stdout)
-        print(f'Load one with, e.g.:  load {examples[0].short_name}', file=self.stdout)
+        print(f"Load one with, e.g.:  load {examples[0].short_name}", file=self.stdout)
         self._print_block_end()
 
     # --- Execution Control ---
@@ -847,8 +851,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         """If the program already exited, say so and return True"""
         if self.sim.exited:
             self.print_error(
-                f"The program has exited (code {self.sim.exit_code}). "
-                'Use "reset" to run it again.'
+                f'The program has exited (code {self.sim.exit_code}). Use "reset" to run it again.'
             )
             return True
         return False

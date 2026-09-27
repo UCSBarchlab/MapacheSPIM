@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 try:
     import keystone
+
     # Verify keystone actually works by trying to access a constant
     _ = keystone.KS_ARCH_X86
     KEYSTONE_AVAILABLE = True
@@ -313,11 +314,13 @@ class Assembler:
                 sect_data = sections[sect_name]
                 if sect_data.data or sect_name == ".text":
                     base = section_bases.get(sect_name, self._layout.text_base)
-                    builder.add_section(Section(
-                        name=sect_name,
-                        data=bytes(sect_data.data),
-                        address=base,
-                    ))
+                    builder.add_section(
+                        Section(
+                            name=sect_name,
+                            data=bytes(sect_data.data),
+                            address=base,
+                        )
+                    )
 
         # Add symbols
         for name, addr in all_labels.items():
@@ -329,13 +332,15 @@ class Assembler:
                     section_idx = i + 1
                     break
 
-            builder.add_symbol(Symbol(
-                name=name,
-                address=addr,
-                sym_type=STT_FUNC if name == entry_symbol else STT_NOTYPE,
-                binding=STB_GLOBAL if is_global else STB_LOCAL,
-                section_index=section_idx,
-            ))
+            builder.add_symbol(
+                Symbol(
+                    name=name,
+                    address=addr,
+                    sym_type=STT_FUNC if name == entry_symbol else STT_NOTYPE,
+                    binding=STB_GLOBAL if is_global else STB_LOCAL,
+                    section_index=section_idx,
+                )
+            )
 
         result.symbols = all_labels
         result.debug_lines = debug_lines
@@ -530,9 +535,31 @@ class Assembler:
         mnemonic = parts[0].lower() if parts else ""
 
         # For branch/call instructions, use placeholder offset
-        if mnemonic in ('jmp', 'call', 'je', 'jne', 'jz', 'jnz', 'jl', 'jle',
-                        'jg', 'jge', 'ja', 'jae', 'jb', 'jbe', 'jo', 'jno',
-                        'js', 'jns', 'jc', 'jnc', 'loop', 'loope', 'loopne'):
+        if mnemonic in (
+            "jmp",
+            "call",
+            "je",
+            "jne",
+            "jz",
+            "jnz",
+            "jl",
+            "jle",
+            "jg",
+            "jge",
+            "ja",
+            "jae",
+            "jb",
+            "jbe",
+            "jo",
+            "jno",
+            "js",
+            "jns",
+            "jc",
+            "jnc",
+            "loop",
+            "loope",
+            "loopne",
+        ):
             # Use a medium-range placeholder to get near (not short) encoding
             placeholder_addr = addr + 0x100
             placeholder_instr = f"{mnemonic} {placeholder_addr}"
@@ -577,11 +604,11 @@ class Assembler:
             # adr with symbol -> movz + movk sequence (typically 2 instrs for 32-bit addr)
             if mnemonic == "adr":
                 # Check if it's using a symbol (not a numeric offset)
-                ops = [o.strip() for o in operands.split(',')]
+                ops = [o.strip() for o in operands.split(",")]
                 if len(ops) == 2:
                     symbol = ops[1].strip()
                     # If it's not a number, it's a symbol that needs expansion
-                    if not symbol.startswith('#') and not symbol.lstrip('-').isdigit():
+                    if not symbol.startswith("#") and not symbol.lstrip("-").isdigit():
                         return base_size * 2  # movz + movk
             # ldr x0, =symbol -> expands to adr -> movz + movk
             if mnemonic == "ldr" and "=" in operands:
@@ -600,68 +627,108 @@ class Assembler:
         if not parts:
             return 1
 
-        mnemonic = parts[0].lower().rstrip('bwlq')
+        mnemonic = parts[0].lower().rstrip("bwlq")
         operands = parts[1] if len(parts) > 1 else ""
 
         # Single/two-byte instructions
-        if mnemonic == 'nop':
+        if mnemonic == "nop":
             return 1
-        if mnemonic == 'ret':
+        if mnemonic == "ret":
             return 1
-        if mnemonic in ('syscall', 'hlt', 'cld', 'std', 'cdqe', 'cqo'):
+        if mnemonic in ("syscall", "hlt", "cld", "std", "cdqe", "cqo"):
             return 2
 
         # Near jumps/calls with label: 5 bytes (1 opcode + 4 offset)
         # But conditional jumps can be 2 bytes for short jumps, assume 6 for safety
-        if mnemonic in ('jmp', 'call'):
+        if mnemonic in ("jmp", "call"):
             return 5
-        if mnemonic in ('je', 'jne', 'jz', 'jnz', 'jl', 'jle', 'jg', 'jge',
-                        'ja', 'jae', 'jb', 'jbe', 'jo', 'jno', 'js', 'jns',
-                        'jc', 'jnc', 'loop', 'loope', 'loopne'):
+        if mnemonic in (
+            "je",
+            "jne",
+            "jz",
+            "jnz",
+            "jl",
+            "jle",
+            "jg",
+            "jge",
+            "ja",
+            "jae",
+            "jb",
+            "jbe",
+            "jo",
+            "jno",
+            "js",
+            "jns",
+            "jc",
+            "jnc",
+            "loop",
+            "loope",
+            "loopne",
+        ):
             return 6  # 0F XX + 4-byte offset
 
         # RIP-relative addressing: 7 bytes
         # Format: symbol(%rip) or [rip + symbol]
-        if '%rip' in operands or 'rip' in operands.lower():
+        if "%rip" in operands or "rip" in operands.lower():
             # REX.W (1) + opcode (1-2) + ModR/M (1) + disp32 (4) = 7-8 bytes
             return 7
 
         # LEA with memory operand
-        if mnemonic == 'lea':
-            if '%rip' in operands or 'rip' in operands.lower():
+        if mnemonic == "lea":
+            if "%rip" in operands or "rip" in operands.lower():
                 return 7
             return 4  # Base case
 
         # MOV with 64-bit immediate
-        if mnemonic == 'mov':
+        if mnemonic == "mov":
             # Check for 64-bit register destination with immediate
-            if operands.startswith('$') or operands.startswith('%'):
+            if operands.startswith("$") or operands.startswith("%"):
                 # AT&T: movq $imm, %reg or Intel mov reg, imm
-                if any(r in operands for r in ['%rax', '%rbx', '%rcx', '%rdx',
-                                                '%rsi', '%rdi', '%rbp', '%rsp',
-                                                '%r8', '%r9', '%r10', '%r11',
-                                                '%r12', '%r13', '%r14', '%r15',
-                                                'rax', 'rbx', 'rcx', 'rdx']):
+                if any(
+                    r in operands
+                    for r in [
+                        "%rax",
+                        "%rbx",
+                        "%rcx",
+                        "%rdx",
+                        "%rsi",
+                        "%rdi",
+                        "%rbp",
+                        "%rsp",
+                        "%r8",
+                        "%r9",
+                        "%r10",
+                        "%r11",
+                        "%r12",
+                        "%r13",
+                        "%r14",
+                        "%r15",
+                        "rax",
+                        "rbx",
+                        "rcx",
+                        "rdx",
+                    ]
+                ):
                     # Could be 10 bytes for movabs
-                    if '$' in operands:
+                    if "$" in operands:
                         return 10
                     return 7
             # Simple reg-reg or reg-mem: 2-4 bytes
             return 3
 
         # TEST, CMP with register: 2-3 bytes
-        if mnemonic in ('test', 'cmp'):
-            if '(' not in operands and '[' not in operands:
+        if mnemonic in ("test", "cmp"):
+            if "(" not in operands and "[" not in operands:
                 return 3
 
         # ADD, SUB, XOR, AND, OR with immediate or register: 3-7 bytes
-        if mnemonic in ('add', 'sub', 'xor', 'and', 'or'):
-            if '$' in operands or any(c.isdigit() for c in operands[:5]):
+        if mnemonic in ("add", "sub", "xor", "and", "or"):
+            if "$" in operands or any(c.isdigit() for c in operands[:5]):
                 return 7  # Could have 32-bit immediate
             return 3  # Register-register
 
         # Push/pop: 1-2 bytes
-        if mnemonic in ('push', 'pop'):
+        if mnemonic in ("push", "pop"):
             return 2
 
         # Default for unknown instructions
@@ -726,7 +793,9 @@ class Assembler:
             try:
                 encoding, count = self._ks.asm(instr, current_addr)
                 if encoding is None or count == 0:
-                    errors.append(f"Line {line.line_number}: Failed to assemble: {line.instruction}")
+                    errors.append(
+                        f"Line {line.line_number}: Failed to assemble: {line.instruction}"
+                    )
                     continue
 
                 code.extend(encoding)
@@ -755,10 +824,11 @@ class Assembler:
         Example: mov x0, #42 -> mov x0, 42
         """
         import re
+
         # Match # followed by a number (decimal, hex, or negative)
         # But not at the start of the line (which would be a comment)
         # Pattern: comma or space, then #, then optional -, then number
-        return re.sub(r'([\s,])#(-?(?:0x[0-9a-fA-F]+|\d+))', r'\1\2', instr)
+        return re.sub(r"([\s,])#(-?(?:0x[0-9a-fA-F]+|\d+))", r"\1\2", instr)
 
     def _expand_arm64_pseudo(
         self,
@@ -780,7 +850,7 @@ class Assembler:
 
         # Handle 'adr' with symbol - convert to movz + movk sequence for far addresses
         if mnemonic == "adr":
-            ops = [o.strip() for o in operands.split(',')]
+            ops = [o.strip() for o in operands.split(",")]
             if len(ops) == 2:
                 reg = ops[0]
                 symbol = ops[1].strip()
@@ -837,7 +907,7 @@ class Assembler:
 
         # Handle cbz/cbnz (compare and branch if zero/not zero)
         if mnemonic in ("cbz", "cbnz"):
-            ops = [o.strip() for o in operands.split(',')]
+            ops = [o.strip() for o in operands.split(",")]
             if len(ops) == 2:
                 reg, symbol = ops[0], ops[1].strip()
                 if symbol in labels:
@@ -846,7 +916,7 @@ class Assembler:
 
         # Handle tbz/tbnz (test bit and branch if zero/not zero)
         if mnemonic in ("tbz", "tbnz"):
-            ops = [o.strip() for o in operands.split(',')]
+            ops = [o.strip() for o in operands.split(",")]
             if len(ops) == 3:
                 reg, bit, symbol = ops[0], ops[1], ops[2].strip()
                 if symbol in labels:
@@ -879,13 +949,35 @@ class Assembler:
         operands = parts[1] if len(parts) > 1 else ""
 
         # Check if already Intel syntax (no % or $)
-        is_att_syntax = '%' in instr or '$' in instr
+        is_att_syntax = "%" in instr or "$" in instr
 
         # For Intel-syntax jump/call with symbol, resolve the symbol
         if not is_att_syntax:
-            if mnemonic in ('jmp', 'call', 'je', 'jne', 'jz', 'jnz', 'jl', 'jle',
-                            'jg', 'jge', 'ja', 'jae', 'jb', 'jbe', 'jo', 'jno',
-                            'js', 'jns', 'jc', 'jnc', 'loop', 'loope', 'loopne'):
+            if mnemonic in (
+                "jmp",
+                "call",
+                "je",
+                "jne",
+                "jz",
+                "jnz",
+                "jl",
+                "jle",
+                "jg",
+                "jge",
+                "ja",
+                "jae",
+                "jb",
+                "jbe",
+                "jo",
+                "jno",
+                "js",
+                "jns",
+                "jc",
+                "jnc",
+                "loop",
+                "loope",
+                "loopne",
+            ):
                 symbol = operands.strip()
                 if symbol in labels:
                     return f"{mnemonic} {labels[symbol]}"
@@ -893,22 +985,50 @@ class Assembler:
 
         # Handle special AT&T mnemonics
         # movslq = move sign-extend long to quad (Intel: movsxd)
-        if mnemonic == 'movslq':
-            mnemonic = 'movsxd'
+        if mnemonic == "movslq":
+            mnemonic = "movsxd"
         # cltq = sign-extend eax to rax (Intel: cdqe)
-        elif mnemonic == 'cltq':
-            return 'cdqe'
+        elif mnemonic == "cltq":
+            return "cdqe"
         # cqto = sign-extend rax to rdx:rax (Intel: cqo)
-        elif mnemonic == 'cqto':
-            return 'cqo'
+        elif mnemonic == "cqto":
+            return "cqo"
 
         # Remove size suffixes (b, w, l, q)
-        if mnemonic.endswith(('b', 'w', 'l', 'q')) and len(mnemonic) > 2:
+        if mnemonic.endswith(("b", "w", "l", "q")) and len(mnemonic) > 2:
             base = mnemonic[:-1]
-            if base in ('mov', 'add', 'sub', 'xor', 'and', 'or', 'cmp', 'test',
-                        'lea', 'push', 'pop', 'call', 'ret', 'jmp', 'dec', 'inc',
-                        'neg', 'not', 'mul', 'imul', 'div', 'idiv', 'shl', 'shr',
-                        'sar', 'sal', 'rol', 'ror', 'rcl', 'rcr'):
+            if base in (
+                "mov",
+                "add",
+                "sub",
+                "xor",
+                "and",
+                "or",
+                "cmp",
+                "test",
+                "lea",
+                "push",
+                "pop",
+                "call",
+                "ret",
+                "jmp",
+                "dec",
+                "inc",
+                "neg",
+                "not",
+                "mul",
+                "imul",
+                "div",
+                "idiv",
+                "shl",
+                "shr",
+                "sar",
+                "sal",
+                "rol",
+                "ror",
+                "rcl",
+                "rcr",
+            ):
                 mnemonic = base
 
         # Handle no-operand instructions
@@ -920,11 +1040,11 @@ class Assembler:
         depth = 0
         current = ""
         for c in operands:
-            if c == '(':
+            if c == "(":
                 depth += 1
-            elif c == ')':
+            elif c == ")":
                 depth -= 1
-            elif c == ',' and depth == 0:
+            elif c == "," and depth == 0:
                 op_list.append(current.strip())
                 current = ""
                 continue
@@ -938,7 +1058,7 @@ class Assembler:
             op = op.strip()
 
             # Handle RIP-relative: symbol(%rip) -> [rip + address]
-            rip_match = re.match(r'(\w+)\s*\(\s*%rip\s*\)', op)
+            rip_match = re.match(r"(\w+)\s*\(\s*%rip\s*\)", op)
             if rip_match:
                 symbol = rip_match.group(1)
                 if symbol in labels:
@@ -952,9 +1072,7 @@ class Assembler:
             # Handle memory operands with index and scale: offset(base, index, scale)
             # AT&T: (%r12, %rax, 4) -> Intel: [r12 + rax*4]
             # AT&T: 16(%rsp, %rax, 8) -> Intel: [rsp + rax*8 + 16]
-            sib_match = re.match(
-                r'(-?\d+)?\s*\(\s*%(\w+)\s*,\s*%(\w+)\s*,\s*(\d+)\s*\)', op
-            )
+            sib_match = re.match(r"(-?\d+)?\s*\(\s*%(\w+)\s*,\s*%(\w+)\s*,\s*(\d+)\s*\)", op)
             if sib_match:
                 offset = sib_match.group(1)
                 base = sib_match.group(2)
@@ -968,7 +1086,7 @@ class Assembler:
                 continue
 
             # Handle memory operands: (%reg) -> [reg], offset(%reg) -> [reg + offset]
-            mem_match = re.match(r'(-?\d+)?\s*\(\s*%(\w+)\s*\)', op)
+            mem_match = re.match(r"(-?\d+)?\s*\(\s*%(\w+)\s*\)", op)
             if mem_match:
                 offset = mem_match.group(1)
                 reg = mem_match.group(2)
@@ -979,7 +1097,7 @@ class Assembler:
                 continue
 
             # Handle immediate: $value -> value
-            if op.startswith('$'):
+            if op.startswith("$"):
                 value = op[1:]
                 # Check if it's a symbol
                 if value in labels:
@@ -989,7 +1107,7 @@ class Assembler:
                 continue
 
             # Handle register: %reg -> reg
-            if op.startswith('%'):
+            if op.startswith("%"):
                 converted.append(op[1:])
                 continue
 
@@ -1002,7 +1120,7 @@ class Assembler:
             converted.append(op)
 
         # Reverse operand order for two-operand instructions (AT&T: src, dst -> Intel: dst, src)
-        if len(converted) == 2 and mnemonic not in ('push', 'pop', 'call', 'jmp', 'syscall'):
+        if len(converted) == 2 and mnemonic not in ("push", "pop", "call", "jmp", "syscall"):
             converted = converted[::-1]
 
         return f"{mnemonic} {', '.join(converted)}"

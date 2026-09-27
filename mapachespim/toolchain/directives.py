@@ -15,6 +15,7 @@ from typing import Dict, List, Literal, Optional, Tuple
 
 class LineType(Enum):
     """Type of assembly source line."""
+
     EMPTY = auto()
     COMMENT = auto()
     LABEL = auto()
@@ -84,14 +85,14 @@ class DirectiveParser:
     """
 
     # Regex patterns
-    LABEL_PATTERN = re.compile(r'^([a-zA-Z_][a-zA-Z0-9_]*):(.*)$')
-    DIRECTIVE_PATTERN = re.compile(r'^\s*\.(\w+)\s*(.*)$')
+    LABEL_PATTERN = re.compile(r"^([a-zA-Z_][a-zA-Z0-9_]*):(.*)$")
+    DIRECTIVE_PATTERN = re.compile(r"^\s*\.(\w+)\s*(.*)$")
     # Hash comment: # at start, or # preceded by space and NOT followed by digit/minus (ARM immediate)
     # This handles both #42 and #-32 as ARM immediates, not comments
-    HASH_COMMENT = re.compile(r'(^|\s)#(?!-?\d).*$')
+    HASH_COMMENT = re.compile(r"(^|\s)#(?!-?\d).*$")
     COMMENT_PATTERNS = [
-        re.compile(r'//.*$'),  # C++ style
-        re.compile(r';.*$'),   # Semicolon comments
+        re.compile(r"//.*$"),  # C++ style
+        re.compile(r";.*$"),  # Semicolon comments
     ]
 
     # Valid ISA values for .isa directive
@@ -117,8 +118,8 @@ class DirectiveParser:
     def _get_endianness(self) -> Literal["little", "big"]:
         """Return byte order for data directives based on ISA."""
         if self.isa in self.BIG_ENDIAN_ISAS:
-            return 'big'
-        return 'little'
+            return "big"
+        return "little"
 
     def parse(self, source: str) -> Dict[str, SectionData]:
         """
@@ -160,10 +161,10 @@ class DirectiveParser:
         original = line
 
         # Strip hash comments (# at start or after space, but not ARM immediates like #42)
-        line = self.HASH_COMMENT.sub(r'\1', line)
+        line = self.HASH_COMMENT.sub(r"\1", line)
         # Strip other comment styles
         for pattern in self.COMMENT_PATTERNS:
-            line = pattern.sub('', line)
+            line = pattern.sub("", line)
 
         line = line.strip()
 
@@ -189,15 +190,16 @@ class DirectiveParser:
             args_str = dir_match.group(2).strip()
             args = self._parse_args(args_str) if args_str else []
             return ParsedLine(
-                line_num, LineType.DIRECTIVE, original,
-                label=label, directive=directive, directive_args=args
+                line_num,
+                LineType.DIRECTIVE,
+                original,
+                label=label,
+                directive=directive,
+                directive_args=args,
             )
 
         # Must be an instruction
-        return ParsedLine(
-            line_num, LineType.INSTRUCTION, original,
-            label=label, instruction=line
-        )
+        return ParsedLine(line_num, LineType.INSTRUCTION, original, label=label, instruction=line)
 
     def _parse_args(self, args_str: str) -> List[str]:
         """Parse comma-separated directive arguments, respecting quotes."""
@@ -211,11 +213,11 @@ class DirectiveParser:
                 current += char
                 if char == string_char:
                     in_string = False
-            elif char in '"\'':
+            elif char in "\"'":
                 in_string = True
                 string_char = char
                 current += char
-            elif char == ',':
+            elif char == ",":
                 if current.strip():
                     args.append(current.strip())
                 current = ""
@@ -258,7 +260,7 @@ class DirectiveParser:
         if directive == "section":
             if args:
                 sect_name = args[0].strip('"')
-                if not sect_name.startswith('.'):
+                if not sect_name.startswith("."):
                     sect_name = f".{sect_name}"
                 if sect_name not in self.sections:
                     self.sections[sect_name] = SectionData(name=sect_name)
@@ -307,7 +309,7 @@ class DirectiveParser:
                     section.data.extend((value & 0xFFFF).to_bytes(2, endian))
                     section.current_offset += 2
                 except Exception:
-                    section.data.extend(b'\x00\x00')
+                    section.data.extend(b"\x00\x00")
                     section.current_offset += 2
             return
 
@@ -319,7 +321,7 @@ class DirectiveParser:
                     section.data.extend((value & 0xFFFFFFFF).to_bytes(4, endian))
                     section.current_offset += 4
                 except Exception:
-                    section.data.extend(b'\x00\x00\x00\x00')
+                    section.data.extend(b"\x00\x00\x00\x00")
                     section.current_offset += 4
             return
 
@@ -331,7 +333,7 @@ class DirectiveParser:
                     section.data.extend(value.to_bytes(8, endian))
                     section.current_offset += 8
                 except Exception:
-                    section.data.extend(b'\x00' * 8)
+                    section.data.extend(b"\x00" * 8)
                     section.current_offset += 8
             return
 
@@ -339,14 +341,14 @@ class DirectiveParser:
         if directive == "ascii":
             for arg in args:
                 s = self._parse_string(arg)
-                section.data.extend(s.encode('utf-8'))
+                section.data.extend(s.encode("utf-8"))
                 section.current_offset += len(s)
             return
 
         if directive in ("asciz", "string"):
             for arg in args:
                 s = self._parse_string(arg)
-                section.data.extend(s.encode('utf-8'))
+                section.data.extend(s.encode("utf-8"))
                 section.data.append(0)  # Null terminator
                 section.current_offset += len(s) + 1
             return
@@ -360,7 +362,7 @@ class DirectiveParser:
                     alignment = self._evaluate_expr(args[0])
                     if alignment > 0:
                         padding = (alignment - (section.current_offset % alignment)) % alignment
-                        section.data.extend(b'\x00' * padding)
+                        section.data.extend(b"\x00" * padding)
                         section.current_offset += padding
                 except Exception:
                     pass
@@ -372,7 +374,7 @@ class DirectiveParser:
                     alignment = self._evaluate_expr(args[0])
                     if alignment > 0:
                         padding = (alignment - (section.current_offset % alignment)) % alignment
-                        section.data.extend(b'\x00' * padding)
+                        section.data.extend(b"\x00" * padding)
                         section.current_offset += padding
                 except Exception:
                     pass
@@ -384,7 +386,7 @@ class DirectiveParser:
                     power = self._evaluate_expr(args[0])
                     alignment = 1 << power
                     padding = (alignment - (section.current_offset % alignment)) % alignment
-                    section.data.extend(b'\x00' * padding)
+                    section.data.extend(b"\x00" * padding)
                     section.current_offset += padding
                 except Exception:
                     pass
@@ -420,15 +422,15 @@ class DirectiveParser:
             return self.constants[expr]
 
         # Hex
-        if expr.startswith('0x') or expr.startswith('0X'):
+        if expr.startswith("0x") or expr.startswith("0X"):
             return int(expr, 16)
 
         # Binary
-        if expr.startswith('0b') or expr.startswith('0B'):
+        if expr.startswith("0b") or expr.startswith("0B"):
             return int(expr, 2)
 
         # Octal
-        if expr.startswith('0') and len(expr) > 1 and expr[1:].isdigit():
+        if expr.startswith("0") and len(expr) > 1 and expr[1:].isdigit():
             return int(expr, 8)
 
         # Character literal
@@ -442,29 +444,29 @@ class DirectiveParser:
             pass
 
         # Simple arithmetic
-        for op in ['+', '-', '*', '/', '<<', '>>', '|', '&', '^']:
+        for op in ["+", "-", "*", "/", "<<", ">>", "|", "&", "^"]:
             if op in expr:
                 parts = expr.rsplit(op, 1)
                 if len(parts) == 2:
                     left = self._evaluate_expr(parts[0])
                     right = self._evaluate_expr(parts[1])
-                    if op == '+':
+                    if op == "+":
                         return left + right
-                    if op == '-':
+                    if op == "-":
                         return left - right
-                    if op == '*':
+                    if op == "*":
                         return left * right
-                    if op == '/':
+                    if op == "/":
                         return left // right if right else 0
-                    if op == '<<':
+                    if op == "<<":
                         return left << right
-                    if op == '>>':
+                    if op == ">>":
                         return left >> right
-                    if op == '|':
+                    if op == "|":
                         return left | right
-                    if op == '&':
+                    if op == "&":
                         return left & right
-                    if op == '^':
+                    if op == "^":
                         return left ^ right
 
         raise ValueError(f"Cannot evaluate: {expr}")
@@ -475,33 +477,32 @@ class DirectiveParser:
             return ""
 
         # Remove quotes
-        if (s.startswith('"') and s.endswith('"')) or \
-           (s.startswith("'") and s.endswith("'")):
+        if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
             s = s[1:-1]
 
         # Process escape sequences
         result = []
         i = 0
         while i < len(s):
-            if s[i] == '\\' and i + 1 < len(s):
+            if s[i] == "\\" and i + 1 < len(s):
                 next_char = s[i + 1]
-                if next_char == 'n':
-                    result.append('\n')
-                elif next_char == 't':
-                    result.append('\t')
-                elif next_char == 'r':
-                    result.append('\r')
-                elif next_char == '0':
-                    result.append('\0')
-                elif next_char == '\\':
-                    result.append('\\')
+                if next_char == "n":
+                    result.append("\n")
+                elif next_char == "t":
+                    result.append("\t")
+                elif next_char == "r":
+                    result.append("\r")
+                elif next_char == "0":
+                    result.append("\0")
+                elif next_char == "\\":
+                    result.append("\\")
                 elif next_char == '"':
                     result.append('"')
                 elif next_char == "'":
                     result.append("'")
-                elif next_char == 'x' and i + 3 < len(s):
+                elif next_char == "x" and i + 3 < len(s):
                     try:
-                        value = int(s[i+2:i+4], 16)
+                        value = int(s[i + 2 : i + 4], 16)
                         result.append(chr(value))
                         i += 2
                     except ValueError:
@@ -513,7 +514,7 @@ class DirectiveParser:
                 result.append(s[i])
                 i += 1
 
-        return ''.join(result)
+        return "".join(result)
 
     def get_instructions(self, section_name: str) -> List[Tuple[int, str, Optional[str]]]:
         """

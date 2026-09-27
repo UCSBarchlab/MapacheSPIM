@@ -189,10 +189,10 @@ def _detect_isa_from_directive(source: str) -> Optional[str]:
     for line in source.splitlines():
         line = line.strip()
         # Skip empty lines and comments
-        if not line or line.startswith('#') or line.startswith('//') or line.startswith(';'):
+        if not line or line.startswith("#") or line.startswith("//") or line.startswith(";"):
             continue
         # Check for .isa directive
-        if line.lower().startswith('.isa'):
+        if line.lower().startswith(".isa"):
             parts = line.split(None, 1)
             if len(parts) >= 2:
                 isa_value = parts[1].strip().lower().replace("-", "_")
@@ -200,7 +200,7 @@ def _detect_isa_from_directive(source: str) -> Optional[str]:
                     return isa_value
         # Stop after first non-empty, non-comment, non-.isa line
         # (the .isa directive should be at the top of the file)
-        if not line.startswith('.'):
+        if not line.startswith("."):
             break
 
     return None

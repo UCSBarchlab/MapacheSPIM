@@ -139,5 +139,3 @@ def split_operands(text: str) -> List[str]:
     if cur.strip() or ops:
         ops.append(cur.strip())
     return ops
-
-

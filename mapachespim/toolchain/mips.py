@@ -259,7 +259,10 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         if len(ops) == 3 and m in ("div", "divu"):
             # Three-operand pseudo form: quotient into rd
             rd = parse_register(ops[0])
-            return [_r(parse_register(ops[1]), parse_register(ops[2]), 0, 0, MULDIV[m]), _r(0, 0, rd, 0, 0x12)]
+            return [
+                _r(parse_register(ops[1]), parse_register(ops[2]), 0, 0, MULDIV[m]),
+                _r(0, 0, rd, 0, 0x12),
+            ]
         _expect(ops, 2, f"{m} $rs, $rt")
         return [_r(parse_register(ops[0]), parse_register(ops[1]), 0, 0, MULDIV[m])]
 
@@ -267,7 +270,10 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         _expect(ops, 3, f"{m} $rd, $rs, $rt")
         rd = parse_register(ops[0])
         funct = MULDIV["div" if m == "rem" else "divu"]
-        return [_r(parse_register(ops[1]), parse_register(ops[2]), 0, 0, funct), _r(0, 0, rd, 0, 0x10)]
+        return [
+            _r(parse_register(ops[1]), parse_register(ops[2]), 0, 0, funct),
+            _r(0, 0, rd, 0, 0x10),
+        ]
 
     if m in HILO_TO:
         _expect(ops, 1, f"{m} $rd")
@@ -287,7 +293,9 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
 
     if m in SPECIAL2_ACC:
         _expect(ops, 2, f"{m} $rs, $rt")
-        return [_r(parse_register(ops[0]), parse_register(ops[1]), 0, 0, SPECIAL2_ACC[m], opcode=0x1C)]
+        return [
+            _r(parse_register(ops[0]), parse_register(ops[1]), 0, 0, SPECIAL2_ACC[m], opcode=0x1C)
+        ]
 
     if m in ("clz", "clo"):
         _expect(ops, 2, f"{m} $rd, $rs")
@@ -411,7 +419,11 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         _expect(ops, 2, "abs $rd, $rs")
         rd, rs = parse_register(ops[0]), parse_register(ops[1])
         # sra $at, rs, 31; xor rd, rs, $at; subu rd, rd, $at
-        return [_r(0, rs, AT, 31, 0x03), _r(rs, AT, rd, 0, ALU3["xor"]), _r(rd, AT, rd, 0, ALU3["subu"])]
+        return [
+            _r(0, rs, AT, 31, 0x03),
+            _r(rs, AT, rd, 0, ALU3["xor"]),
+            _r(rd, AT, rd, 0, ALU3["subu"]),
+        ]
 
     raise MIPSEncodeError(f"unknown instruction '{mnemonic}'")
 

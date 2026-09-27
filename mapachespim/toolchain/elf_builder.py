@@ -212,30 +212,36 @@ class ELFBuilder:
             debug_line: .debug_line section content.
         """
         # Debug sections: SHT_PROGBITS, no flags (not loadable), address 0
-        self.sections.append(Section(
-            name=".debug_abbrev",
-            data=debug_abbrev,
-            address=0,
-            sh_type=SHT_PROGBITS,
-            sh_flags=0,
-            alignment=1,
-        ))
-        self.sections.append(Section(
-            name=".debug_info",
-            data=debug_info,
-            address=0,
-            sh_type=SHT_PROGBITS,
-            sh_flags=0,
-            alignment=1,
-        ))
-        self.sections.append(Section(
-            name=".debug_line",
-            data=debug_line,
-            address=0,
-            sh_type=SHT_PROGBITS,
-            sh_flags=0,
-            alignment=1,
-        ))
+        self.sections.append(
+            Section(
+                name=".debug_abbrev",
+                data=debug_abbrev,
+                address=0,
+                sh_type=SHT_PROGBITS,
+                sh_flags=0,
+                alignment=1,
+            )
+        )
+        self.sections.append(
+            Section(
+                name=".debug_info",
+                data=debug_info,
+                address=0,
+                sh_type=SHT_PROGBITS,
+                sh_flags=0,
+                alignment=1,
+            )
+        )
+        self.sections.append(
+            Section(
+                name=".debug_line",
+                data=debug_line,
+                address=0,
+                sh_type=SHT_PROGBITS,
+                sh_flags=0,
+                alignment=1,
+            )
+        )
 
     def build(self) -> bytes:
         """
@@ -297,8 +303,7 @@ class ELFBuilder:
             st_other = 0
             st_shndx = sym.section_index if sym.section_index else SHN_ABS
             symtab += struct.pack(
-                f"{endian}IBBHQQ",
-                st_name, st_info, st_other, st_shndx, sym.address, sym.size
+                f"{endian}IBBHQQ", st_name, st_info, st_other, st_shndx, sym.address, sym.size
             )
 
         # Calculate offsets
@@ -343,19 +348,19 @@ class ELFBuilder:
 
         ehdr = bytes(e_ident) + struct.pack(
             f"{endian}HHIQQQIHHHHHH",
-            ET_EXEC,           # e_type
-            self.machine,      # e_machine
-            EV_CURRENT,        # e_version
-            self.entry,        # e_entry
-            phdr_offset,       # e_phoff
-            shdr_offset,       # e_shoff
-            0,                 # e_flags
-            ehdr_size,         # e_ehsize
-            phdr_size,         # e_phentsize
-            num_phdrs,         # e_phnum
-            shdr_size,         # e_shentsize
-            num_shdrs,         # e_shnum
-            shstrtab_idx,      # e_shstrndx
+            ET_EXEC,  # e_type
+            self.machine,  # e_machine
+            EV_CURRENT,  # e_version
+            self.entry,  # e_entry
+            phdr_offset,  # e_phoff
+            shdr_offset,  # e_shoff
+            0,  # e_flags
+            ehdr_size,  # e_ehsize
+            phdr_size,  # e_phentsize
+            num_phdrs,  # e_phnum
+            shdr_size,  # e_shentsize
+            num_shdrs,  # e_shnum
+            shstrtab_idx,  # e_shstrndx
         )
 
         # Build program headers
@@ -374,14 +379,14 @@ class ELFBuilder:
 
             phdrs += struct.pack(
                 f"{endian}IIQQQQQQ",
-                PT_LOAD,           # p_type
-                flags,             # p_flags
-                file_offset,       # p_offset
-                section.address,   # p_vaddr
-                section.address,   # p_paddr
-                file_size,         # p_filesz
-                mem_size,          # p_memsz
-                section.alignment, # p_align
+                PT_LOAD,  # p_type
+                flags,  # p_flags
+                file_offset,  # p_offset
+                section.address,  # p_vaddr
+                section.address,  # p_paddr
+                file_size,  # p_filesz
+                mem_size,  # p_memsz
+                section.alignment,  # p_align
             )
 
         # Build section data
@@ -429,16 +434,16 @@ class ELFBuilder:
 
             shdrs += struct.pack(
                 f"{endian}IIQQQQIIQQ",
-                sh_name,           # sh_name
-                section.sh_type,   # sh_type
+                sh_name,  # sh_name
+                section.sh_type,  # sh_type
                 section.sh_flags,  # sh_flags
-                section.address,   # sh_addr
-                sh_offset,         # sh_offset
-                sh_size,           # sh_size
-                0,                 # sh_link
-                0,                 # sh_info
-                section.alignment, # sh_addralign
-                0,                 # sh_entsize
+                section.address,  # sh_addr
+                sh_offset,  # sh_offset
+                sh_size,  # sh_size
+                0,  # sh_link
+                0,  # sh_info
+                section.alignment,  # sh_addralign
+                0,  # sh_entsize
             )
 
         # .shstrtab section header
@@ -450,7 +455,10 @@ class ELFBuilder:
             0,
             shstrtab_offset,
             len(shstrtab),
-            0, 0, 1, 0,
+            0,
+            0,
+            1,
+            0,
         )
 
         # .strtab section header
@@ -462,7 +470,10 @@ class ELFBuilder:
             0,
             strtab_offset,
             len(strtab),
-            0, 0, 1, 0,
+            0,
+            0,
+            1,
+            0,
         )
 
         # .symtab section header
@@ -475,10 +486,10 @@ class ELFBuilder:
             0,
             symtab_offset,
             len(symtab),
-            strtab_idx,        # sh_link = string table index
-            1,                 # sh_info = first global symbol
+            strtab_idx,  # sh_link = string table index
+            1,  # sh_info = first global symbol
             8,
-            24,                # entry size for 64-bit symbols
+            24,  # entry size for 64-bit symbols
         )
 
         return ehdr + phdrs + section_data + shdrs
@@ -529,8 +540,7 @@ class ELFBuilder:
             st_other = 0
             st_shndx = sym.section_index if sym.section_index else SHN_ABS
             symtab += struct.pack(
-                f"{endian}IIIBBH",
-                st_name, sym.address, sym.size, st_info, st_other, st_shndx
+                f"{endian}IIIBBH", st_name, sym.address, sym.size, st_info, st_other, st_shndx
             )
 
         # Calculate offsets
@@ -663,7 +673,8 @@ class ELFBuilder:
                 section.address,
                 sh_offset,
                 sh_size,
-                0, 0,
+                0,
+                0,
                 section.alignment,
                 0,
             )
@@ -672,28 +683,45 @@ class ELFBuilder:
         shdrs += struct.pack(
             f"{endian}IIIIIIIIII",
             shstrtab_offsets[".shstrtab"],
-            SHT_STRTAB, 0, 0,
-            shstrtab_offset, len(shstrtab),
-            0, 0, 1, 0,
+            SHT_STRTAB,
+            0,
+            0,
+            shstrtab_offset,
+            len(shstrtab),
+            0,
+            0,
+            1,
+            0,
         )
 
         # .strtab
         shdrs += struct.pack(
             f"{endian}IIIIIIIIII",
             shstrtab_offsets[".strtab"],
-            SHT_STRTAB, 0, 0,
-            strtab_offset, len(strtab),
-            0, 0, 1, 0,
+            SHT_STRTAB,
+            0,
+            0,
+            strtab_offset,
+            len(strtab),
+            0,
+            0,
+            1,
+            0,
         )
 
         # .symtab
         shdrs += struct.pack(
             f"{endian}IIIIIIIIII",
             shstrtab_offsets[".symtab"],
-            SHT_SYMTAB, 0, 0,
-            symtab_offset, len(symtab),
-            strtab_idx, 1,
-            4, 16,
+            SHT_SYMTAB,
+            0,
+            0,
+            symtab_offset,
+            len(symtab),
+            strtab_idx,
+            1,
+            4,
+            16,
         )
 
         return ehdr + phdrs + section_data + shdrs

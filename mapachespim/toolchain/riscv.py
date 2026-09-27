@@ -301,7 +301,16 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
                     raise RISCVEncodeError(f"unknown register '{ops[2].strip()}'")
                 raise
         opcode, f3, f7 = R_TYPE[m]
-        return [_r(opcode, f3, f7, parse_register(ops[0]), parse_register(ops[1]), parse_register(ops[2]))]
+        return [
+            _r(
+                opcode,
+                f3,
+                f7,
+                parse_register(ops[0]),
+                parse_register(ops[1]),
+                parse_register(ops[2]),
+            )
+        ]
 
     if m in I_ALU:
         _expect(ops, 3, f"{m} rd, rs1, imm")
@@ -313,7 +322,14 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
         opcode, f3, hi, bits = SHIFT_IMM[m]
         shamt = _check_unsigned(ctx.eval(ops[2]), bits, "shift amount")
         rd, rs1 = parse_register(ops[0]), parse_register(ops[1])
-        return [((hi << 26) if bits == 6 else (hi << 25)) | (shamt << 20) | (rs1 << 15) | (f3 << 12) | (rd << 7) | opcode]
+        return [
+            ((hi << 26) if bits == 6 else (hi << 25))
+            | (shamt << 20)
+            | (rs1 << 15)
+            | (f3 << 12)
+            | (rd << 7)
+            | opcode
+        ]
 
     if m in LOADS:
         _expect(ops, 2, f"{m} rd, offset(rs1)")
@@ -337,12 +353,21 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
 
     if m in BRANCHES:
         _expect(ops, 3, f"{m} rs1, rs2, label")
-        return [_b(BRANCHES[m], parse_register(ops[0]), parse_register(ops[1]), target_offset(ops[2]))]
+        return [
+            _b(BRANCHES[m], parse_register(ops[0]), parse_register(ops[1]), target_offset(ops[2]))
+        ]
 
     if m in SWAP_BRANCHES:
         _expect(ops, 3, f"{m} rs1, rs2, label")
         real = SWAP_BRANCHES[m]
-        return [_b(BRANCHES[real], parse_register(ops[1]), parse_register(ops[0]), target_offset(ops[2]))]
+        return [
+            _b(
+                BRANCHES[real],
+                parse_register(ops[1]),
+                parse_register(ops[0]),
+                target_offset(ops[2]),
+            )
+        ]
 
     if m in ZERO_BRANCHES:
         _expect(ops, 2, f"{m} rs, label")
@@ -471,9 +496,13 @@ def _encode(mnemonic: str, ops: List[str], ctx: Context) -> List[int]:
     if m in ("csrr", "csrw", "csrs", "csrc"):
         _expect(ops, 2, f"{m} ...")
         if m == "csrr":
-            return [(_parse_csr(ops[1], ctx) << 20) | (2 << 12) | (parse_register(ops[0]) << 7) | 0x73]
+            return [
+                (_parse_csr(ops[1], ctx) << 20) | (2 << 12) | (parse_register(ops[0]) << 7) | 0x73
+            ]
         f3 = {"csrw": 1, "csrs": 2, "csrc": 3}[m]
-        return [(_parse_csr(ops[0], ctx) << 20) | (parse_register(ops[1]) << 15) | (f3 << 12) | 0x73]
+        return [
+            (_parse_csr(ops[0], ctx) << 20) | (parse_register(ops[1]) << 15) | (f3 << 12) | 0x73
+        ]
 
     raise RISCVEncodeError(f"unknown instruction '{mnemonic}'")
 
@@ -531,4 +560,3 @@ def instruction_size(text: str, labels: Dict[str, int], address: int = 0) -> int
     except RISCVEncodeError:
         return INSTR_SIZE  # the real error is reported by encode()
     return len(words) * INSTR_SIZE
-

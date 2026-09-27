@@ -46,7 +46,8 @@ Supported ISAs:
     )
 
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=Path,
         default=None,
         help="Output ELF file (default: source with .elf extension)",
@@ -68,13 +69,15 @@ Supported ISAs:
     )
 
     parser.add_argument(
-        "-g", "--debug",
+        "-g",
+        "--debug",
         action="store_true",
         help="Generate DWARF debug information",
     )
 
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="Verbose output",
     )
