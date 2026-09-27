@@ -15,9 +15,10 @@ try:
     _ = keystone.KS_ARCH_X86
     KEYSTONE_AVAILABLE = True
     KEYSTONE_ERROR = None
-except ImportError as e:
+except ImportError:
+    # Simply not installed; the message raised later explains how to add it
     KEYSTONE_AVAILABLE = False
-    KEYSTONE_ERROR = str(e)
+    KEYSTONE_ERROR = None
     keystone = None
 except Exception as e:
     # Keystone installed but native library failed to load
@@ -173,11 +174,13 @@ class Assembler:
             return
 
         if not KEYSTONE_AVAILABLE:
-            msg = f"Assembling {isa} requires the Keystone Engine, which is not installed.\n"
             if KEYSTONE_ERROR:
-                msg += f"Error: {KEYSTONE_ERROR}\n\n"
-            msg += "Install it with:  pip install 'mapachespim[keystone]'\n\n"
-            msg += "RISC-V and MIPS programs can be assembled without Keystone."
+                msg = f"Assembling {isa} requires the Keystone Engine, which failed to load:\n"
+                msg += f"  {KEYSTONE_ERROR}\n"
+            else:
+                msg = f"Assembling {isa} requires the Keystone Engine, which is not installed.\n"
+            msg += "Install it with:  pip install 'mapachespim[keystone]'\n"
+            msg += "(RISC-V and MIPS programs can be assembled without it.)"
             raise ImportError(msg)
 
         try:
@@ -347,7 +350,9 @@ class Assembler:
             min_instr_len = self._config.get("instr_size") or 1
 
             # Build DWARF sections
-            dwarf = DWARFv2Builder(addr_size=addr_size)
+            dwarf = DWARFv2Builder(
+                addr_size=addr_size, big_endian=not self._layout.is_little_endian
+            )
             abbrev = dwarf.build_debug_abbrev()
             info = dwarf.build_debug_info(source_filename or "source.s", text_start, text_end)
             line = dwarf.build_debug_line(source_filename or "source.s", debug_lines, min_instr_len)

@@ -11,6 +11,7 @@ from __future__ import annotations
 import cmd
 import signal
 import sys
+import tempfile
 from pathlib import Path
 from types import FrameType
 from typing import Any, Dict, Generator, List, Optional, Set, Tuple
@@ -94,8 +95,12 @@ class SourceInfo:
         return result
 
 
-def _parse_dwarf_line_info(elf_path: str) -> SourceInfo:
-    """Parse DWARF debug info and return SourceInfo object"""
+def _parse_dwarf_line_info(elf_path: str, source_dirs: Optional[List[Path]] = None) -> SourceInfo:
+    """Parse DWARF debug info and return SourceInfo object
+
+    Source files are looked up relative to the current directory, the ELF's
+    directory, and any extra ``source_dirs``.
+    """
     source_info = SourceInfo()
 
     if not ELFTOOLS_AVAILABLE:
@@ -148,7 +153,7 @@ def _parse_dwarf_line_info(elf_path: str) -> SourceInfo:
 
                             # Cache source file content if not already cached
                             if filename not in source_info.source_cache:
-                                _load_source_file(source_info, filename, elf_path)
+                                _load_source_file(source_info, filename, elf_path, source_dirs)
 
                     prev_state = state
 
@@ -159,13 +164,21 @@ def _parse_dwarf_line_info(elf_path: str) -> SourceInfo:
         return source_info
 
 
-def _load_source_file(source_info: SourceInfo, filename: str, elf_path: str) -> None:
+def _load_source_file(
+    source_info: SourceInfo,
+    filename: str,
+    elf_path: str,
+    source_dirs: Optional[List[Path]] = None,
+) -> None:
     """Try to load source file contents into cache"""
-    # Try to find source file relative to ELF location
-    elf_dir = Path(elf_path).parent
+    # Extra directories (e.g. where an assembled .s file lives) come first
+    search_paths = []
+    for directory in source_dirs or []:
+        search_paths += [directory / filename, directory / Path(filename).name]
 
-    # Try multiple search paths
-    search_paths = [
+    # Then relative to the current directory and the ELF location
+    elf_dir = Path(elf_path).parent
+    search_paths += [
         Path(filename),  # Absolute or relative to CWD
         elf_dir / filename,  # Relative to ELF
         elf_dir / Path(filename).name,  # Just filename in ELF dir
@@ -199,12 +212,17 @@ class MapacheSPIMConsole(cmd.Cmd):
     Supports multiple ISAs: RISC-V, ARM64, and x86-64.
     """
 
-    intro: str = "Welcome to MapacheSPIM. Type help or ? to list commands.\n"
+    intro: str = (
+        "Welcome to MapacheSPIM. Type help or ? to list commands, "
+        "or quickstart for a tutorial.\n"
+    )
     prompt: str = "(mapachespim) "
 
     _verbose: bool
     sim: Optional[Simulator]
     loaded_file: Optional[str]
+    loaded_source: Optional[Path]
+    _elf_path: Optional[str]
     breakpoints: Set[int]
     _interrupted: bool
     _running: bool
@@ -232,7 +250,11 @@ class MapacheSPIMConsole(cmd.Cmd):
             pass  # readline not available on all platforms
 
         self.sim = None
-        self.loaded_file = None
+        self.loaded_file = None  # what the user loaded (ELF or source file)
+        self.loaded_source = None  # assembly source, when loaded from .s
+        self._elf_path = None  # ELF actually loaded into the simulator
+        self._isa_override: Optional[str] = None
+        self._tempdir: Optional[tempfile.TemporaryDirectory] = None
         self.breakpoints = set()
         self._interrupted = False
         self._running = False
@@ -295,55 +317,252 @@ class MapacheSPIMConsole(cmd.Cmd):
     # --- File Loading ---
 
     def do_load(self, arg: str) -> None:
-        """Load an ELF file
+        """Load a program (an ELF executable, an assembly file, or an example)
 
         Usage:
-            load <filename>
+            load <file> [isa]
 
-        Loads a compiled ELF executable into the simulator. The ISA is
-        auto-detected from the ELF file (RISC-V, ARM64, or x86-64).
-        The program counter is set to the entry point and all
-        breakpoints are cleared.
+        Loads a program into the simulator. The program counter is set to
+        the entry point and all breakpoints are cleared.
+
+          - ELF executables are loaded directly; the ISA is auto-detected.
+          - Assembly source files (.s, .S, .asm) are assembled first, with
+            debug info so 'list' can show your source. The ISA comes from a
+            '.isa' directive in the file, or from the optional isa argument
+            (riscv64, mips32, arm64, x86_64).
+          - Bundled examples can be loaded by name; see 'examples'.
 
         Examples:
-            load examples/riscv/fibonacci/fibonacci
-            load examples/arm/test_simple/simple
-            load examples/x86_64/test_simple/simple
+            load riscv/hello_asm                    # A bundled example
+            load examples/riscv/fibonacci/fibonacci # Same, by path
+            load myprog.s                           # Assemble and load
+            load myprog.s riscv64                   # ...choosing the ISA
+            load myprog                             # An ELF you built
 
-        After loading, use 'status' to see the ISA and entry point.
+        Tips:
+            - After editing a .s file, use 'reload' to re-assemble it
+            - Use 'examples' to list the bundled example programs
+            - Use Tab to complete file paths and example names
         """
-        if not arg:
-            self.print_error("Error: Please specify an ELF file to load.")
+        parts = arg.split()
+        if not parts:
+            self.print_error("Error: Please specify a file to load (or see 'examples').")
+            return
+        if len(parts) > 2:
+            self.print_error("Error: Usage: load <file> [isa]")
             return
 
-        filepath = Path(arg)
+        name = parts[0]
+        isa = parts[1] if len(parts) > 1 else None
+        filepath = Path(name).expanduser()
         if not filepath.exists():
-            self.print_error(f'Error: File "{arg}" not found.')
+            from .examples import find_example
+
+            example = find_example(name)
+            if example is None:
+                self.print_error(
+                    f'Error: File "{name}" not found. Type "examples" to see the bundled examples.'
+                )
+                return
+            filepath = example
+
+        if filepath.is_dir():
+            self.print_error(f'Error: "{name}" is a directory.')
             return
 
-        try:
-            self.sim.load_elf(str(filepath))
-            self.loaded_file = str(filepath)
-            pc = self.sim.get_pc()
-            isa_name = self.sim.get_isa_name()
-            print(f"Loaded {filepath} ({isa_name})", file=self.stdout)
-            print(f"Entry point: {pc:#018x}", file=self.stdout)
-            self.breakpoints.clear()
+        if filepath.suffix in (".s", ".S", ".asm"):
+            self._assemble_and_load(filepath, isa, display_name=name)
+        else:
+            if isa is not None:
+                self.print_error(
+                    "Error: The ISA argument only applies to assembly files; "
+                    "an ELF file's ISA is detected automatically."
+                )
+                return
+            self._load_elf_file(str(filepath), display_name=name)
 
-            # Parse DWARF debug information
-            self.source_info = _parse_dwarf_line_info(str(filepath))
-            if self.source_info.has_debug_info:
-                num_files = len(self.source_info.source_cache)
-                if num_files > 0:
-                    file_list = ", ".join(self.source_info.source_cache.keys())
-                    print(
-                        f"Source info: {file_list} ({len(self.source_info.addr_to_line)} address mappings)",
-                        file=self.stdout,
-                    )
-                else:
-                    print("Debug info present but source files not found", file=self.stdout)
+    def _load_elf_file(
+        self,
+        elf_path: str,
+        display_name: str,
+        source: Optional[Path] = None,
+        keep_breakpoints: bool = False,
+    ) -> bool:
+        """Load an ELF into the simulator and read its debug info"""
+        try:
+            self.sim.load_elf(elf_path)
         except Exception as e:
             self.print_error(f"Error loading ELF file: {e}")
+            return False
+
+        self.loaded_file = display_name
+        self.loaded_source = source
+        self._elf_path = elf_path
+        self.prev_regs = None
+        pc = self.sim.get_pc()
+        isa_name = self.sim.get_isa_name()
+        print(f"Loaded {display_name} ({isa_name})", file=self.stdout)
+        print(f"Entry point: {pc:#018x}", file=self.stdout)
+        if not keep_breakpoints:
+            self.breakpoints.clear()
+
+        # Parse DWARF debug information
+        source_dirs = [source.parent] if source is not None else None
+        self.source_info = _parse_dwarf_line_info(elf_path, source_dirs)
+        if self.source_info.has_debug_info:
+            num_files = len(self.source_info.source_cache)
+            if num_files > 0:
+                file_list = ", ".join(self.source_info.source_cache.keys())
+                print(
+                    f"Source info: {file_list} ({len(self.source_info.addr_to_line)} address mappings)",
+                    file=self.stdout,
+                )
+            else:
+                print("Debug info present but source files not found", file=self.stdout)
+        return True
+
+    def _assemble_and_load(
+        self,
+        source: Path,
+        isa: Optional[str],
+        display_name: str,
+        keep_breakpoints: bool = False,
+    ) -> bool:
+        """Assemble a source file (with debug info) and load the result"""
+        from .toolchain import assemble_file
+
+        valid_isas = ("riscv64", "arm64", "x86_64", "mips32")
+        if isa is not None and isa.lower() not in valid_isas:
+            self.print_error(f'Error: Unknown ISA "{isa}". Use one of: {", ".join(valid_isas)}')
+            return False
+
+        if self._tempdir is None:
+            self._tempdir = tempfile.TemporaryDirectory(prefix="mapachespim-")
+        elf_path = Path(self._tempdir.name) / (source.stem or "program")
+
+        result = assemble_file(source, output_path=elf_path, isa=isa, debug=True)
+        for warning in result.warnings:
+            print(f"{source.name}: warning: {warning}", file=self.stdout)
+        if not result.success:
+            self._print_block_start()
+            if any(e.startswith("ISA not specified") for e in result.errors):
+                print(f"Error: {source.name} does not say which ISA it is for.", file=self.stdout)
+                print("Add a line like this at the top of the file:", file=self.stdout)
+                print("    .isa riscv64", file=self.stdout)
+                print(f"or give the ISA when loading:  load {display_name} riscv64", file=self.stdout)
+                print(f"(ISAs: {', '.join(valid_isas)})", file=self.stdout)
+            else:
+                print(f"Error: could not assemble {source.name}:", file=self.stdout)
+                for error in result.errors:
+                    first, *rest = error.splitlines()
+                    print(f"  {source.name}: {first}", file=self.stdout)
+                    for line in rest:
+                        print(f"    {line}" if line.strip() else "", file=self.stdout)
+            self._print_block_end()
+            return False
+
+        self._isa_override = isa
+        print(f"Assembled {source.name} ({len(result.elf_bytes)} bytes)", file=self.stdout)
+        return self._load_elf_file(
+            str(elf_path), display_name, source=source, keep_breakpoints=keep_breakpoints
+        )
+
+    def do_reload(self, arg: str) -> None:
+        """Reload the current program from disk
+
+        Usage:
+            reload
+
+        For an assembly file, re-assembles it and loads the result, so you
+        can edit your .s file and try the new version without retyping the
+        'load' command. For an ELF file, reloads it (for example after you
+        rebuilt it with mapachespim-as).
+
+        Breakpoints set on labels move with their label; breakpoints on
+        addresses that are no longer labelled are kept as they are.
+
+        Examples:
+            load myprog.s
+            run                     # Find a bug, edit myprog.s...
+            reload                  # Re-assemble and load the fixed version
+        """
+        if not self.loaded_file:
+            self.print_error('Error: No program loaded. Use "load <file>" first.')
+            return
+
+        # Remember which label each breakpoint was on so it can follow the label
+        old_symbols = {addr: name for name, addr in self.sim.get_symbols().items()}
+        by_label = {addr: old_symbols[addr] for addr in self.breakpoints if addr in old_symbols}
+
+        if self.loaded_source is not None:
+            ok = self._assemble_and_load(
+                self.loaded_source,
+                self._isa_override,
+                self.loaded_file,
+                keep_breakpoints=True,
+            )
+        else:
+            ok = self._load_elf_file(
+                self._elf_path or self.loaded_file, self.loaded_file, keep_breakpoints=True
+            )
+        if not ok:
+            return
+
+        moved = set()
+        for addr in list(self.breakpoints):
+            if addr in by_label:
+                new_addr = self.sim.lookup_symbol(by_label[addr])
+                self.breakpoints.discard(addr)
+                if new_addr is not None:
+                    moved.add(new_addr)
+            else:
+                moved.add(addr)
+        self.breakpoints = moved
+        if self.breakpoints:
+            print(f"Kept {len(self.breakpoints)} breakpoint(s)", file=self.stdout)
+
+    def do_examples(self, arg: str) -> None:
+        """List the bundled example programs
+
+        Usage:
+            examples [isa]
+
+        Lists the example programs that come with MapacheSPIM, optionally
+        only those for one ISA (riscv, mips, arm, x86_64). Load one by name.
+
+        Examples:
+            examples                # List everything
+            examples riscv          # Only RISC-V examples
+            load riscv/hello_asm    # Load one
+
+        Tips:
+            - To edit the examples, copy them to your own directory with:
+                mapachespim --copy-examples my-examples
+        """
+        from .examples import ISA_DIRS, list_examples
+
+        wanted = arg.strip().lower() or None
+        if wanted is not None and wanted not in ISA_DIRS:
+            self.print_error(f'Error: Unknown ISA "{arg.strip()}". Use one of: {", ".join(ISA_DIRS)}')
+            return
+
+        examples = [e for e in list_examples() if wanted is None or e.isa == wanted]
+        if not examples:
+            self.print_error("No bundled examples found in this installation.")
+            return
+
+        self._print_block_start()
+        current = None
+        for example in examples:
+            if example.isa != current:
+                if current is not None:
+                    print(file=self.stdout)
+                current = example.isa
+                print(f"{ISA_DIRS[example.isa]}:", file=self.stdout)
+            print(f"  {example.short_name:<24} {example.description}", file=self.stdout)
+        print(file=self.stdout)
+        print(f'Load one with, e.g.:  load {examples[0].short_name}', file=self.stdout)
+        self._print_block_end()
 
     # --- Execution Control ---
 
@@ -930,7 +1149,7 @@ class MapacheSPIMConsole(cmd.Cmd):
 
             # Look up section
             try:
-                with open(self.loaded_file, "rb") as f:
+                with open(self._elf_path, "rb") as f:
                     elf = ELFFile(f)
                     section = elf.get_section_by_name(addr_or_section)
                     if not section:
@@ -1338,7 +1557,7 @@ class MapacheSPIMConsole(cmd.Cmd):
                 return
 
             try:
-                with open(self.loaded_file, "rb") as f:
+                with open(self._elf_path, "rb") as f:
                     elf = ELFFile(f)
 
                     self._print_block_start()
@@ -1467,6 +1686,8 @@ class MapacheSPIMConsole(cmd.Cmd):
         """
         self._print_block_start()
         print(f"Loaded file: {self.loaded_file or 'None'}", file=self.stdout)
+        if self.loaded_source is not None:
+            print(f"Source: {self.loaded_source}", file=self.stdout)
         if self.loaded_file:
             isa_name = self.sim.get_isa_name()
             pc = self.sim.get_pc()
@@ -1640,12 +1861,14 @@ class MapacheSPIMConsole(cmd.Cmd):
             # Group commands by category
             categories = {
                 "Loading & Running": [
-                    ("load", "Load an ELF file"),
+                    ("load", "Load a program (.s file, ELF, or example)"),
+                    ("reload", "Re-assemble/reload the current program"),
+                    ("examples", "List the bundled example programs"),
                     ("run (r)", "Run program until halt or breakpoint"),
                     ("step (s)", "Execute one or more instructions"),
                     ("stepreg (sr)", "Step and show registers"),
                     ("continue (c)", "Continue after breakpoint"),
-                    ("reset", "Reset simulator state"),
+                    ("reset", "Restart the program from the beginning"),
                 ],
                 "Inspection": [
                     ("regs", "Display all registers"),
@@ -1710,6 +1933,14 @@ class MapacheSPIMConsole(cmd.Cmd):
 
         # Get matching paths
         matches = glob.glob(pattern)
+
+        # Also offer bundled example names like "riscv/fibonacci"
+        if not use_tilde and text.count("/") <= 1:
+            from .examples import list_examples
+
+            for example in list_examples():
+                if example.short_name.startswith(text) and not Path(example.short_name).exists():
+                    matches.append(example.short_name)
 
         # Format completions - return full paths that replace `text`
         completions = []
@@ -1796,15 +2027,17 @@ class MapacheSPIMConsole(cmd.Cmd):
         print("MapacheSPIM Quick Start Guide", file=self.stdout)
         print("=" * 60, file=self.stdout)
         print(file=self.stdout)
-        print("1. LOAD A PROGRAM (ISA is auto-detected)", file=self.stdout)
-        print("   load examples/riscv/fibonacci/fibonacci  # RISC-V", file=self.stdout)
-        print("   load examples/arm/fibonacci/fibonacci    # ARM64", file=self.stdout)
-        print("   load examples/x86_64/test_simple/simple  # x86-64", file=self.stdout)
-        print("   (Use Tab to autocomplete file paths!)", file=self.stdout)
+        print("1. LOAD A PROGRAM", file=self.stdout)
+        print("   examples                 - List the bundled examples", file=self.stdout)
+        print("   load riscv/hello_asm     - Load an example by name", file=self.stdout)
+        print("   load myprog.s            - Assemble and load your own program", file=self.stdout)
+        print("   reload                   - Re-assemble after editing", file=self.stdout)
+        print("   (Use Tab to autocomplete file paths and example names!)", file=self.stdout)
         print(file=self.stdout)
         print("2. SEE WHERE YOU ARE", file=self.stdout)
         print("   pc              - Show program counter", file=self.stdout)
-        print("   disasm <addr>   - Disassemble instructions", file=self.stdout)
+        print("   list            - Show your source code around the PC", file=self.stdout)
+        print("   disasm          - Disassemble instructions at the PC", file=self.stdout)
         print("   regs            - Show all registers", file=self.stdout)
         print(file=self.stdout)
         print("3. EXECUTE CODE", file=self.stdout)
@@ -1812,6 +2045,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         print("   step 5          - Execute 5 instructions", file=self.stdout)
         print("   run             - Run until program ends", file=self.stdout)
         print("   run 100         - Run at most 100 instructions", file=self.stdout)
+        print("   reset           - Start over from the beginning", file=self.stdout)
         print(file=self.stdout)
         print("4. SET BREAKPOINTS", file=self.stdout)
         print("   break <addr>    - Set breakpoint at address", file=self.stdout)
@@ -1821,6 +2055,7 @@ class MapacheSPIMConsole(cmd.Cmd):
         print(file=self.stdout)
         print("5. EXAMINE MEMORY", file=self.stdout)
         print("   mem 0x80000000  - Show memory at address", file=self.stdout)
+        print("   mem my_label    - Show memory at a label", file=self.stdout)
         print("   mem .data       - Show data section", file=self.stdout)
         print(file=self.stdout)
         print("6. TIPS FOR DEBUGGING", file=self.stdout)
@@ -1837,7 +2072,13 @@ class MapacheSPIMConsole(cmd.Cmd):
 DEFAULT_MAX_STEPS = 10_000_000
 
 
-def _execute(console: MapacheSPIMConsole, path: str, max_steps: int, verbose: bool) -> int:
+def _execute(
+    console: MapacheSPIMConsole,
+    path: str,
+    max_steps: int,
+    verbose: bool,
+    isa: Optional[str] = None,
+) -> int:
     """Run a program non-interactively and return the process exit status.
 
     The status is the program's exit code if it exits normally, 1 if the file
@@ -1846,7 +2087,9 @@ def _execute(console: MapacheSPIMConsole, path: str, max_steps: int, verbose: bo
     """
     import io
 
-    if not Path(path).exists():
+    from .examples import find_example
+
+    if not Path(path).exists() and find_example(path) is None:
         print(f"Error: File '{path}' not found", file=sys.stderr)
         return 1
 
@@ -1855,7 +2098,7 @@ def _execute(console: MapacheSPIMConsole, path: str, max_steps: int, verbose: bo
     original_stdout = console.stdout
     if not verbose:
         console.stdout = captured_output
-    console.onecmd(f"load {path}")
+    console.onecmd(f"load {path} {isa}" if isa else f"load {path}")
     console.stdout = original_stdout
 
     if not console.loaded_file:
@@ -1910,7 +2153,16 @@ def main() -> None:
         prog="mapachespim",
         description="MapacheSPIM - Interactive Multi-ISA Simulator (RISC-V, ARM64, x86-64, MIPS32)",
     )
-    parser.add_argument("file", nargs="?", help="Program to load on startup")
+    parser.add_argument(
+        "file",
+        nargs="?",
+        help="Program to load: an ELF file, an assembly file (.s), or an example name",
+    )
+    parser.add_argument(
+        "--isa",
+        choices=["riscv64", "arm64", "x86_64", "mips32"],
+        help="ISA of an assembly file without an .isa directive",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Verbose mode (show extra messages)"
@@ -1920,6 +2172,13 @@ def main() -> None:
         "--execute",
         action="store_true",
         help="Run the program and exit with its exit code (no interactive console)",
+    )
+    parser.add_argument(
+        "--copy-examples",
+        metavar="DIR",
+        nargs="?",
+        const="mapachespim-examples",
+        help="Copy the bundled example programs to DIR (default: ./mapachespim-examples) and exit",
     )
     parser.add_argument(
         "--max-steps",
@@ -1933,6 +2192,18 @@ def main() -> None:
     if args.max_steps < 1:
         parser.error("--max-steps must be at least 1")
 
+    if args.copy_examples is not None:
+        from .examples import copy_examples
+
+        try:
+            dest = copy_examples(Path(args.copy_examples))
+        except (FileNotFoundError, FileExistsError) as e:
+            print(f"Error: {e}", file=sys.stderr)
+            sys.exit(1)
+        print(f"Copied examples to {dest}/")
+        print(f"Try:  mapachespim {dest}/riscv/hello_asm/hello_asm.s")
+        sys.exit(0)
+
     # Create console
     console = MapacheSPIMConsole(verbose=args.verbose)
 
@@ -1941,11 +2212,20 @@ def main() -> None:
         if not args.file:
             print("Error: -e/--execute requires a file argument", file=sys.stderr)
             sys.exit(1)
-        sys.exit(_execute(console, args.file, args.max_steps, args.verbose))
+        try:
+            status = _execute(console, args.file, args.max_steps, args.verbose, args.isa)
+        except BrokenPipeError:
+            # Output was piped into something like `head` that exited early
+            import os
+
+            devnull = os.open(os.devnull, os.O_WRONLY)
+            os.dup2(devnull, sys.stdout.fileno())
+            status = 1
+        sys.exit(status)
 
     # Interactive mode: start REPL
     if args.file:
-        console.onecmd(f"load {args.file}")
+        console.onecmd(f"load {args.file} {args.isa}" if args.isa else f"load {args.file}")
 
     try:
         console.cmdloop()

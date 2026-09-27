@@ -96,14 +96,17 @@ class DWARFv2Builder:
         line = builder.build_debug_line("hello.s", lines)
     """
 
-    def __init__(self, addr_size: int = 8):
+    def __init__(self, addr_size: int = 8, big_endian: bool = False):
         """
         Initialize DWARF builder.
 
         Args:
             addr_size: Address size in bytes (8 for 64-bit, 4 for 32-bit).
+            big_endian: Write multi-byte fields big-endian (e.g. for MIPS).
+                Debuggers read DWARF in the ELF file's byte order.
         """
         self.addr_size = addr_size
+        self._endian = ">" if big_endian else "<"
 
     def build_debug_abbrev(self) -> bytes:
         """
@@ -155,15 +158,15 @@ class DWARFv2Builder:
         die_content.append(0x01)  # abbrev number 1
 
         # stmt_list (4 bytes)
-        die_content.extend(struct.pack('<I', stmt_list_offset))
+        die_content.extend(struct.pack(self._endian + 'I', stmt_list_offset))
 
         # low_pc and high_pc (addr_size bytes each)
         if self.addr_size == 8:
-            die_content.extend(struct.pack('<Q', low_pc))
-            die_content.extend(struct.pack('<Q', high_pc))
+            die_content.extend(struct.pack(self._endian + 'Q', low_pc))
+            die_content.extend(struct.pack(self._endian + 'Q', high_pc))
         else:
-            die_content.extend(struct.pack('<I', low_pc))
-            die_content.extend(struct.pack('<I', high_pc))
+            die_content.extend(struct.pack(self._endian + 'I', low_pc))
+            die_content.extend(struct.pack(self._endian + 'I', high_pc))
 
         # name (null-terminated string)
         die_content.extend(filename.encode('utf-8'))
@@ -179,9 +182,9 @@ class DWARFv2Builder:
         unit_length = cu_header_size + len(die_content)
 
         header = bytearray()
-        header.extend(struct.pack('<I', unit_length))  # unit_length
-        header.extend(struct.pack('<H', 2))            # version = 2
-        header.extend(struct.pack('<I', 0))            # abbrev_offset = 0
+        header.extend(struct.pack(self._endian + 'I', unit_length))  # unit_length
+        header.extend(struct.pack(self._endian + 'H', 2))            # version = 2
+        header.extend(struct.pack(self._endian + 'I', 0))            # abbrev_offset = 0
         header.append(self.addr_size)                  # address_size
 
         return bytes(header + die_content)
@@ -233,8 +236,8 @@ class DWARFv2Builder:
         header = bytearray()
         # Placeholder for unit_length (filled in later)
         header.extend(b'\x00\x00\x00\x00')
-        header.extend(struct.pack('<H', 2))  # version = 2
-        header.extend(struct.pack('<I', header_content_len))  # header_length
+        header.extend(struct.pack(self._endian + 'H', 2))  # version = 2
+        header.extend(struct.pack(self._endian + 'I', header_content_len))  # header_length
         header.append(min_instr_length)      # minimum_instruction_length
         header.append(1)                     # default_is_stmt
         header.append(LINE_BASE & 0xFF)      # line_base (signed, -5)
@@ -249,7 +252,7 @@ class DWARFv2Builder:
 
         # Fill in unit_length (total length minus the 4-byte length field itself)
         unit_length = len(result) - 4
-        struct.pack_into('<I', result, 0, unit_length)
+        struct.pack_into(self._endian + 'I', result, 0, unit_length)
 
         return bytes(result)
 
@@ -279,9 +282,9 @@ class DWARFv2Builder:
             if current_addr == 0 or addr < current_addr:
                 # Use extended opcode to set address
                 if self.addr_size == 8:
-                    addr_bytes = struct.pack('<Q', addr)
+                    addr_bytes = struct.pack(self._endian + 'Q', addr)
                 else:
-                    addr_bytes = struct.pack('<I', addr)
+                    addr_bytes = struct.pack(self._endian + 'I', addr)
                 program.extend(self._extended_opcode(DW_LNE_set_address, addr_bytes))
                 current_addr = addr
 
