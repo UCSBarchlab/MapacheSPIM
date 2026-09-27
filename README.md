@@ -126,9 +126,12 @@ x30 (  t5) = 0x0000000000000000    x31 (  t6) = 0x0000000000000000
 
 pc = 0x0000000080000040
 
-(mapachespim) mem fib_input 8
+(mapachespim) mem fibonacci 64
 
-0x80100000:  07 00 00 00  00 00 00 00                              |........|
+0x80000038:  63 04 05 04  93 02 10 00  63 04 55 04  13 01 81 fe  |c.......c.U.....|
+0x80000048:  23 38 11 00  23 34 81 00  23 30 a1 00  13 05 f5 ff  |#8..#4..#0......|
+0x80000058:  ef f0 1f fe  13 04 05 00  03 35 01 00  13 05 e5 ff  |.........5......|
+0x80000068:  ef f0 1f fd  33 05 a4 00  83 30 01 01  03 34 81 00  |....3....0...4..|
 
 (mapachespim) quit
 Goodbye!
@@ -137,7 +140,9 @@ Goodbye!
 At any point when execution is stopped, you can inspect registers and memory. The full 64-bit value of each
 register is shown in hex along with its ABI name (like `a0`, `sp`, `ra`). A star (★) appears next to registers
 that have changed since you last looked, to help you follow the execution of the program. Memory is shown in
-bytes, grouped into 4-byte words for easier reading.
+bytes, grouped into 4-byte words for easier reading. Here `mem fibonacci 64` shows the machine
+code of the `fibonacci` function: its first word, `63 04 05 04`, is the `beqz` instruction that the
+first `step` executed.
 
 ### Writing Your Own Programs
 

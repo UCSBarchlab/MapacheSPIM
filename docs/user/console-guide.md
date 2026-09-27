@@ -276,13 +276,20 @@ Breakpoint removed at 0x0000000080000038
 Program completed (tohost) after 455 instructions
 PC = 0x0000000080000034
 
-(mapachespim) mem fib_result 8
+(mapachespim) mem fib_input 64
 
-0x80100004:  0d 00 00 00  00 00 00 00                              |........|
+0x80100000:  07 00 00 00  0d 00 00 00  00 00 00 00  00 00 00 00  |................|
+0x80100010:  00 00 00 00  00 00 00 00  00 00 00 00  00 00 00 00  |................|
+0x80100020:  00 00 00 00  00 00 00 00  00 00 00 00  00 00 00 00  |................|
+0x80100030:  00 00 00 00  00 00 00 00  00 00 00 00  00 00 00 00  |................|
 
 (mapachespim) quit
 Goodbye!
 ```
+
+The last `mem` shows the program's data: `fib_input` (7) in the first word, and the result it
+computed, `fib_result` (13, or `0d` in hex), in the next. Words are stored little-endian, so the
+low byte comes first.
 
 ## RISC-V Register ABI Names
 
