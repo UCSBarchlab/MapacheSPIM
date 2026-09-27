@@ -28,9 +28,10 @@ except Exception as e:
     KEYSTONE_ERROR = f"Keystone native library failed: {e}"
     keystone = None
 
-from . import mips, riscv
+from . import arm64, mips, riscv
 from .directives import (
     INTERNAL_LABEL_PREFIXES,
+    POOL_LABEL_PREFIX,
     DirectiveParser,
     LineType,
     ParsedLine,
@@ -87,7 +88,6 @@ class AssemblyResult:
 
 
 # Keystone architecture/mode constants
-KS_ARCH_ARM64 = 2
 KS_ARCH_X86 = 4
 
 KS_MODE_LITTLE_ENDIAN = 0
@@ -129,14 +129,15 @@ class Assembler:
             "mode": None,
             "instr_size": 4,
         },
+        # ARM64 is encoded by the built-in pure-Python encoder (arm64.py)
         "arm64": {
-            "arch": KS_ARCH_ARM64,
-            "mode": KS_MODE_LITTLE_ENDIAN,
+            "arch": None,
+            "mode": None,
             "instr_size": 4,
         },
         "aarch64": {
-            "arch": KS_ARCH_ARM64,
-            "mode": KS_MODE_LITTLE_ENDIAN,
+            "arch": None,
+            "mode": None,
             "instr_size": 4,
         },
         "x86_64": {
@@ -210,6 +211,73 @@ class Assembler:
             raise RuntimeError(f"Failed to initialize Keystone for {isa}: {e}")
 
     @staticmethod
+    def _add_literal_pools(section: SectionData) -> None:
+        """Turn ARM64 'ldr x0, =value' into loads from a literal pool.
+
+        As in GNU as, each load reads a pool entry placed at the next
+        .ltorg/.pool directive or at the end of the section. Within a pool,
+        equal values share one entry; 4-byte entries come first, then 8-byte
+        entries, each group aligned to its size.
+        """
+        lines: List[ParsedLine] = []
+        pool: Dict[Tuple[object, ...], Tuple[str, str, int]] = {}  # key -> (label, expr, size)
+        counter = 0
+
+        def dump(line_number: int) -> None:
+            for size in (4, 8):
+                entries = [(label, expr) for label, expr, sz in pool.values() if sz == size]
+                if not entries:
+                    continue
+                lines.append(
+                    ParsedLine(
+                        line_number,
+                        LineType.DIRECTIVE,
+                        "",
+                        directive="balign",
+                        directive_args=[str(size)],
+                    )
+                )
+                for label, expr in entries:
+                    lines.append(
+                        ParsedLine(
+                            line_number,
+                            LineType.DIRECTIVE,
+                            "",
+                            label=label,
+                            directive="word" if size == 4 else "dword",
+                            directive_args=[expr],
+                        )
+                    )
+            pool.clear()
+
+        last_line = 0
+        for line in section.lines:
+            last_line = line.line_number
+            if line.line_type == LineType.INSTRUCTION and line.instruction:
+                found = arm64.literal_load(line.instruction)
+                if found is not None:
+                    mnemonic, rt, expr = found
+                    try:
+                        size = arm64.literal_size(mnemonic, rt)
+                    except EncodeError as e:
+                        raise EncodeError(f"Line {line.line_number}: {e}")
+                    value = arm64.constant_value(expr)
+                    key: Tuple[object, ...] = (
+                        ("value", value & ((1 << (8 * size)) - 1), size)
+                        if value is not None
+                        else ("expr", expr.replace(" ", ""), size)
+                    )
+                    if key not in pool:
+                        counter += 1
+                        pool[key] = (f"{POOL_LABEL_PREFIX}{counter}", expr, size)
+                    line.instruction = f"{mnemonic} {rt}, {pool[key][0]}"
+            lines.append(line)
+            if line.line_type == LineType.DIRECTIVE and line.directive in ("ltorg", "pool"):
+                dump(line.line_number)
+        dump(last_line)
+        section.lines = lines
+
+    @staticmethod
     def _resolve_constants(
         pending: Dict[str, Tuple[str, int]],
         constants: Dict[str, int],
@@ -278,6 +346,8 @@ class Assembler:
             return riscv
         if self.isa in ("mips32", "mips"):
             return mips
+        if self.isa in ("arm64", "aarch64"):
+            return arm64
         return None
 
     def assemble(
@@ -305,6 +375,11 @@ class Assembler:
         parser = DirectiveParser(isa=self.isa)
         self._parser = parser
         sections = parser.parse(source)
+        if self.isa in ("arm64", "aarch64") and ".text" in sections:
+            try:
+                self._add_literal_pools(sections[".text"])
+            except EncodeError as e:
+                result.errors.append(str(e))
 
         result.errors.extend(parser.errors)
         result.warnings.extend(parser.warnings)
@@ -723,22 +798,6 @@ class Assembler:
         if self._builtin_encoder is not None:
             return self._builtin_encoder.instruction_size(instr, data_labels or {})
 
-        # ARM64 pseudo-instructions that expand to multiple instructions
-        if self.isa in ("arm64", "aarch64"):
-            operands = parts[1] if len(parts) > 1 else ""
-            # adr with symbol -> movz + movk sequence (typically 2 instrs for 32-bit addr)
-            if mnemonic == "adr":
-                # Check if it's using a symbol (not a numeric offset)
-                ops = [o.strip() for o in operands.split(",")]
-                if len(ops) == 2:
-                    symbol = ops[1].strip()
-                    # If it's not a number, it's a symbol that needs expansion
-                    if not symbol.startswith("#") and not symbol.lstrip("-").isdigit():
-                        return base_size * 2  # movz + movk
-            # ldr x0, =symbol -> expands to adr -> movz + movk
-            if mnemonic == "ldr" and "=" in operands:
-                return base_size * 2
-
         return base_size
 
     def _estimate_x86_instr_size(self, instr: str) -> int:
@@ -920,11 +979,6 @@ class Assembler:
                 current_addr += len(encoding)
                 continue
 
-            # Expand pseudo-instructions for ARM64 and normalize syntax
-            if self.isa in ("arm64", "aarch64"):
-                instr = self._normalize_arm64_syntax(instr)
-                instr = self._expand_arm64_pseudo(instr, current_addr, labels)
-
             # Convert AT&T to Intel syntax for x86-64
             if self.isa == "x86_64":
                 instr = self._convert_x86_att_to_intel(instr, labels)
@@ -955,115 +1009,6 @@ class Assembler:
                     )
 
         return bytes(code), label_addrs, errors, debug_lines
-
-    def _normalize_arm64_syntax(self, instr: str) -> str:
-        """
-        Normalize ARM64 syntax for Keystone compatibility.
-
-        Keystone doesn't accept # prefix on immediates, so we strip them.
-        Example: mov x0, #42 -> mov x0, 42
-        """
-        import re
-
-        # Match # followed by a number (decimal, hex, or negative)
-        # But not at the start of the line (which would be a comment)
-        # Pattern: comma or space, then #, then optional -, then number
-        return re.sub(r"([\s,])#(-?(?:0x[0-9a-fA-F]+|\d+))", r"\1\2", instr)
-
-    def _expand_arm64_pseudo(
-        self,
-        instr: str,
-        addr: int,
-        labels: Dict[str, int],
-    ) -> str:
-        """
-        Expand ARM64 pseudo-instructions.
-
-        Handles adr with far symbols by using adrp + add sequence.
-        """
-        parts = instr.split(None, 1)
-        if not parts:
-            return instr
-
-        mnemonic = parts[0].lower()
-        operands = parts[1] if len(parts) > 1 else ""
-
-        # Handle 'adr' with symbol - convert to movz + movk sequence for far addresses
-        if mnemonic == "adr":
-            ops = [o.strip() for o in operands.split(",")]
-            if len(ops) == 2:
-                reg = ops[0]
-                symbol = ops[1].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    # Use movz/movk sequence for 64-bit address
-                    # movz loads the lowest 16 bits, movk adds higher bits
-                    b0 = target & 0xFFFF
-                    b1 = (target >> 16) & 0xFFFF
-                    b2 = (target >> 32) & 0xFFFF
-                    b3 = (target >> 48) & 0xFFFF
-
-                    instrs = [f"movz {reg}, {b0}"]
-                    if b1:
-                        instrs.append(f"movk {reg}, {b1}, lsl 16")
-                    if b2:
-                        instrs.append(f"movk {reg}, {b2}, lsl 32")
-                    if b3:
-                        instrs.append(f"movk {reg}, {b3}, lsl 48")
-
-                    return "; ".join(instrs)
-
-        # Handle 'ldr' with = syntax (ldr x0, =symbol)
-        if mnemonic == "ldr" and "=" in operands:
-            ops = operands.split(",")
-            if len(ops) == 2:
-                reg = ops[0].strip()
-                symbol = ops[1].strip().lstrip("=")
-                if symbol in labels:
-                    target = labels[symbol]
-                    return self._expand_arm64_pseudo(f"adr {reg}, {symbol}", addr, labels)
-
-        # Handle 'b' (unconditional branch) with symbol
-        # Note: Keystone expects absolute target address for ARM64 branches
-        if mnemonic == "b":
-            symbol = operands.strip()
-            if symbol in labels:
-                target = labels[symbol]
-                return f"b 0x{target:x}"
-
-        # Handle 'bl' (branch and link) with symbol
-        if mnemonic == "bl":
-            symbol = operands.strip()
-            if symbol in labels:
-                target = labels[symbol]
-                return f"bl 0x{target:x}"
-
-        # Handle conditional branches (b.eq, b.ne, etc.)
-        if mnemonic.startswith("b."):
-            symbol = operands.strip()
-            if symbol in labels:
-                target = labels[symbol]
-                return f"{mnemonic} 0x{target:x}"
-
-        # Handle cbz/cbnz (compare and branch if zero/not zero)
-        if mnemonic in ("cbz", "cbnz"):
-            ops = [o.strip() for o in operands.split(",")]
-            if len(ops) == 2:
-                reg, symbol = ops[0], ops[1].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    return f"{mnemonic} {reg}, 0x{target:x}"
-
-        # Handle tbz/tbnz (test bit and branch if zero/not zero)
-        if mnemonic in ("tbz", "tbnz"):
-            ops = [o.strip() for o in operands.split(",")]
-            if len(ops) == 3:
-                reg, bit, symbol = ops[0], ops[1], ops[2].strip()
-                if symbol in labels:
-                    target = labels[symbol]
-                    return f"{mnemonic} {reg}, {bit}, 0x{target:x}"
-
-        return instr
 
     def _convert_x86_att_to_intel(
         self,

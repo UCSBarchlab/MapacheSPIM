@@ -109,7 +109,10 @@ DOT_LABEL_PREFIX = ".L.dot."
 # Prefix of internal names given to numeric local labels like "1:"
 LOCAL_LABEL_PREFIX = ".L.local."
 
-INTERNAL_LABEL_PREFIXES = (DOT_LABEL_PREFIX, LOCAL_LABEL_PREFIX)
+# Prefix of labels for ARM64 literal pool entries (ldr x0, =value)
+POOL_LABEL_PREFIX = ".L.pool."
+
+INTERNAL_LABEL_PREFIXES = (DOT_LABEL_PREFIX, LOCAL_LABEL_PREFIX, POOL_LABEL_PREFIX)
 
 
 class DirectiveParser:

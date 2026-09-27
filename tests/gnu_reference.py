@@ -42,6 +42,7 @@ TARGETS: Dict[str, GnuTarget] = {
         # No compressed instructions, no linker relaxation, absolute code
         ".option norvc\n.option norelax\n.option nopic\n",
     ),
+    "arm64": GnuTarget("aarch64-linux-gnu-", (), ""),
     "mips32": GnuTarget(
         "mips-linux-gnu-",
         ("-march=mips32", "-EB", "-mno-shared", "-O0", "-32"),
